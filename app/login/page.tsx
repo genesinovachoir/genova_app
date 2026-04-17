@@ -49,10 +49,16 @@ export default function LoginPage() {
         initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="w-full max-w-sm"
+        className="flex w-full max-w-sm flex-col"
       >
         {/* Logo */}
-        <div className="mb-10 flex flex-col items-center gap-0">
+        <div
+          className="flex flex-col items-center gap-0"
+          style={{
+            // Move the logo block toward the golden-ratio anchor (~38.2% from top).
+            marginTop: 'clamp(-6.5rem, -11.8vh, -2rem)',
+          }}
+        >
           <div className="w-32 h-32 overflow-hidden flex items-center justify-center pointer-events-none">
             <video
               src="/login.mp4"
@@ -74,7 +80,10 @@ export default function LoginPage() {
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="glass-panel space-y-4 p-6">
+        <form
+          onSubmit={handleSubmit}
+          className="glass-panel mt-[clamp(1.5rem,3.8vh,3rem)] space-y-4 p-6"
+        >
           <div className="space-y-2">
             <label className="text-[0.65rem] font-bold uppercase tracking-[0.2em] text-[var(--color-text-medium)]">
               E-posta
