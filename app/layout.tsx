@@ -15,12 +15,21 @@ const manrope = Manrope({
 });
 
 export const metadata: Metadata = {
-  title: 'Genova Korist',
+  title: 'Genova App',
+  applicationName: 'Genova App',
   description: 'Koro Yönetim Uygulaması',
   manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    title: 'Genova App',
+    statusBarStyle: 'default',
+  },
   icons: {
-    icon: '/icon.png',
-    apple: '/icon.png',
+    icon: [
+      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
   },
 };
 
