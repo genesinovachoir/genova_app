@@ -1,0 +1,63 @@
+'use client';
+
+import { Home, Music, ClipboardList, User } from 'lucide-react';
+import { LottieIcon } from './LottieIcon';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { motion } from 'motion/react';
+
+export function BottomNav() {
+  const pathname = usePathname();
+
+  const navItems = [
+    { name: 'Anasayfa', path: '/', icon: Home, lottie: '/lottie/Home Icon.json' },
+    { name: 'Repertuvar', path: '/repertuvar', icon: Music, lottie: '/lottie/player music.json' },
+    { name: 'Ödevler', path: '/odevler', icon: ClipboardList, lottie: '/lottie/Tasks.json' },
+    { name: 'Profil', path: '/profil', icon: User, lottie: '/lottie/Profile Icon.json' },
+  ];
+
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-50 pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
+      <div className="mx-auto w-[calc(100%-1.25rem)] max-w-md">
+        <div className="floating-nav flex items-center justify-around px-2 py-2">
+        {navItems.map((item) => {
+          const isActive = pathname === item.path;
+          const Icon = item.icon;
+
+          return (
+            <Link
+              key={item.path}
+              href={item.path}
+              className="relative flex flex-1 flex-col items-center justify-center gap-1 px-2 py-2.5 active:scale-95 sm:px-3"
+            >
+              {isActive && (
+                <motion.div
+                  layoutId="bottom-nav-indicator"
+                  className="absolute inset-0 rounded-[10px] border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)]"
+                  transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
+                />
+              )}
+              <LottieIcon
+                path={item.lottie}
+                fallback={Icon}
+                size={24}
+                isActive={isActive}
+                className={`relative z-10 transition-colors duration-300 ${
+                  item.name === 'Anasayfa' ? 'scale-[1.25]' : item.name === 'Repertuvar' ? 'scale-[1.45]' : 'scale-100'
+                } ${isActive ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-medium)]'}`}
+              />
+              <span
+                className={`relative z-10 font-sans text-[0.6rem] font-bold uppercase tracking-[0.24em] ${
+                  isActive ? 'text-[var(--color-text-high)]' : 'text-[var(--color-text-medium)]'
+                }`}
+              >
+                {item.name}
+              </span>
+            </Link>
+          );
+        })}
+        </div>
+      </div>
+    </nav>
+  );
+}

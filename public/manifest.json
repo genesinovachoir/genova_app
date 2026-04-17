@@ -1,0 +1,16 @@
+{
+  "name": "Genova Korist",
+  "short_name": "Korist",
+  "description": "Koro Yönetim Uygulaması",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#041329",
+  "theme_color": "#041329",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "40x40",
+      "type": "image/png"
+    }
+  ]
+}
