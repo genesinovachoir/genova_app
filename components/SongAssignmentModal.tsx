@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Users, Check, Loader2, AlertCircle, CheckCircle2, Search } from 'lucide-react';
-import { supabase, ChoirMember, SongAssignment } from '@/lib/supabase';
+import { supabase, ChoirMember } from '@/lib/supabase';
 
 interface SongAssignmentModalProps {
   isOpen: boolean;
@@ -13,8 +13,6 @@ interface SongAssignmentModalProps {
   partName?: string;
   onSaved?: () => Promise<void> | void;
 }
-
-const VOICE_GROUPS = ['Soprano', 'Alto', 'Tenor', 'Bass'];
 
 export function SongAssignmentModal({ isOpen, onClose, songId, songTitle, partName, onSaved }: SongAssignmentModalProps) {
   const [members, setMembers] = useState<ChoirMember[]>([]);
@@ -130,6 +128,48 @@ export function SongAssignmentModal({ isOpen, onClose, songId, songTitle, partNa
         const inserts = Array.from(assigned).map(member_id => ({ song_id: songId, member_id, part_name: partName || null }));
         const { error: insertErr } = await supabase.from('song_assignments').insert(inserts);
         if (insertErr) throw new Error(insertErr.message);
+      }
+
+      // Partisyon ataması yapıldığında şarkı-genel atamayı da (part_name = null) senkron tut.
+      // Böylece eski "Şarkı Ata" akışını kullanan görünürlük kontrolleri de bozulmaz.
+      if (partName) {
+        const { data: allPartRows, error: partRowsError } = await supabase
+          .from('song_assignments')
+          .select('member_id')
+          .eq('song_id', songId)
+          .not('part_name', 'is', null);
+
+        if (partRowsError) {
+          throw new Error(partRowsError.message);
+        }
+
+        const memberIdsWithAnyPart = Array.from(
+          new Set((allPartRows ?? []).map((row: { member_id: string }) => row.member_id)),
+        );
+
+        const { error: deleteSongLevelError } = await supabase
+          .from('song_assignments')
+          .delete()
+          .eq('song_id', songId)
+          .is('part_name', null);
+
+        if (deleteSongLevelError) {
+          throw new Error(deleteSongLevelError.message);
+        }
+
+        if (memberIdsWithAnyPart.length > 0) {
+          const songLevelInserts = memberIdsWithAnyPart.map((member_id) => ({
+            song_id: songId,
+            member_id,
+            part_name: null,
+          }));
+          const { error: insertSongLevelError } = await supabase
+            .from('song_assignments')
+            .insert(songLevelInserts);
+          if (insertSongLevelError) {
+            throw new Error(insertSongLevelError.message);
+          }
+        }
       }
 
       await onSaved?.();

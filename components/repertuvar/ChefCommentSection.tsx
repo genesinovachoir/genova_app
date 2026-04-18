@@ -10,11 +10,14 @@ import { useAuth } from '@/components/AuthProvider';
 import { sanitizeRichText, isRichTextMeaningful } from '@/lib/richText';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ToastProvider';
+import type { PreviewVoiceGroup, VoiceGroup } from '@/lib/repertuvar/annotation-types';
 
 interface ChefCommentSectionProps {
   songId: string;
   memberId: string | null;
   canComment: boolean;
+  selectedVoiceGroup: PreviewVoiceGroup;
+  composerTargetVoiceGroup: VoiceGroup | null;
 }
 
 interface CommentAuthor {
@@ -27,6 +30,7 @@ interface SongChefComment {
   id: string;
   song_id: string;
   content_html: string;
+  target_voice_group: VoiceGroup | null;
   created_at: string;
   created_by: string;
   choir_members: CommentAuthor | null;
@@ -36,7 +40,8 @@ interface RawSongChefComment extends Omit<SongChefComment, 'choir_members'> {
   choir_members?: CommentAuthor | CommentAuthor[] | null;
 }
 
-const COMMENTS_QUERY_KEY = (songId: string) => ['repertoire-song-comments', songId] as const;
+const COMMENTS_QUERY_KEY = (songId: string, selectedVoiceGroup: PreviewVoiceGroup) =>
+  ['repertoire-song-comments', songId, selectedVoiceGroup] as const;
 
 function formatCommentDate(value: string) {
   return new Date(value).toLocaleDateString('tr-TR', {
@@ -59,19 +64,34 @@ function normalizeComment(row: RawSongChefComment): SongChefComment {
   };
 }
 
-async function fetchComments(songId: string) {
-  const { data, error } = await supabase
+async function fetchComments(
+  songId: string,
+  selectedVoiceGroup: PreviewVoiceGroup,
+  includeGlobalWhenScoped: boolean,
+) {
+  let query = supabase
     .from('repertoire_song_comments')
     .select(`
       id,
       song_id,
       content_html,
+      target_voice_group,
       created_at,
       created_by,
       choir_members ( first_name, last_name, photo_url )
     `)
     .eq('song_id', songId)
     .order('created_at', { ascending: true });
+
+  if (selectedVoiceGroup !== 'ALL') {
+    if (includeGlobalWhenScoped) {
+      query = query.or(`target_voice_group.eq.${selectedVoiceGroup},target_voice_group.is.null`);
+    } else {
+      query = query.eq('target_voice_group', selectedVoiceGroup);
+    }
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw error;
@@ -80,7 +100,13 @@ async function fetchComments(songId: string) {
   return (data ?? []).map((row) => normalizeComment(row as RawSongChefComment));
 }
 
-export function ChefCommentSection({ songId, memberId, canComment }: ChefCommentSectionProps) {
+export function ChefCommentSection({
+  songId,
+  memberId,
+  canComment,
+  selectedVoiceGroup,
+  composerTargetVoiceGroup,
+}: ChefCommentSectionProps) {
   const { member, isAdmin } = useAuth();
   const isChef = isAdmin();
   const queryClient = useQueryClient();
@@ -89,10 +115,11 @@ export function ChefCommentSection({ songId, memberId, canComment }: ChefComment
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingHtml, setEditingHtml] = useState('');
   const [editorHtml, setEditorHtml] = useState('');
+  const includeGlobalWhenScoped = !isChef;
 
   const commentsQuery = useQuery({
-    queryKey: COMMENTS_QUERY_KEY(songId),
-    queryFn: () => fetchComments(songId),
+    queryKey: COMMENTS_QUERY_KEY(songId, selectedVoiceGroup),
+    queryFn: () => fetchComments(songId, selectedVoiceGroup, includeGlobalWhenScoped),
   });
 
   useEffect(() => {
@@ -102,7 +129,7 @@ export function ChefCommentSection({ songId, memberId, canComment }: ChefComment
         'postgres_changes',
         { event: '*', schema: 'public', table: 'repertoire_song_comments', filter: `song_id=eq.${songId}` },
         () => {
-          void queryClient.invalidateQueries({ queryKey: COMMENTS_QUERY_KEY(songId) });
+          void queryClient.invalidateQueries({ queryKey: ['repertoire-song-comments', songId] });
         },
       )
       .subscribe();
@@ -118,6 +145,7 @@ export function ChefCommentSection({ songId, memberId, canComment }: ChefComment
         song_id: songId,
         content_html: sanitizeRichText(contentHtml),
         created_by: memberId,
+        target_voice_group: composerTargetVoiceGroup,
       });
       if (error) {
         throw error;
@@ -125,7 +153,7 @@ export function ChefCommentSection({ songId, memberId, canComment }: ChefComment
     },
     onSuccess: async () => {
       setEditorHtml('');
-      await queryClient.invalidateQueries({ queryKey: COMMENTS_QUERY_KEY(songId) });
+      await queryClient.invalidateQueries({ queryKey: ['repertoire-song-comments', songId] });
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Yorum gönderilemedi.', 'Şef notu');
@@ -145,7 +173,7 @@ export function ChefCommentSection({ songId, memberId, canComment }: ChefComment
     onSuccess: async () => {
       setEditingCommentId(null);
       setEditingHtml('');
-      await queryClient.invalidateQueries({ queryKey: COMMENTS_QUERY_KEY(songId) });
+      await queryClient.invalidateQueries({ queryKey: ['repertoire-song-comments', songId] });
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Yorum güncellenemedi.', 'Şef notu');
@@ -166,7 +194,7 @@ export function ChefCommentSection({ songId, memberId, canComment }: ChefComment
         setEditingCommentId(null);
         setEditingHtml('');
       }
-      await queryClient.invalidateQueries({ queryKey: COMMENTS_QUERY_KEY(songId) });
+      await queryClient.invalidateQueries({ queryKey: ['repertoire-song-comments', songId] });
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Yorum silinemedi.', 'Şef notu');
@@ -175,12 +203,19 @@ export function ChefCommentSection({ songId, memberId, canComment }: ChefComment
 
   const comments = commentsQuery.data ?? [];
   const canSubmit = useMemo(
-    () => Boolean(canComment && memberId && !submitMutation.isPending && isRichTextMeaningful(editorHtml)),
-    [canComment, editorHtml, memberId, submitMutation.isPending],
+    () => Boolean(
+      canComment &&
+      memberId &&
+      !submitMutation.isPending &&
+      isRichTextMeaningful(editorHtml) &&
+      (isChef || composerTargetVoiceGroup !== null),
+    ),
+    [canComment, composerTargetVoiceGroup, editorHtml, isChef, memberId, submitMutation.isPending],
   );
 
   const composerName = member?.first_name || 'Siz';
   const composerPhotoUrl = member?.photo_url ?? null;
+  const scopeLabel = selectedVoiceGroup === 'ALL' ? 'Tümü' : selectedVoiceGroup;
   const pendingDeleteComment = comments.find((comment) => comment.id === confirmDeleteId) ?? null;
 
   function canEditComment(comment: SongChefComment) {
@@ -211,7 +246,7 @@ export function ChefCommentSection({ songId, memberId, canComment }: ChefComment
     <section className="mt-8">
       <div className="space-y-6">
         <div className="px-5 sm:px-6">
-          <span className="page-kicker">Şef Notu</span>
+          <span className="page-kicker">Şef Notu · {scopeLabel}</span>
         </div>
 
         <div className="relative ml-9 space-y-8 border-l border-[var(--color-border-strong)] pb-4 md:ml-10">
@@ -246,6 +281,9 @@ export function ChefCommentSection({ songId, memberId, canComment }: ChefComment
                     <div className="flex flex-col gap-2">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <p className="text-[13px] font-semibold text-[var(--color-text-high)]">{fullName}</p>
+                        <span className="rounded-full border border-[var(--color-border)] bg-white/5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-medium)]">
+                          {comment.target_voice_group ?? 'Tüm Koro'}
+                        </span>
                         <span className="text-[11px] text-[var(--color-text-medium)]">{formatCommentDate(comment.created_at)}</span>
 
                         {canEditComment(comment) || canDeleteComment(comment) ? (

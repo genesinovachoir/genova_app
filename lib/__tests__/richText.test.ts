@@ -20,6 +20,13 @@ describe('sanitizeRichText', () => {
     expect(sanitized).not.toContain('javascript:');
   });
 
+  it('keeps internal links without forcing new tab', () => {
+    const sanitized = sanitizeRichText('<p><a href="/repertuvar/softest-rains">sayfaya git</a></p>');
+
+    expect(sanitized).toContain('href="/repertuvar/softest-rains"');
+    expect(sanitized).not.toContain('target="_blank"');
+  });
+
   it('returns a safe empty paragraph for empty content', () => {
     expect(sanitizeRichText('')).toBe('<p></p>');
     expect(sanitizeRichText(null)).toBe('<p></p>');

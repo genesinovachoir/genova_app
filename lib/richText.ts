@@ -17,10 +17,25 @@ export function sanitizeRichText(html: string | null | undefined): string {
     },
     nonTextTags: ['style', 'script', 'textarea', 'noscript'],
     transformTags: {
-      a: sanitizeHtml.simpleTransform('a', {
-        target: '_blank',
-        rel: 'noopener noreferrer',
-      }),
+      a: (tagName, attribs) => {
+        const href = attribs.href?.trim() ?? '';
+        const isInternal = href.startsWith('/') && !href.startsWith('//');
+        const nextAttribs: Record<string, string> = {};
+
+        if (href) {
+          nextAttribs.href = href;
+        }
+
+        if (!isInternal && href) {
+          nextAttribs.target = '_blank';
+          nextAttribs.rel = 'noopener noreferrer';
+        }
+
+        return {
+          tagName,
+          attribs: nextAttribs,
+        };
+      },
     },
   }).trim();
 
@@ -35,4 +50,13 @@ export function isRichTextMeaningful(html: string | null | undefined) {
     .trim();
 
   return plainText.length > 0 || /<img\b/i.test(sanitized);
+}
+
+export function stripHtmlTags(html: string | null | undefined): string {
+  if (!html) return '';
+  return html
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }

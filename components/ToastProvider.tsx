@@ -78,7 +78,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[250] mx-auto flex max-w-lg flex-col gap-3 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[250] mx-auto flex max-w-lg flex-col gap-3 px-4 pb-[calc(8rem+env(safe-area-inset-bottom))]">
         <AnimatePresence>
           {toasts.map((toast) => {
             const style = VARIANT_STYLES[toast.variant];

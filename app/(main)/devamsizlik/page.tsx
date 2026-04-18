@@ -144,6 +144,20 @@ async function fetchPendingApprovals() {
   })) as PendingAttendance[];
 }
 
+async function fetchContinuityInfo(memberId: string) {
+  const { data, error } = await supabase.rpc('get_member_continuity_info', { p_member_id: memberId });
+  if (error) {
+    throw error;
+  }
+  return data?.[0] as {
+    total_rehearsals: number;
+    attended_rehearsals: number;
+    total_assignments: number;
+    approved_assignments: number;
+    continuity_coefficient: number;
+  } | null;
+}
+
 export default function DevamsizlikPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -173,6 +187,12 @@ export default function DevamsizlikPage() {
     queryKey: ['devamsizlik', 'pending', member?.id],
     queryFn: fetchPendingApprovals,
     enabled: Boolean(member?.id && canApprove),
+  });
+
+  const continuityQuery = useQuery({
+    queryKey: ['devamsizlik', 'continuity', member?.id],
+    queryFn: () => fetchContinuityInfo(member!.id),
+    enabled: Boolean(member?.id),
   });
 
   useEffect(() => {
@@ -236,6 +256,7 @@ export default function DevamsizlikPage() {
   const rehearsals = monthDataQuery.data?.rehearsals;
   const myAttendance = monthDataQuery.data?.myAttendance;
   const pendingAttendances = pendingQuery.data ?? [];
+  const continuity = continuityQuery.data;
 
   const calendarDays = useMemo<CalendarDay[]>(() => {
     const monthRehearsals = rehearsals ?? [];
@@ -330,7 +351,7 @@ export default function DevamsizlikPage() {
 
   return (
     <main className="min-h-screen bg-[var(--color-background)] pb-[max(2rem,env(safe-area-inset-bottom))]">
-      <div className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-background)]/90 px-5 pb-4 pt-[max(env(safe-area-inset-top),1.25rem)] backdrop-blur-sm">
+      <div className="border-b border-[var(--color-border)] bg-[var(--color-background)]/90 px-5 pb-4 pt-[max(env(safe-area-inset-top),1.25rem)] backdrop-blur-sm">
         <button
           onClick={() => router.back()}
           className="mb-4 inline-flex items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] active:scale-95"

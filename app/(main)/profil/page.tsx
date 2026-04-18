@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { useAuth } from '@/components/AuthProvider';
 
 export default function Profil() {
-  const { member, roles, signOut, isLoading, isAdmin } = useAuth();
+  const { member, roles, signOut, isLoading } = useAuth();
   const [todayTimestamp] = useState(() => Date.now());
 
 
@@ -40,12 +40,12 @@ export default function Profil() {
       <div className="flex items-center justify-between px-1 pt-2">
         <span className="font-serif text-xl tracking-tight font-medium text-white/90">Profilim</span>
         <div className="flex items-center gap-2">
-          {isAdmin() && (
-            <Link href="/profil/degisiklikler"
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--color-accent-soft)] border border-[var(--color-accent-soft)] text-[var(--color-accent)] hover:bg-[#C0B283]/20 transition-colors">
-              <ShieldCheck size={16} />
-            </Link>
-          )}
+          <Link
+            href="/profil/degisiklikler"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--color-accent-soft)] border border-[var(--color-accent-soft)] text-[var(--color-accent)] hover:bg-[#C0B283]/20 transition-colors"
+          >
+            <ShieldCheck size={16} />
+          </Link>
           <button
             onClick={() => signOut()}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-white/5 border border-white/10 text-[var(--color-text-medium)] hover:text-red-400 hover:border-red-400/30 transition-colors"

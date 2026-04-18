@@ -15,7 +15,7 @@ interface FileUploadModalProps {
   description?: string;
   /** Partisyon label seçimi için (midi modunda) */
   showPartitionLabel?: boolean;
-  onUpload: (file: File, partitionLabel?: string) => Promise<void>;
+  onUpload: (file: File, partitionLabel?: string, note?: string) => Promise<void>;
 }
 
 const MODE_CONFIG: Record<UploadMode, {
@@ -74,6 +74,7 @@ export function FileUploadModal({
 }: FileUploadModalProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [partitionLabel, setPartitionLabel] = useState<string>('');
+  const [submissionNote, setSubmissionNote] = useState<string>('');
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +87,7 @@ export function FileUploadModal({
   const reset = useCallback(() => {
     setSelectedFile(null);
     setPartitionLabel('');
+    setSubmissionNote('');
     setError(null);
     setSuccess(false);
     setUploading(false);
@@ -147,7 +149,11 @@ export function FileUploadModal({
     setError(null);
 
     try {
-      await onUpload(selectedFile, showPartitionLabel ? partitionLabel : undefined);
+      await onUpload(
+        selectedFile, 
+        showPartitionLabel ? partitionLabel : undefined,
+        mode === 'submission' && submissionNote.trim() ? submissionNote.trim() : undefined
+      );
       setSuccess(true);
       setTimeout(() => {
         handleClose();
@@ -213,6 +219,22 @@ export function FileUploadModal({
                       <option key={label} value={label}>{label}</option>
                     ))}
                   </select>
+                </div>
+              )}
+
+              {/* Submission Note (submission modu için) */}
+              {mode === 'submission' && (
+                <div>
+                  <label className="block text-[0.65rem] uppercase tracking-[0.22em] text-[var(--color-text-medium)] mb-2">
+                    Açıklama (İsteğe Bağlı)
+                  </label>
+                  <textarea
+                    value={submissionNote}
+                    onChange={e => setSubmissionNote(e.target.value)}
+                    placeholder="Şefin veya partisyon şefinin görmesini istediğiniz bir not ekleyebilirsiniz..."
+                    rows={3}
+                    className="editorial-input w-full resize-none text-sm"
+                  />
                 </div>
               )}
 

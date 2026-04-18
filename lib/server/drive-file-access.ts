@@ -4,6 +4,7 @@ interface MemberContext {
   memberId: string | null;
   isChef: boolean;
   isSectionLeader: boolean;
+  voiceGroup: string | null;
 }
 
 export interface AuthorizedDriveFile {
@@ -11,6 +12,31 @@ export interface AuthorizedDriveFile {
   fileName: string | null;
   mimeType: string | null;
   kind: 'repertoire' | 'assignment_submission';
+  storageBucket?: string | null;
+  storagePath?: string | null;
+}
+
+const STORAGE_LINK_PREFIX = 'storage://';
+
+function parseStorageLocation(rawValue: string | null | undefined): { bucket: string; path: string } | null {
+  if (!rawValue || !rawValue.startsWith(STORAGE_LINK_PREFIX)) {
+    return null;
+  }
+
+  const withoutPrefix = rawValue.slice(STORAGE_LINK_PREFIX.length);
+  const firstSlashIndex = withoutPrefix.indexOf('/');
+  if (firstSlashIndex <= 0 || firstSlashIndex === withoutPrefix.length - 1) {
+    return null;
+  }
+
+  const bucket = withoutPrefix.slice(0, firstSlashIndex);
+  const path = withoutPrefix.slice(firstSlashIndex + 1);
+
+  if (!bucket || !path) {
+    return null;
+  }
+
+  return { bucket, path };
 }
 
 function normalizeRoleName(value: string) {
@@ -26,12 +52,12 @@ async function loadMemberContext(authUserId: string): Promise<MemberContext> {
   const serviceClient = createSupabaseServiceClient();
   const { data: member } = await serviceClient
     .from('choir_members')
-    .select('id')
+    .select('id, voice_group')
     .eq('auth_user_id', authUserId)
     .maybeSingle();
 
   if (!member) {
-    return { memberId: null, isChef: false, isSectionLeader: false };
+    return { memberId: null, isChef: false, isSectionLeader: false, voiceGroup: null };
   }
 
   const { data: roles } = await serviceClient
@@ -52,10 +78,15 @@ async function loadMemberContext(authUserId: string): Promise<MemberContext> {
     memberId: member.id,
     isChef: normalizedRoles.has('sef'),
     isSectionLeader: normalizedRoles.has('partisyon sefi') || normalizedRoles.has('sef'),
+    voiceGroup: (member as { voice_group?: string | null }).voice_group ?? null,
   };
 }
 
 async function authorizeRepertoireFile(driveFileId: string, memberContext: MemberContext): Promise<AuthorizedDriveFile | null> {
+  if (!memberContext.memberId) {
+    return null;
+  }
+
   const serviceClient = createSupabaseServiceClient();
   const { data: repertoireFile } = await serviceClient
     .from('repertoire_files')
@@ -73,9 +104,27 @@ async function authorizeRepertoireFile(driveFileId: string, memberContext: Membe
     .eq('id', repertoireFile.song_id)
     .maybeSingle();
 
-  const canAccess = Boolean(song && (song.is_visible || memberContext.isChef));
-  if (!canAccess) {
+  if (!song) {
     return null;
+  }
+
+  const isPrivilegedMember = memberContext.isChef || memberContext.isSectionLeader;
+  if (!song.is_visible && !isPrivilegedMember) {
+    return null;
+  }
+
+  if (!isPrivilegedMember) {
+    const { data: assignment } = await serviceClient
+      .from('song_assignments')
+      .select('song_id')
+      .eq('song_id', repertoireFile.song_id)
+      .eq('member_id', memberContext.memberId)
+      .limit(1)
+      .maybeSingle();
+
+    if (!assignment) {
+      return null;
+    }
   }
 
   return {
@@ -94,7 +143,7 @@ async function authorizeAssignmentSubmission(driveFileId: string, memberContext:
   const serviceClient = createSupabaseServiceClient();
   const { data: submission } = await serviceClient
     .from('assignment_submissions')
-    .select('drive_file_id, file_name, mime_type, member_id')
+    .select('drive_file_id, file_name, mime_type, member_id, drive_download_link')
     .eq('drive_file_id', driveFileId)
     .maybeSingle();
 
@@ -102,16 +151,28 @@ async function authorizeAssignmentSubmission(driveFileId: string, memberContext:
     return null;
   }
 
-  const canAccess = memberContext.isChef || memberContext.isSectionLeader || submission.member_id === memberContext.memberId;
+  let canAccess = memberContext.isChef || submission.member_id === memberContext.memberId;
+  if (!canAccess && memberContext.isSectionLeader && memberContext.voiceGroup) {
+    const { data: targetMember } = await serviceClient
+      .from('choir_members')
+      .select('voice_group')
+      .eq('id', submission.member_id)
+      .maybeSingle();
+    canAccess = Boolean(targetMember?.voice_group && targetMember.voice_group === memberContext.voiceGroup);
+  }
   if (!canAccess) {
     return null;
   }
+
+  const storageLocation = parseStorageLocation(submission.drive_download_link);
 
   return {
     driveFileId,
     fileName: submission.file_name,
     mimeType: submission.mime_type,
     kind: 'assignment_submission',
+    storageBucket: storageLocation?.bucket ?? null,
+    storagePath: storageLocation?.path ?? null,
   };
 }
 

@@ -22,7 +22,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: 'Genova App',
-    statusBarStyle: 'default',
+    statusBarStyle: 'black',
   },
   icons: {
     icon: [

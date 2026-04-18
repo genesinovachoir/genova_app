@@ -20,6 +20,7 @@ import { AddSongModal } from '@/components/AddSongModal';
 import { ProtectedDriveImage } from '@/components/ProtectedDriveImage';
 import { SongAssignmentModal } from '@/components/SongAssignmentModal';
 import { SongEditModal } from '@/components/SongEditModal';
+import { createSlugLookup, getRepertoirePath } from '@/lib/internalPageLinks';
 
 const ACCENT_GRADIENTS = [
   'from-[#D4C8A0]/20 via-[#E0D8B8]/5 to-transparent',
@@ -48,8 +49,10 @@ function isPdfRepertoireFile(file: RepertoireFile | null | undefined): boolean {
 
 export default function Repertuvar() {
   const router = useRouter();
-  const { isAdmin, member } = useAuth();
+  const { isAdmin, isSectionLeader, member, isLoading: authLoading } = useAuth();
   const isChef = isAdmin();
+  const isLeader = isSectionLeader();
+  const isChoristUser = !isChef && !isLeader;
 
   const [songs, setSongs] = useState<RepertoireSong[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,6 +65,7 @@ export default function Repertuvar() {
   const [assignModal, setAssignModal] = useState<{ songId: string; songTitle: string } | null>(null);
   const [editSong, setEditSong] = useState<RepertoireSong | null>(null);
   const [userParts, setUserParts] = useState<Record<string, string>>({});
+  const [assignedSongIds, setAssignedSongIds] = useState<Set<string>>(new Set());
   const [pendingDeleteTag, setPendingDeleteTag] = useState<RepertoireTag | null>(null);
   const [deletingTagId, setDeletingTagId] = useState<string | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,14 +112,28 @@ export default function Repertuvar() {
       setSongs(normalizedSongs.filter((song) => Boolean(song.drive_folder_id)));
 
       if (member?.id) {
-        const { data: assignmentsData } = await supabase
+        const { data: assignmentsData, error: assignmentsError } = await supabase
           .from('song_assignments')
           .select('song_id, part_name')
-          .eq('member_id', member.id)
-          .not('part_name', 'is', null);
+          .eq('member_id', member.id);
 
-        const partsMap = (assignmentsData ?? []).reduce((acc, row) => ({ ...acc, [row.song_id]: row.part_name }), {} as Record<string, string>);
+        if (assignmentsError) {
+          throw new Error(assignmentsError.message);
+        }
+
+        const partsMap = (assignmentsData ?? []).reduce((acc, row) => {
+          if (row.part_name) {
+            acc[row.song_id] = row.part_name;
+          }
+          return acc;
+        }, {} as Record<string, string>);
+
+        const assignedIds = new Set((assignmentsData ?? []).map((row) => row.song_id));
         setUserParts(partsMap);
+        setAssignedSongIds(assignedIds);
+      } else {
+        setUserParts({});
+        setAssignedSongIds(new Set());
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Veri yüklenemedi');
@@ -124,7 +142,13 @@ export default function Repertuvar() {
     }
   }, [member?.id]);
 
-  useEffect(() => { fetchSongs(); fetchTags(); }, [fetchSongs, fetchTags]);
+  useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+    fetchSongs();
+    fetchTags();
+  }, [authLoading, fetchSongs, fetchTags]);
 
   useEffect(() => {
     if (!tagOptions.includes(activeTag)) {
@@ -210,12 +234,34 @@ export default function Repertuvar() {
         s.composer?.toLowerCase().includes(searchLower) ||
         (s.tags ?? []).some((tag) => tag.name.toLowerCase().includes(searchLower));
       const matchVisibility = isChef ? true : s.is_visible;
-      if (activeTag === 'Gizli') return matchSearch && !s.is_visible;
+      const matchAssignment = !isChoristUser || assignedSongIds.has(s.id);
+      if (activeTag === 'Gizli') return matchSearch && !s.is_visible && matchAssignment;
       const matchTag = activeTag === 'Tümü'
         ? true
         : (s.tags ?? []).some((tag) => tag.name === activeTag);
-      return matchSearch && matchVisibility && matchTag;
+      return matchSearch && matchVisibility && matchTag && matchAssignment;
     });
+
+  const totalAccessibleSongs = useMemo(() => {
+    return songs.filter(s => {
+      const matchVisibility = isChef ? true : s.is_visible;
+      const matchAssignment = !isChoristUser || assignedSongIds.has(s.id);
+      return matchVisibility && matchAssignment;
+    }).length;
+  }, [songs, isChef, isChoristUser, assignedSongIds]);
+
+  const songSlugLookup = useMemo(
+    () =>
+      createSlugLookup(
+        songs.map((song) => ({
+          id: song.id,
+          title: song.title,
+          created_at: song.created_at,
+        })),
+        'sarki',
+      ),
+    [songs],
+  );
 
   return (
     <main className="page-shell space-y-6">
@@ -314,7 +360,7 @@ export default function Repertuvar() {
                     : 'border border-[var(--color-border)] bg-white/3 text-[var(--color-text-medium)] hover:border-white/20 hover:text-[var(--color-text-high)]'
                 }`}
               >
-                {tag === 'Tümü' ? `${tag} (${songs.length})` : tag}
+                {tag === 'Tümü' ? `${tag} (${totalAccessibleSongs})` : tag}
               </button>
             );
           })}
@@ -348,7 +394,7 @@ export default function Repertuvar() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
                   transition={{ delay: 0.05 * index }}
-                  onClick={() => router.push(`/repertuvar/${song.id}`)}
+                  onClick={() => router.push(getRepertoirePath(song, songSlugLookup.slugById))}
                   className={`glass-panel cursor-pointer p-5 sm:p-6 transition-all hover:border-white/20 ${!song.is_visible ? 'opacity-60' : ''}`}
                 >
                   <div className="grid gap-4 sm:grid-cols-[110px_minmax(0,1fr)]">
@@ -405,13 +451,6 @@ export default function Repertuvar() {
                               className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] hover:text-[var(--color-text-high)] transition-colors"
                             >
                               {song.is_visible ? <Eye size={13} /> : <EyeOff size={13} />}
-                            </button>
-                            <button
-                              onClick={() => setAssignModal({ songId: song.id, songTitle: song.title })}
-                              title="Korist Ata"
-                              className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] hover:text-[var(--color-accent)] transition-colors"
-                            >
-                              <Users size={13} />
                             </button>
                           </div>
                         )}

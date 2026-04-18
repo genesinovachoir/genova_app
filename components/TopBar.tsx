@@ -31,7 +31,7 @@ export function TopBar() {
               )}
             </div>
             <div className="flex flex-1 flex-col justify-center min-w-0 ml-1">
-              <p className="page-kicker text-[0.55rem] leading-none mb-1.5">Genova Korist</p>
+              <p className="page-kicker text-[0.55rem] leading-none mb-1.5">GENOVA APP</p>
               <h1 className="font-serif text-[14px] sm:text-base font-medium tracking-tight text-[var(--color-text-high)] whitespace-nowrap">
                 Hoş Geldin, {displayName}
               </h1>

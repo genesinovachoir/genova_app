@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 
+import { createSupabaseServiceClient } from '@/lib/server/supabase-auth';
 import { verifyDriveFileToken } from '@/lib/server/drive-file-token';
 
 export const dynamic = 'force-dynamic';
@@ -32,6 +33,49 @@ function makeContentDisposition(fileName: string) {
   return `inline; filename="${fallbackName}"; filename*=UTF-8''${encodedName}`;
 }
 
+async function proxyStorageFile(requestMethod: string, tokenPayload: ReturnType<typeof verifyDriveFileToken>) {
+  if (!tokenPayload?.storageBucket || !tokenPayload.storagePath) {
+    return new Response('Storage dosya konumu eksik.', { status: 500 });
+  }
+
+  const serviceClient = createSupabaseServiceClient();
+  const { data, error } = await serviceClient
+    .storage
+    .from(tokenPayload.storageBucket)
+    .download(tokenPayload.storagePath);
+
+  if (error || !data) {
+    return new Response('Dosya depolamada bulunamadı.', {
+      status: 404,
+      headers: {
+        'Cache-Control': 'private, no-store',
+      },
+    });
+  }
+
+  const responseHeaders = new Headers({
+    'Content-Type': data.type || tokenPayload.mimeType || 'application/octet-stream',
+    'Cache-Control': 'private, no-store',
+    'Accept-Ranges': 'none',
+  });
+
+  if (tokenPayload.fileName) {
+    responseHeaders.set('Content-Disposition', makeContentDisposition(tokenPayload.fileName));
+  }
+
+  if (requestMethod === 'HEAD') {
+    return new Response(null, {
+      status: 200,
+      headers: responseHeaders,
+    });
+  }
+
+  return new Response(data.stream(), {
+    status: 200,
+    headers: responseHeaders,
+  });
+}
+
 async function proxyDriveFile(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const token = request.nextUrl.searchParams.get('token');
@@ -46,6 +90,10 @@ async function proxyDriveFile(request: NextRequest, { params }: { params: Promis
   const tokenPayload = verifyDriveFileToken(token);
   if (!tokenPayload || tokenPayload.driveFileId !== id) {
     return new Response('Unauthorized', { status: 401 });
+  }
+
+  if (tokenPayload.storageBucket && tokenPayload.storagePath) {
+    return proxyStorageFile(request.method, tokenPayload);
   }
 
   const upstreamUrl = new URL('https://drive.google.com/uc');

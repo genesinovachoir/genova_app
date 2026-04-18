@@ -1,9 +1,9 @@
 'use client';
 
 import type { ElementType } from 'react';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { motion, AnimatePresence, useMotionValue, useTransform } from 'motion/react';
+import { motion, AnimatePresence, useMotionValue, useTransform, animate } from 'motion/react';
 import {
   ChevronRight,
   Loader2,
@@ -21,10 +21,11 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { LottieIcon } from '@/components/LottieIcon';
+import { KoristPerformanceSection } from '@/components/KoristPerformanceSection';
 import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/ToastProvider';
 import { supabase, type Announcement, type Attendance, type Rehearsal } from '@/lib/supabase';
-import { formatWhatsApp } from '@/lib/formatText';
+import { sanitizeRichText } from '@/lib/richText';
 
 const ICON_MAP: Record<string, ElementType> = {
   megaphone: Megaphone,
@@ -173,7 +174,15 @@ export default function Dashboard() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const dragX = useMotionValue(0);
-  const fillWidth = useTransform(dragX, (x) => `calc(3.5rem + ${typeof x === 'number' ? Math.max(0, x) : 0}px)`);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const thumbRef = useRef<HTMLDivElement>(null);
+  const [maxDrag, setMaxDrag] = useState(200);
+
+  const fillWidth = useTransform(dragX, (x) => {
+    const thumbW = thumbRef.current?.offsetWidth || 56;
+    return `${thumbW + Math.max(0, typeof x === 'number' ? x : 0)}px`;
+  });
+
   const todayStr = useMemo(() => getTodayString(new Date()), []);
 
   const announcementsQuery = useQuery({
@@ -186,6 +195,26 @@ export default function Dashboard() {
     queryFn: () => fetchTodayRehearsal(member!.id, todayStr),
     enabled: Boolean(member?.id),
   });
+
+  const todayRehearsal = todayRehearsalQuery.data?.rehearsal ?? null;
+  const attendanceState = todayRehearsalQuery.data?.attendanceState ?? 'idle';
+
+  useEffect(() => {
+    if (!containerRef.current || !thumbRef.current) return;
+    
+    const updateSize = () => {
+      if (containerRef.current && thumbRef.current) {
+        setMaxDrag(containerRef.current.offsetWidth - thumbRef.current.offsetWidth);
+      }
+    };
+    
+    updateSize();
+    
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(containerRef.current);
+    
+    return () => observer.disconnect();
+  }, [todayRehearsal, attendanceState]);
 
   const statsQuery = useQuery({
     queryKey: ['dashboard', 'attendanceStats', member?.id, todayStr],
@@ -325,16 +354,11 @@ export default function Dashboard() {
         }
       }
 
-      dragX.set(0);
+      animate(dragX, 0, { type: 'spring', stiffness: 300, damping: 20 });
       toast.error(error instanceof Error ? error.message : 'Katılım kaydedilemedi.', 'Katılım');
     },
-    onSuccess: (status) => {
-      dragX.set(0);
-      if (status === 'approved') {
-        toast.success('Katılım onaylandı.');
-      } else {
-        toast.info('Katılım kaydedildi. Onay bekleniyor.');
-      }
+    onSuccess: () => {
+      animate(dragX, 0, { type: 'spring', stiffness: 300, damping: 20 });
     },
     onSettled: async () => {
       if (!member?.id) {
@@ -349,8 +373,6 @@ export default function Dashboard() {
   });
 
   const announcements = announcementsQuery.data ?? [];
-  const todayRehearsal = todayRehearsalQuery.data?.rehearsal ?? null;
-  const attendanceState = todayRehearsalQuery.data?.attendanceState ?? 'idle';
   const { attendedCount, missedCount, totalRehearsals } = statsQuery.data ?? {
     attendedCount: 0,
     missedCount: 0,
@@ -366,7 +388,7 @@ export default function Dashboard() {
 
   const handleSwipeConfirm = () => {
     if (!member?.id || !todayRehearsal || attendanceState !== 'idle' || attendanceMutation.isPending) {
-      dragX.set(0);
+      animate(dragX, 0, { type: 'spring', stiffness: 300, damping: 20 });
       return;
     }
 
@@ -446,7 +468,7 @@ export default function Dashboard() {
             </Link>
           </div>
 
-          <div className="mt-8 flex items-center justify-between gap-6">
+          <div className="mt-4 flex items-center justify-between gap-6">
             <div className="space-y-3 text-sm text-[var(--color-text-medium)]">
               <div className="flex items-center gap-3">
                 <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]" />
@@ -518,12 +540,15 @@ export default function Dashboard() {
               {todayRehearsal.notes ? (
                 <div className="rounded-[4px] border border-[var(--color-border)] bg-white/4 p-4">
                   <p className="text-[0.68rem] uppercase tracking-[0.22em] text-[var(--color-text-medium)]">Not</p>
-                  <p className="mt-3 text-sm leading-6 text-[var(--color-text-medium)]">{formatWhatsApp(todayRehearsal.notes)}</p>
+                  <div
+                    className="prose prose-invert mt-3 max-w-none text-[var(--color-text-high)] opacity-90 prose-p:my-0.5 prose-p:text-[14px] prose-p:leading-[1.4] prose-ul:list-disc prose-ol:list-decimal prose-li:my-0.5 prose-a:text-[var(--color-accent)] prose-img:my-2 prose-img:max-h-[30vh] prose-img:w-full prose-img:rounded-[8px] prose-img:border prose-img:border-[var(--color-border)] prose-img:object-cover"
+                    dangerouslySetInnerHTML={{ __html: sanitizeRichText(todayRehearsal.notes) }}
+                  />
                 </div>
               ) : null}
 
               <div className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
-                <div className="group relative h-14 overflow-hidden rounded-full border border-[var(--color-border)] bg-[var(--color-surface-solid)] sm:h-16">
+                <div ref={containerRef} className="group relative h-14 overflow-hidden rounded-full border border-[var(--color-border)] bg-[var(--color-surface-solid)] sm:h-16">
                   {attendanceState === 'idle' ? (
                     <motion.div
                       className="absolute bottom-0 left-0 top-0 z-10 rounded-full bg-[var(--color-accent)]"
@@ -549,20 +574,22 @@ export default function Dashboard() {
 
                   {attendanceState === 'idle' ? (
                     <motion.div
+                      ref={thumbRef}
                       style={{ x: dragX }}
                       drag="x"
-                      dragConstraints={{ left: 0, right: 280 }}
-                      dragElastic={0.08}
-                      onDragEnd={(_, info) => {
-                        if (info.offset.x > 150) {
+                      dragConstraints={{ left: 0, right: maxDrag }}
+                      dragElastic={0}
+                      dragMomentum={false}
+                      onDragEnd={() => {
+                        if (dragX.get() >= maxDrag * 0.8) {
                           handleSwipeConfirm();
                         } else {
-                          dragX.set(0);
+                          animate(dragX, 0, { type: 'spring', stiffness: 300, damping: 20 });
                         }
                       }}
-                      className="relative z-20 flex h-full w-14 shrink-0 cursor-grab items-center justify-center rounded-full bg-[var(--color-accent)] text-[var(--color-background)] shadow-lg active:scale-95 active:cursor-grabbing sm:w-16"
+                      className="group/thumb relative z-20 flex h-full w-14 shrink-0 cursor-grab items-center justify-center rounded-full bg-[var(--color-accent)] text-[var(--color-background)] shadow-lg active:cursor-grabbing sm:w-16"
                     >
-                      <ChevronRight size={24} strokeWidth={2.4} />
+                      <ChevronRight className="transition-transform duration-200 group-active/thumb:scale-75" size={24} strokeWidth={2.4} />
                     </motion.div>
                   ) : null}
 
@@ -643,6 +670,8 @@ export default function Dashboard() {
           </motion.section>
         ) : null}
       </div>
+
+      <KoristPerformanceSection />
     </main>
   );
 }

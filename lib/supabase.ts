@@ -172,6 +172,7 @@ export interface RepertoireSongComment {
   id: string;
   song_id: string;
   content_html: string;
+  target_voice_group: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -231,6 +232,11 @@ export interface AssignmentSubmission {
   drive_member_folder_id: string | null;
   submitted_at: string;
   updated_at: string;
+  status?: 'pending' | 'approved' | 'rejected';
+  submission_note?: string | null;
+  reviewer_note?: string | null;
+  approved_at?: string | null;
+  approved_by?: string | null;
   choir_members?: { first_name: string; last_name: string; voice_group: string | null };
 }
 

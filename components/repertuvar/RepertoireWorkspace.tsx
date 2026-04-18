@@ -29,10 +29,24 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import { AnnotationStage } from '@/components/repertuvar/AnnotationStage';
 import { ChefCommentSection } from '@/components/repertuvar/ChefCommentSection';
 import { useProtectedDriveFileUrl } from '@/hooks/useProtectedDriveFileUrl';
+import { getProtectedDriveFileUrl } from '@/lib/drive-file-url';
 import {
   loadAnnotationsForFile,
   saveLayerSnapshot,
 } from '@/lib/repertuvar/annotations';
+import {
+  buildOfflineSongVersion,
+  clearOfflineSongSyncState,
+  getOfflineDriveFileUrl,
+  getOfflineSongSettings,
+  isRepertoireOfflineSupported,
+  markOfflineSongSynced,
+  removeOfflineSongFiles,
+  setOfflineSongEnabled,
+  syncSongFilesForOffline,
+  type OfflineSyncFileInput,
+  type OfflineSyncResult,
+} from '@/lib/repertuvar/offline';
 import {
   ANNOTATION_COLOR_SWATCHES,
   AnnotationColor,
@@ -54,8 +68,13 @@ import {
   getLayerItemsFromStore,
   useRepertoireWorkspaceStore,
 } from '@/store/useRepertoireWorkspaceStore';
+import { useMiniAudioPlayerStore } from '@/store/useMiniAudioPlayerStore';
+import { getSharedAudioElement, resolveAudioUrl } from '@/lib/shared-audio';
 
-pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url
+).toString();
 
 const pdfOptions = {
   cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
@@ -118,20 +137,47 @@ function isPdfRepertoireFile(file: RepertoireFile | null | undefined): boolean {
 }
 
 function getInlineFileSource(
-  file: Pick<RepertoireFile, 'drive_download_link'> | null | undefined,
+  file: Pick<RepertoireFile, 'drive_download_link' | 'drive_file_id'> | null | undefined,
   protectedUrl: string | null,
+  allowOfflineFallback: boolean,
 ): string | null {
+  if (allowOfflineFallback) {
+    const offlineUrl = getOfflineDriveFileUrl(file);
+    if (offlineUrl) {
+      return offlineUrl;
+    }
+  }
   return protectedUrl ?? file?.drive_download_link ?? null;
+}
+
+function formatSyncedAtLabel(timestamp: number | null) {
+  if (!timestamp) {
+    return null;
+  }
+
+  try {
+    return new Intl.DateTimeFormat('tr-TR', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    }).format(timestamp);
+  } catch {
+    return null;
+  }
 }
 
 // ─── AudioPanel ──────────────────────────────────────────────────────────────
 interface AudioPanelProps {
+  songId: string;
+  songTitle: string;
+  coverSource: string | null;
   audioFiles: RepertoireFile[];
   selectedAudio: RepertoireFile | null;
   selectedAudioSource: string | null;
+  allowOfflineFallback: boolean;
   audioRef: { current: HTMLAudioElement | null };
   setSelectedAudioId: (id: string | null) => void;
   setAudioState: (state: { isPlaying?: boolean; currentTime?: number; duration?: number }) => void;
+  renderUi?: boolean;
 }
 
 function getAudioDisplayName(file: RepertoireFile): string {
@@ -152,13 +198,25 @@ function formatSecondsOnly(seconds: number): string {
   return `${Math.floor(seconds)}s`;
 }
 
+function isSourceMatch(audio: HTMLAudioElement, source: string | null): boolean {
+  if (!source) {
+    return false;
+  }
+  return audio.src === resolveAudioUrl(source);
+}
+
 function AudioPanel({
+  songId,
+  songTitle,
+  coverSource,
   audioFiles,
   selectedAudio,
   selectedAudioSource,
+  allowOfflineFallback,
   audioRef,
   setSelectedAudioId,
   setAudioState,
+  renderUi = true,
 }: AudioPanelProps) {
   const [open, setOpen] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -169,6 +227,13 @@ function AudioPanel({
   const [dragValue, setDragValue] = useState(0);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const progressRef = useRef<HTMLDivElement | null>(null);
+  const setMiniSession = useMiniAudioPlayerStore((state) => state.setSession);
+  const setMiniPlaybackState = useMiniAudioPlayerStore((state) => state.setPlaybackState);
+  const isUnmountingRef = useRef(false);
+  const latestIsPlayingRef = useRef(false);
+  const latestCurrentTimeRef = useRef(0);
+  const latestDurationRef = useRef(0);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
 
   const intendedPlayState = useRef(false);
   const intendedTimeRef = useRef(0);
@@ -180,6 +245,12 @@ function AudioPanel({
       intendedTimeRef.current = currentTime;
     }
   }, [selectedAudioSource, currentTime]);
+
+  useEffect(() => {
+    latestIsPlayingRef.current = isPlaying;
+    latestCurrentTimeRef.current = currentTime;
+    latestDurationRef.current = duration;
+  }, [currentTime, duration, isPlaying]);
 
   const closeOnOutside = useCallback((e: MouseEvent) => {
     if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -201,9 +272,17 @@ function AudioPanel({
   function handlePlayPause() {
     const el = audioRef.current;
     if (!el) return;
+
+    if (selectedAudioSource && !isSourceMatch(el, selectedAudioSource)) {
+      el.src = selectedAudioSource;
+      intendedPlayState.current = true;
+      el.play().catch(console.error);
+      return;
+    }
+
     if (el.paused) {
       intendedPlayState.current = true;
-      el.play();
+      el.play().catch(console.error);
     } else {
       intendedPlayState.current = false;
       el.pause();
@@ -281,61 +360,270 @@ function AudioPanel({
   const progress = duration > 0 ? (displayTime / duration) * 100 : 0;
 
   useEffect(() => {
-    const el = audioRef.current;
-    if (el) {
-      el.playbackRate = playbackRate;
+    const sharedAudio = getSharedAudioElement();
+    audioElementRef.current = sharedAudio;
+    audioRef.current = sharedAudio;
+
+    return () => {
+      audioRef.current = null;
+    };
+  }, [audioRef]);
+
+  useEffect(() => {
+    const el = audioElementRef.current;
+    if (!el) {
+      return;
     }
-  }, [audioRef, playbackRate, selectedAudioSource]);
+    el.playbackRate = playbackRate;
+  }, [playbackRate, selectedAudioSource]);
+
+  useEffect(() => {
+    const el = audioElementRef.current;
+    if (!el) {
+      return;
+    }
+
+    const handlePlay = () => {
+      const matchesSelection = isSourceMatch(el, selectedAudioSource);
+      setIsPlaying(matchesSelection && !el.paused);
+      setAudioState({ isPlaying: matchesSelection && !el.paused });
+      setMiniPlaybackState({ isPlaying: !el.paused });
+      intendedPlayState.current = true;
+    };
+
+    const handlePause = () => {
+      if (isUnmountingRef.current) return;
+      if (intendedPlayState.current) return;
+      const matchesSelection = isSourceMatch(el, selectedAudioSource);
+      setIsPlaying(false);
+      setAudioState({ isPlaying: matchesSelection ? false : latestIsPlayingRef.current });
+      setMiniPlaybackState({ isPlaying: false });
+    };
+
+    const handleTimeUpdate = () => {
+      const t = el.currentTime;
+      const d = el.duration || 0;
+      const matchesSelection = isSourceMatch(el, selectedAudioSource);
+      if (matchesSelection) {
+        if (!isDragging) {
+          setCurrentTime(t);
+          intendedTimeRef.current = t;
+        }
+        setDuration(d);
+        setAudioState({ currentTime: t, duration: d });
+      }
+      setMiniPlaybackState({ currentTime: t, duration: d });
+    };
+
+    const handleLoadedMetadata = () => {
+      const d = el.duration || 0;
+      const matchesSelection = isSourceMatch(el, selectedAudioSource);
+      if (matchesSelection) {
+        const targetTime = Math.min(intendedTimeRef.current, d);
+        if (Number.isFinite(targetTime) && targetTime >= 0) {
+          el.currentTime = targetTime;
+        }
+        el.playbackRate = playbackRate;
+        setDuration(d);
+        setAudioState({ currentTime: targetTime, duration: d });
+        setCurrentTime(targetTime);
+        setMiniPlaybackState({ currentTime: targetTime, duration: d });
+      } else {
+        setMiniPlaybackState({ duration: d });
+      }
+
+      if (intendedPlayState.current) {
+        el.play().catch(console.error);
+      }
+    };
+
+    const handleEnded = () => {
+      intendedPlayState.current = false;
+      setIsPlaying(false);
+      setAudioState({ isPlaying: false });
+      setMiniPlaybackState({ isPlaying: false });
+    };
+
+    el.addEventListener('play', handlePlay);
+    el.addEventListener('pause', handlePause);
+    el.addEventListener('timeupdate', handleTimeUpdate);
+    el.addEventListener('loadedmetadata', handleLoadedMetadata);
+    el.addEventListener('ended', handleEnded);
+
+    return () => {
+      el.removeEventListener('play', handlePlay);
+      el.removeEventListener('pause', handlePause);
+      el.removeEventListener('timeupdate', handleTimeUpdate);
+      el.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      el.removeEventListener('ended', handleEnded);
+    };
+  }, [isDragging, playbackRate, selectedAudioSource, setAudioState, setMiniPlaybackState]);
+
+  useEffect(() => {
+    const el = audioElementRef.current;
+    if (!el || !selectedAudioSource) {
+      return;
+    }
+
+    const resolved = resolveAudioUrl(selectedAudioSource);
+    if (el.src !== resolved) {
+      const shouldSwitchSource = intendedPlayState.current || !el.src;
+      if (shouldSwitchSource) {
+        el.src = selectedAudioSource;
+      }
+    }
+  }, [selectedAudioSource]);
+
+  useEffect(() => {
+    const el = audioElementRef.current;
+    if (!el) {
+      return;
+    }
+
+    const rafId = window.requestAnimationFrame(() => {
+      const matchesSelection = isSourceMatch(el, selectedAudioSource);
+      const playingThisSelection = matchesSelection && !el.paused;
+      setIsPlaying(playingThisSelection);
+      setAudioState({ isPlaying: playingThisSelection });
+
+      if (matchesSelection) {
+        const t = Number.isFinite(el.currentTime) ? el.currentTime : 0;
+        const d = Number.isFinite(el.duration) ? el.duration : 0;
+        setCurrentTime(t);
+        setDuration(d);
+      }
+    });
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [selectedAudioSource, setAudioState]);
+
+  useEffect(() => {
+    const el = audioElementRef.current;
+    const sessionState = useMiniAudioPlayerStore.getState();
+    const matchesSelection = Boolean(el && isSourceMatch(el, selectedAudioSource));
+
+    // Another song is actively mounted/playing; don't hijack mini player metadata.
+    const differentActiveSong =
+      sessionState.isActive &&
+      Boolean(sessionState.songId) &&
+      sessionState.songId !== songId;
+    if (!matchesSelection && differentActiveSong) {
+      return;
+    }
+
+    // Fetch protected URLs for ALL audio files in parallel so every partition appears in the list.
+    let cancelled = false;
+    async function buildAndSetTracks() {
+      const resolvedTracks = await Promise.all(
+        audioFiles.map(async (file) => {
+          // For the currently selected file, prefer the already-resolved selectedAudioSource.
+          if (file.id === selectedAudio?.id && selectedAudioSource) {
+            return { id: file.id, label: getAudioDisplayName(file), source: selectedAudioSource };
+          }
+          // For others: use offline route only when offline fallback is explicitly active.
+          if (allowOfflineFallback) {
+            const offlineUrl = getOfflineDriveFileUrl(file);
+            if (offlineUrl) {
+              return { id: file.id, label: getAudioDisplayName(file), source: offlineUrl };
+            }
+          }
+          try {
+            const protectedUrl = await getProtectedDriveFileUrl(file);
+            const source = protectedUrl ?? file.drive_download_link;
+            if (!source) return null;
+            return { id: file.id, label: getAudioDisplayName(file), source };
+          } catch {
+            const fallback = file.drive_download_link;
+            if (!fallback) return null;
+            return { id: file.id, label: getAudioDisplayName(file), source: fallback };
+          }
+        }),
+      );
+
+      if (cancelled) return;
+
+      const miniTracks = resolvedTracks.filter(
+        (item): item is { id: string; label: string; source: string } => Boolean(item),
+      );
+
+      const latestSession = useMiniAudioPlayerStore.getState();
+      const elNow = audioElementRef.current;
+      const sameSongSession = latestSession.isActive && latestSession.songId === songId;
+      const canUseLiveAudioState = Boolean(sameSongSession && elNow && elNow.src);
+
+      // Keep the live playback snapshot intact until this page has a confirmed audio source.
+      // Otherwise the floating player briefly receives 0s/1x state and snaps back to the start.
+      setMiniSession({
+        songId,
+        songTitle,
+        coverSource,
+        tracks: miniTracks,
+        currentTrackId: sameSongSession
+          ? (latestSession.currentTrackId ?? selectedAudio?.id ?? null)
+          : selectedAudio?.id ?? null,
+        currentTime: canUseLiveAudioState && elNow
+          ? (Number.isFinite(elNow.currentTime) ? elNow.currentTime : 0)
+          : sameSongSession
+            ? latestSession.currentTime
+            : currentTime,
+        duration: canUseLiveAudioState && elNow
+          ? (Number.isFinite(elNow.duration) ? elNow.duration : 0)
+          : sameSongSession
+            ? latestSession.duration
+            : duration,
+        isPlaying: canUseLiveAudioState && elNow
+          ? !elNow.paused
+          : sameSongSession
+            ? latestSession.isPlaying
+            : isPlaying,
+        playbackRate: canUseLiveAudioState && elNow
+          ? elNow.playbackRate
+          : sameSongSession
+            ? latestSession.playbackRate
+            : playbackRate,
+      });
+    }
+
+    void buildAndSetTracks();
+    return () => { cancelled = true; };
+  }, [
+    audioFiles,
+    coverSource,
+    currentTime,
+    duration,
+    isPlaying,
+    playbackRate,
+    songId,
+    selectedAudio?.id,
+    selectedAudioSource,
+    allowOfflineFallback,
+    setMiniSession,
+    songTitle,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      isUnmountingRef.current = true;
+      const sharedAudio = audioElementRef.current;
+      const isActuallyPlaying = Boolean(sharedAudio && !sharedAudio.paused);
+      if (isActuallyPlaying || intendedPlayState.current || latestIsPlayingRef.current) {
+        setMiniPlaybackState({
+          isPlaying: true,
+          currentTime: sharedAudio?.currentTime ?? latestCurrentTimeRef.current,
+          duration: sharedAudio?.duration ?? latestDurationRef.current,
+        });
+      }
+    };
+  }, [setMiniPlaybackState]);
+
+  if (!renderUi) {
+    return null;
+  }
 
   return (
     <div className="rounded-[14px] border border-[var(--color-border)] bg-white/[0.04]">
-      {/* Hidden native audio element – drives all playback */}
-      {selectedAudioSource && (
-        <audio
-          ref={audioRef}
-          src={selectedAudioSource}
-          onPlay={() => {
-            setIsPlaying(true);
-            setAudioState({ isPlaying: true });
-            intendedPlayState.current = true;
-          }}
-          onPause={() => {
-            if (intendedPlayState.current) return;
-            setIsPlaying(false);
-            setAudioState({ isPlaying: false });
-          }}
-          onTimeUpdate={(e) => {
-            const t = e.currentTarget.currentTime;
-            const d = e.currentTarget.duration || 0;
-            if (!isDragging) {
-              setCurrentTime(t);
-              intendedTimeRef.current = t;
-            }
-            setDuration(d);
-            setAudioState({ currentTime: t, duration: d });
-          }}
-          onLoadedMetadata={(e) => {
-            const el = e.currentTarget;
-            const d = el.duration || 0;
-            const targetTime = Math.min(intendedTimeRef.current, d);
-            el.currentTime = targetTime;
-            el.playbackRate = playbackRate;
-            setDuration(d);
-            setAudioState({ currentTime: targetTime, duration: d });
-            setCurrentTime(targetTime);
-
-            if (intendedPlayState.current) {
-              el.play().catch(console.error);
-            }
-          }}
-          onEnded={() => {
-            intendedPlayState.current = false;
-            setIsPlaying(false);
-            setAudioState({ isPlaying: false });
-          }}
-        />
-      )}
-
       {/* Top bar: icon + track label + dropdown */}
       <div className="flex items-center gap-2 border-b border-white/5 px-3 py-2">
         <Music4 size={12} className="text-purple-400 shrink-0" />
@@ -426,20 +714,55 @@ function AudioPanel({
       ) : (
         <div className="space-y-2 px-3 py-2.5">
           {/* Controls row */}
-          <div className="flex items-center justify-center">
-            <button
-              type="button"
-              onClick={handlePlayPause}
-              className="relative flex h-8 w-8 shrink-0 items-center justify-center text-white transition-all hover:text-[var(--color-accent)] active:scale-95"
-              title={isPlaying ? 'Durdur' : 'Oynat'}
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-mono text-[0.62rem] tabular-nums text-[var(--color-text-low)]">
+              {formatSecondsOnly(displayTime)}
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handlePrev}
+                disabled={!hasMultiple || currentIndex <= 0}
+                className="flex h-6 w-6 items-center justify-center text-[var(--color-text-low)] transition-all hover:text-[var(--color-text-high)] disabled:cursor-not-allowed disabled:opacity-20 active:scale-90"
+                title="Önceki parça"
+              >
+                <SkipBack size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={handlePlayPause}
+                className="relative flex h-8 w-8 shrink-0 items-center justify-center text-white transition-all hover:text-[var(--color-accent)] active:scale-95"
+                title={isPlaying ? 'Durdur' : 'Oynat'}
+              >
+                {isPlaying ? <Pause size={20} /> : <Play size={20} className="translate-x-[1px]" />}
+              </button>
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={!hasMultiple || currentIndex >= audioFiles.length - 1}
+                className="flex h-6 w-6 items-center justify-center text-[var(--color-text-low)] transition-all hover:text-[var(--color-text-high)] disabled:cursor-not-allowed disabled:opacity-20 active:scale-90"
+                title="Sonraki parça"
+              >
+                <SkipForward size={13} />
+              </button>
+            </div>
+            <label className="sr-only" htmlFor="audio-speed-select">Hız</label>
+            <select
+              id="audio-speed-select"
+              value={playbackRate}
+              onChange={(event) => setPlaybackRate(Number(event.target.value))}
+              className="h-6 rounded-[6px] border border-[var(--color-border)] bg-white/5 px-1.5 text-[0.56rem] font-bold text-[var(--color-text-medium)] outline-none"
             >
-              {isPlaying ? <Pause size={20} /> : <Play size={20} className="translate-x-[1px]" />}
-            </button>
+              {PLAYBACK_SPEEDS.map((speed) => (
+                <option key={speed} value={speed}>
+                  {speed}x
+                </option>
+              ))}
+            </select>
           </div>
 
-          {/* Progress bar + time */}
+          {/* Seekable bar */}
           <div className="space-y-1.5">
-            {/* Seekable bar */}
             <div
               ref={progressRef}
               onMouseDown={handleProgressMouseDown}
@@ -465,46 +788,6 @@ function AudioPanel({
                 style={{ left: `calc(${progress}% - 6px)` }}
               />
             </div>
-
-            {/* Time labels */}
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-[0.62rem] tabular-nums text-[var(--color-text-low)]">
-                {formatSecondsOnly(displayTime)}
-              </span>
-              <div className="ml-auto flex items-center gap-1.5">
-                <label className="sr-only" htmlFor="audio-speed-select">Hız</label>
-                <select
-                  id="audio-speed-select"
-                  value={playbackRate}
-                  onChange={(event) => setPlaybackRate(Number(event.target.value))}
-                  className="h-6 rounded-[6px] border border-[var(--color-border)] bg-white/5 px-1.5 text-[0.56rem] font-bold text-[var(--color-text-medium)] outline-none"
-                >
-                  {PLAYBACK_SPEEDS.map((speed) => (
-                    <option key={speed} value={speed}>
-                      {speed}x
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={handlePrev}
-                  disabled={!hasMultiple || currentIndex <= 0}
-                  className="flex h-6 w-6 items-center justify-center text-[var(--color-text-low)] transition-all hover:text-[var(--color-text-high)] disabled:cursor-not-allowed disabled:opacity-20 active:scale-90"
-                  title="Önceki parça"
-                >
-                  <SkipBack size={13} />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleNext}
-                  disabled={!hasMultiple || currentIndex >= audioFiles.length - 1}
-                  className="flex h-6 w-6 items-center justify-center text-[var(--color-text-low)] transition-all hover:text-[var(--color-text-high)] disabled:cursor-not-allowed disabled:opacity-20 active:scale-90"
-                  title="Sonraki parça"
-                >
-                  <SkipForward size={13} />
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       )}
@@ -524,8 +807,16 @@ export function RepertoireWorkspace({
   const saveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const savePayloadRef = useRef<Record<string, QueuedSavePayload>>({});
   const saveStateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attemptedAutoSyncVersionRef = useRef<string | null>(null);
 
   const [viewerWidth, setViewerWidth] = useState(0);
+  const [offlineSupported, setOfflineSupported] = useState(false);
+  const [offlineEnabled, setOfflineEnabledState] = useState(false);
+  const [offlineSyncing, setOfflineSyncing] = useState(false);
+  const [offlineStatus, setOfflineStatus] = useState<string | null>(null);
+  const [offlineError, setOfflineError] = useState<string | null>(null);
+  const [offlineLastSyncedAt, setOfflineLastSyncedAt] = useState<number | null>(null);
+  const [isOnline, setIsOnline] = useState(true);
   const store = useRepertoireWorkspaceStore();
   const {
     selectedPdfId,
@@ -592,6 +883,14 @@ export function RepertoireWorkspace({
       const bTime = Date.parse(b.created_at || '') || 0;
       return bTime - aTime;
     });
+  const filesWithDriveId = useMemo(
+    () => [...(song.files ?? [])].filter((file) => Boolean(file.drive_file_id)),
+    [song.files],
+  );
+  const offlineSongVersion = useMemo(
+    () => buildOfflineSongVersion(filesWithDriveId),
+    [filesWithDriveId],
+  );
 
   const editableLayerOptions = useMemo(() => {
     const options: AnnotationLayerKey[] = [];
@@ -623,11 +922,12 @@ export function RepertoireWorkspace({
   const { url: protectedSelectedPdfSource } = useProtectedDriveFileUrl(selectedPdf);
   const { url: protectedSelectedCoverSource } = useProtectedDriveFileUrl(selectedCover);
   const { url: protectedSelectedAudioSource } = useProtectedDriveFileUrl(selectedAudio);
-  const selectedPdfSource = getInlineFileSource(selectedPdf, protectedSelectedPdfSource);
-  const selectedCoverSource = getInlineFileSource(selectedCover, protectedSelectedCoverSource);
+  const allowOfflineFallback = offlineEnabled && !isOnline;
+  const selectedPdfSource = getInlineFileSource(selectedPdf, protectedSelectedPdfSource, allowOfflineFallback);
+  const selectedCoverSource = getInlineFileSource(selectedCover, protectedSelectedCoverSource, allowOfflineFallback);
   const selectedCoverPreviewSource = selectedCoverSource;
   const selectedCoverIsPdf = isPdfRepertoireFile(selectedCover);
-  const selectedAudioSource = getInlineFileSource(selectedAudio, protectedSelectedAudioSource);
+  const selectedAudioSource = getInlineFileSource(selectedAudio, protectedSelectedAudioSource, allowOfflineFallback);
   const hasCoverPage = Boolean(selectedCoverPreviewSource);
   const totalDisplayPages = totalPages + (hasCoverPage ? 1 : 0);
   const canGoPrevPage = Boolean(selectedPdf) && currentPage > 1;
@@ -641,6 +941,12 @@ export function RepertoireWorkspace({
   const sharedPreviewGroup: PreviewVoiceGroup = isChef
     ? previewVoiceGroup
     : normalizedVoiceGroup ?? 'ALL';
+  const commentPreviewVoiceGroup: PreviewVoiceGroup = isChef
+    ? previewVoiceGroup
+    : normalizedVoiceGroup ?? 'ALL';
+  const commentTargetVoiceGroup: VoiceGroup | null = isChef
+    ? (previewVoiceGroup === 'ALL' ? null : previewVoiceGroup)
+    : normalizedVoiceGroup ?? null;
 
   const visibilityModeOptions = useMemo<VisibilityModeOption[]>(() => {
     if (isChef) {
@@ -784,18 +1090,187 @@ export function RepertoireWorkspace({
     Boolean(memberId) &&
     Boolean(activePdfPageNumber);
   const stageAspectRatio = pageAspectRatio ?? DEFAULT_PAGE_ASPECT_RATIO;
+  const offlineSyncedAtLabel = formatSyncedAtLabel(offlineLastSyncedAt);
 
-  useEffect(() => {
-    const observer = new ResizeObserver(([entry]) => {
-      setViewerWidth(Math.floor(entry.contentRect.width));
-    });
-
-    if (containerRef.current) {
-      observer.observe(containerRef.current);
+  const syncSongForOffline = useCallback(async (reason: 'manual' | 'auto') => {
+    if (!offlineSupported) {
+      throw new Error('Bu cihaz offline repertuvar desteğini sunmuyor.');
     }
 
-    return () => observer.disconnect();
+    if (typeof window !== 'undefined' && !window.navigator.onLine) {
+      throw new Error('İnternet bağlantısı yok. Yeniden bağlanınca tekrar deneyin.');
+    }
+
+    if (filesWithDriveId.length === 0) {
+      throw new Error('Offline kaydetmek için uygun Drive dosyası bulunamadı.');
+    }
+
+    setOfflineSyncing(true);
+    setOfflineError(null);
+    setOfflineStatus(reason === 'manual' ? 'Dosyalar indiriliyor...' : 'Offline yedek güncelleniyor...');
+
+    try {
+      const filesToSync: OfflineSyncFileInput[] = [];
+      for (const file of filesWithDriveId) {
+        const protectedUrl = await getProtectedDriveFileUrl(file);
+        const source = protectedUrl ?? file.drive_download_link;
+        if (!source) {
+          throw new Error(`${file.file_name} için indirme bağlantısı oluşturulamadı.`);
+        }
+
+        filesToSync.push({
+          driveFileId: file.drive_file_id,
+          url: source,
+          fileName: file.file_name,
+          mimeType: file.mime_type,
+        });
+      }
+
+      const result: OfflineSyncResult = await syncSongFilesForOffline(song.id, filesToSync);
+      markOfflineSongSynced(song.id, offlineSongVersion, result.syncedAt);
+      setOfflineLastSyncedAt(result.syncedAt);
+      setOfflineStatus(`${result.cachedCount} dosya offline kullanıma hazır.`);
+      attemptedAutoSyncVersionRef.current = null;
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Offline yedekleme başarısız oldu.';
+      setOfflineError(message);
+      setOfflineStatus(null);
+      throw error;
+    } finally {
+      setOfflineSyncing(false);
+    }
+  }, [filesWithDriveId, offlineSongVersion, offlineSupported, song.id]);
+
+  const handleOfflineToggle = useCallback(async () => {
+    if (!offlineSupported) {
+      setOfflineError('Bu cihaz offline repertuvar desteğini sunmuyor.');
+      return;
+    }
+
+    const nextEnabled = !offlineEnabled;
+    setOfflineEnabledState(nextEnabled);
+    setOfflineSongEnabled(song.id, nextEnabled);
+    setOfflineError(null);
+    attemptedAutoSyncVersionRef.current = null;
+
+    if (!nextEnabled) {
+      setOfflineSyncing(true);
+      try {
+        const result = await removeOfflineSongFiles(song.id);
+        clearOfflineSongSyncState(song.id);
+        setOfflineLastSyncedAt(null);
+        setOfflineStatus(result.removedCount > 0 ? 'Offline dosyalar kaldırıldı.' : 'Offline kullanım kapatıldı.');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Offline dosyalar kaldırılamadı.';
+        setOfflineError(message);
+      } finally {
+        setOfflineSyncing(false);
+      }
+      return;
+    }
+
+    if (!isOnline) {
+      setOfflineStatus('Offline mod açıldı. İnternete bağlanınca dosyalar otomatik indirilecek.');
+      return;
+    }
+
+    try {
+      await syncSongForOffline('manual');
+    } catch {
+      // syncSongForOffline already sets user-facing error state
+    }
+  }, [isOnline, offlineEnabled, offlineSupported, song.id, syncSongForOffline]);
+
+  useEffect(() => {
+    const supported = isRepertoireOfflineSupported();
+    setOfflineSupported(supported);
+    setOfflineStatus(null);
+    setOfflineError(null);
+    setOfflineSyncing(false);
+    attemptedAutoSyncVersionRef.current = null;
+
+    if (typeof window !== 'undefined') {
+      setIsOnline(window.navigator.onLine);
+    }
+
+    if (!supported) {
+      setOfflineEnabledState(false);
+      setOfflineLastSyncedAt(null);
+      return;
+    }
+
+    const settings = getOfflineSongSettings(song.id);
+    setOfflineEnabledState(settings.enabled);
+    setOfflineLastSyncedAt(settings.lastSyncedAt);
+  }, [song.id]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const handleOnline = () => {
+      setIsOnline(true);
+      attemptedAutoSyncVersionRef.current = null;
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!offlineSupported || !offlineEnabled || !isOnline || offlineSyncing) {
+      return;
+    }
+
+    const settings = getOfflineSongSettings(song.id);
+    if (settings.version === offlineSongVersion) {
+      return;
+    }
+
+    if (attemptedAutoSyncVersionRef.current === offlineSongVersion) {
+      return;
+    }
+
+    attemptedAutoSyncVersionRef.current = offlineSongVersion;
+    void syncSongForOffline('auto').catch(() => {
+      // syncSongForOffline already sets user-facing error state
+    });
+  }, [
+    isOnline,
+    offlineEnabled,
+    offlineSongVersion,
+    offlineSupported,
+    offlineSyncing,
+    song.id,
+    syncSongForOffline,
+  ]);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) {
+        setViewerWidth(Math.floor(entry.contentRect.width));
+      }
+    });
+
+    observer.observe(node);
+    setViewerWidth(node.clientWidth);
+
+    return () => observer.disconnect();
+  }, [selectedPdf?.id, hasCoverPage, selectedPdfSource]);
 
   useEffect(() => {
     reset();
@@ -917,16 +1392,6 @@ export function RepertoireWorkspace({
       setActiveTool(null);
     }
   }, [isCoverPage, isEditMode, setActiveTool, setEditMode]);
-
-  useEffect(() => {
-    const element = audioRef.current;
-
-    return () => {
-      if (element) {
-        element.pause();
-      }
-    };
-  }, []);
 
   function setTransientSavedState() {
     if (saveStateTimeoutRef.current) {
@@ -1132,11 +1597,158 @@ export function RepertoireWorkspace({
   const ToolIcon = activeToolInfo?.Icon ?? Pencil;
   const toolLabel = activeToolInfo?.label ?? '—';
 
-  const saveStateLabel = saveState === 'saving'
-    ? 'Kaydediliyor'
-    : saveState === 'saved'
-      ? 'Kaydedildi'
-      : 'Kayıt Hatası';
+  function renderWorkspaceControls(extraClassName?: string) {
+    return (
+      <div className={`flex flex-wrap items-center gap-2 ${extraClassName ?? ''}`}>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={handleEditToggle}
+            className={`shrink-0 inline-flex items-center justify-center rounded-[8px] border px-2.5 py-1.5 transition-colors ${
+              isEditMode
+                ? 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                : 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)]'
+            }`}
+            title={isEditMode ? 'Bitir' : 'Düzenle'}
+          >
+            {saveState === 'saving' ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : saveState === 'error' ? (
+              <AlertCircle size={13} className="text-red-400" />
+            ) : isEditMode ? (
+              <Check size={15} />
+            ) : (
+              <Pencil size={13} />
+            )}
+          </button>
+        )}
+
+        <span className="h-4 w-px bg-[var(--color-border)] mr-1" />
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+            disabled={!canGoPrevPage}
+            className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-40"
+          >
+            <ChevronLeft size={15} />
+          </button>
+          <div className="h-8 inline-flex items-center rounded-[8px] border border-[var(--color-border)] bg-white/4 px-2.5 text-[0.62rem] font-bold uppercase tracking-[0.12em] text-[var(--color-text-medium)]">
+            {currentPage} / {totalDisplayPages || 0}
+          </div>
+          <button
+            type="button"
+            onClick={() => setCurrentPage(Math.min(totalDisplayPages, currentPage + 1))}
+            disabled={!canGoNextPage}
+            className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-40"
+          >
+            <ChevronRight size={15} />
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleVisibilityCycle}
+          className={`inline-flex items-center gap-1.5 rounded-[8px] border px-2.5 py-1.5 text-[0.62rem] font-bold uppercase tracking-[0.14em] ${
+            visibility.personal || visibility.shared
+              ? 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+              : 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)]'
+          }`}
+        >
+          {visibility.personal || visibility.shared ? <Eye size={13} /> : <EyeOff size={13} />}
+          {activeVisibilityMode.label}
+        </button>
+
+        {false && isChef && (
+          <label className="inline-flex items-center gap-1.5 rounded-[8px] border border-[var(--color-border)] bg-white/4 px-2.5 py-1.5 text-[0.62rem] font-bold uppercase tracking-[0.14em] text-[var(--color-text-medium)]">
+            <Users size={13} />
+            <select
+              value={previewVoiceGroup}
+              onChange={(event) => handlePreviewGroupChange(event.target.value as PreviewVoiceGroup)}
+              className="bg-transparent text-[0.65rem] text-[var(--color-text-high)] outline-none"
+            >
+              <option value="ALL">Tüm Partisyonlar</option>
+              {VOICE_GROUPS.map((group) => (
+                <option key={group} value={group}>
+                  {group}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {isEditMode && (
+          <div className="flex flex-wrap items-center gap-1.5 rounded-[8px] border border-[var(--color-accent)]/25 bg-white/3 px-2 py-1.5">
+            <button
+              type="button"
+              onClick={handleLayerCycle}
+              disabled={editableLayerOptions.length === 0}
+              title="Katman"
+              className="inline-flex items-center gap-1.5 rounded-[6px] border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] px-2 py-1 text-[0.58rem] font-bold uppercase tracking-[0.12em] text-[var(--color-accent)] disabled:opacity-40"
+            >
+              <Users size={12} />
+              {getLayerLabel(activeLayerKey)}
+            </button>
+
+            <span className="h-4 w-px bg-[var(--color-border)]" />
+
+            <button
+              type="button"
+              onClick={handleToolCycle}
+              title={toolLabel}
+              className={`flex h-6 w-6 items-center justify-center rounded-[6px] border ${
+                activeTool
+                  ? 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                  : 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)]'
+              }`}
+            >
+              <ToolIcon size={12} />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleColorCycle}
+              title={activeColor === 'black' ? 'Siyah' : activeColor === 'red' ? 'Kırmızı' : 'Beyaz'}
+              className="h-6 w-6 rounded-full border-2 border-white/25 transition-transform active:scale-90"
+              style={{ backgroundColor: ANNOTATION_COLOR_SWATCHES[activeColor] }}
+            />
+
+            <span className="h-4 w-px bg-[var(--color-border)]" />
+
+            <button
+              type="button"
+              onClick={handleUndo}
+              disabled={activeLayerHistory.length === 0}
+              title="Geri Al"
+              className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-30"
+            >
+              <Undo2 size={12} />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleRedo}
+              disabled={activeLayerFuture.length === 0}
+              title="İleri Al"
+              className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-30"
+            >
+              <Redo2 size={12} />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleClearPage}
+              disabled={activeItems.length === 0}
+              title="Sayfayı Temizle"
+              className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-red-500/30 bg-red-500/10 text-red-400 disabled:opacity-30"
+            >
+              <Trash2 size={12} />
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <>
@@ -1150,163 +1762,21 @@ export function RepertoireWorkspace({
               </div>
             )}
 
-            <div className="flex flex-wrap items-center gap-2">
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={handleEditToggle}
-                  className={`shrink-0 inline-flex items-center justify-center rounded-[8px] border px-2.5 py-1.5 transition-colors ${
-                    isEditMode
-                      ? 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                      : 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)]'
-                  }`}
-                  title={isEditMode ? 'Bitir' : 'Düzenle'}
-                >
-                  {saveState === 'saving' ? (
-                    <Loader2 size={13} className="animate-spin" />
-                  ) : saveState === 'error' ? (
-                    <AlertCircle size={13} className="text-red-400" />
-                  ) : isEditMode ? (
-                    <Check size={15} />
-                  ) : (
-                    <Pencil size={13} />
-                  )}
-                </button>
-              )}
-
-              <span className="h-4 w-px bg-[var(--color-border)] mr-1" />
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                  disabled={!canGoPrevPage}
-                  className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-40"
-                >
-                  <ChevronLeft size={15} />
-                </button>
-                <div className="h-8 inline-flex items-center rounded-[8px] border border-[var(--color-border)] bg-white/4 px-2.5 text-[0.62rem] font-bold uppercase tracking-[0.12em] text-[var(--color-text-medium)]">
-                  {currentPage} / {totalDisplayPages || 0}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setCurrentPage(Math.min(totalDisplayPages, currentPage + 1))}
-                  disabled={!canGoNextPage}
-                  className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-40"
-                >
-                  <ChevronRight size={15} />
-                </button>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleVisibilityCycle}
-                className={`inline-flex items-center gap-1.5 rounded-[8px] border px-2.5 py-1.5 text-[0.62rem] font-bold uppercase tracking-[0.14em] ${
-                  visibility.personal || visibility.shared
-                    ? 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                    : 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)]'
-                }`}
-              >
-                {visibility.personal || visibility.shared ? <Eye size={13} /> : <EyeOff size={13} />}
-                {activeVisibilityMode.label}
-              </button>
-
-              {false && isChef && (
-                <label className="inline-flex items-center gap-1.5 rounded-[8px] border border-[var(--color-border)] bg-white/4 px-2.5 py-1.5 text-[0.62rem] font-bold uppercase tracking-[0.14em] text-[var(--color-text-medium)]">
-                  <Users size={13} />
-                  <select
-                    value={previewVoiceGroup}
-                    onChange={(event) => handlePreviewGroupChange(event.target.value as PreviewVoiceGroup)}
-                    className="bg-transparent text-[0.65rem] text-[var(--color-text-high)] outline-none"
-                  >
-                    <option value="ALL">Tüm Partisyonlar</option>
-                    {VOICE_GROUPS.map((group) => (
-                      <option key={group} value={group}>
-                        {group}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-
-              {isEditMode && (
-                <div className="flex flex-wrap items-center gap-1.5 rounded-[8px] border border-[var(--color-accent)]/25 bg-white/3 px-2 py-1.5">
-                  <button
-                    type="button"
-                    onClick={handleLayerCycle}
-                    disabled={editableLayerOptions.length === 0}
-                    title="Katman"
-                    className="inline-flex items-center gap-1.5 rounded-[6px] border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] px-2 py-1 text-[0.58rem] font-bold uppercase tracking-[0.12em] text-[var(--color-accent)] disabled:opacity-40"
-                  >
-                    <Users size={12} />
-                    {getLayerLabel(activeLayerKey)}
-                  </button>
-
-                  <span className="h-4 w-px bg-[var(--color-border)]" />
-
-                  <button
-                    type="button"
-                    onClick={handleToolCycle}
-                    title={toolLabel}
-                    className={`flex h-6 w-6 items-center justify-center rounded-[6px] border ${
-                      activeTool
-                        ? 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                        : 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)]'
-                    }`}
-                  >
-                    <ToolIcon size={12} />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleColorCycle}
-                    title={activeColor === 'black' ? 'Siyah' : activeColor === 'red' ? 'Kırmızı' : 'Beyaz'}
-                    className="h-6 w-6 rounded-full border-2 border-white/25 transition-transform active:scale-90"
-                    style={{ backgroundColor: ANNOTATION_COLOR_SWATCHES[activeColor] }}
-                  />
-
-                  <span className="h-4 w-px bg-[var(--color-border)]" />
-
-                  <button
-                    type="button"
-                    onClick={handleUndo}
-                    disabled={activeLayerHistory.length === 0}
-                    title="Geri Al"
-                    className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-30"
-                  >
-                    <Undo2 size={12} />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleRedo}
-                    disabled={activeLayerFuture.length === 0}
-                    title="İleri Al"
-                    className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-30"
-                  >
-                    <Redo2 size={12} />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleClearPage}
-                    disabled={activeItems.length === 0}
-                    title="Sayfayı Temizle"
-                    className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-red-500/30 bg-red-500/10 text-red-400 disabled:opacity-30"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              )}
-            </div>
+            {renderWorkspaceControls()}
           </div>
 
           <AudioPanel
+            songId={song.id}
+            songTitle={song.title}
+            coverSource={selectedCoverPreviewSource}
             audioFiles={audioFiles}
             selectedAudio={selectedAudio ?? null}
             selectedAudioSource={selectedAudioSource}
+            allowOfflineFallback={allowOfflineFallback}
             audioRef={audioRef}
             setSelectedAudioId={setSelectedAudioId}
             setAudioState={setAudioState}
+            renderUi={false}
           />
         </div>
 
@@ -1508,6 +1978,10 @@ export function RepertoireWorkspace({
                     <p className="text-sm text-red-400">{documentError}</p>
                   </div>
                 )}
+
+                <div className="mt-3">
+                  {renderWorkspaceControls()}
+                </div>
               </div>
             )}
           </div>
@@ -1515,10 +1989,79 @@ export function RepertoireWorkspace({
       </section>
 
       <ChefCommentSection
+        key={`${song.id}:${commentPreviewVoiceGroup}`}
         songId={song.id}
         memberId={memberId}
         canComment={isChef || isSectionLeader}
+        selectedVoiceGroup={commentPreviewVoiceGroup}
+        composerTargetVoiceGroup={commentTargetVoiceGroup}
       />
+
+      <section className="glass-panel p-5 sm:p-6">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-[0.65rem] font-bold uppercase tracking-[0.16em] text-[var(--color-accent)]">
+              OFFLINE KULLANIM
+            </p>
+            <h3 className="mt-0.5 font-serif text-xl leading-tight tracking-[-0.03em]">Bu şarkıyı cihaza indir</h3>
+            <p className="mt-0.5 text-[0.68rem] italic leading-tight text-[var(--color-text-medium)] opacity-70">
+              Son güncelleme: {offlineSyncedAtLabel ?? 'Henüz güncelleme yapılmadı'}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              void handleOfflineToggle();
+            }}
+            disabled={!offlineSupported || offlineSyncing || filesWithDriveId.length === 0}
+            role="switch"
+            aria-checked={offlineEnabled}
+            aria-label="Offline kullanım"
+            className={`relative ml-2 inline-flex h-8 w-14 shrink-0 items-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              offlineEnabled
+                ? 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)]'
+                : 'border-[var(--color-border)] bg-white/6'
+            }`}
+          >
+            <span
+              className={`absolute left-1 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${
+                offlineEnabled ? 'translate-x-6' : 'translate-x-0'
+              }`}
+            />
+            {offlineSyncing && (
+              <span className="absolute inset-0 flex items-center justify-center">
+                <Loader2 size={12} className="animate-spin text-[var(--color-text-high)]" />
+              </span>
+            )}
+          </button>
+        </div>
+
+        {!offlineSupported && (
+          <div className="mt-3 rounded-[10px] border border-orange-500/30 bg-orange-500/10 px-4 py-3">
+            <p className="text-sm text-orange-300">Bu tarayıcıda offline repertuvar desteği kullanılamıyor.</p>
+          </div>
+        )}
+
+        {filesWithDriveId.length === 0 && (
+          <div className="mt-3 rounded-[10px] border border-orange-500/30 bg-orange-500/10 px-4 py-3">
+            <p className="text-sm text-orange-300">Bu şarkıda offline saklanabilecek Drive dosyası bulunamadı.</p>
+          </div>
+        )}
+
+        {offlineStatus && (
+          <div className="mt-3 rounded-[10px] border border-[var(--color-border)] bg-white/5 px-4 py-3">
+            <p className="text-sm text-[var(--color-text-medium)]">{offlineStatus}</p>
+          </div>
+        )}
+
+        {offlineError && (
+          <div className="mt-3 flex items-center gap-2 rounded-[10px] border border-red-500/30 bg-red-500/10 px-4 py-3">
+            <AlertCircle size={14} className="text-red-400" />
+            <p className="text-sm text-red-400">{offlineError}</p>
+          </div>
+        )}
+      </section>
     </>
   );
 }

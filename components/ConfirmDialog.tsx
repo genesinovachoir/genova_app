@@ -47,7 +47,7 @@ export function ConfirmDialog({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.98 }}
             transition={{ type: 'spring', bounce: 0.2, duration: 0.35 }}
-            className="fixed inset-x-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[221] mx-auto max-w-md rounded-[var(--radius-panel)] border border-[var(--color-border)] bg-[var(--color-surface-solid)] p-5 shadow-2xl"
+            className="fixed inset-x-4 bottom-[calc(8rem+env(safe-area-inset-bottom))] z-[221] mx-auto max-w-md rounded-[var(--radius-panel)] border border-[var(--color-border)] bg-[var(--color-surface-solid)] p-5 shadow-2xl"
           >
             <div className="flex items-start gap-3">
               <div className="mt-0.5 rounded-full border border-[var(--color-border)] bg-white/5 p-2 text-[var(--color-accent)]">

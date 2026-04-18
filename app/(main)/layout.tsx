@@ -7,6 +7,8 @@ import { TopBar } from '@/components/TopBar';
 import { BottomNav } from '@/components/BottomNav';
 import { useAuth } from '@/components/AuthProvider';
 import { NotificationPrompt } from '@/components/NotificationPrompt';
+import { ProfileChangeRequestNotifier } from '@/components/ProfileChangeRequestNotifier';
+import { FloatingMiniPlayer } from '@/components/FloatingMiniPlayer';
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { session, isLoading } = useAuth();
@@ -40,8 +42,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       {showNavigation && !isProfilePage && <div className="fade-overlay fade-overlay-top" />}
       {showNavigation && !isProfilePage && <TopBar />}
       {children}
+      <FloatingMiniPlayer hasBottomNav={showNavigation} />
       {showNavigation && <BottomNav />}
       {showNavigation && <div className="fade-overlay fade-overlay-bottom" />}
+      <ProfileChangeRequestNotifier />
       <NotificationPrompt />
     </>
   );

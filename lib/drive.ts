@@ -4,7 +4,7 @@
  * Tüm Drive işlemleri bu dosya üzerinden yapılır.
  */
 
-import { supabase, DriveUploadResult, DriveFolderResult, RepertoireFile, AssignmentSubmission } from './supabase';
+import { supabase, DriveFolderResult, RepertoireFile, AssignmentSubmission } from './supabase';
 
 // Dosyayı base64 string'e çevir (browser-safe)
 async function fileToBase64(file: File): Promise<string> {
@@ -61,6 +61,44 @@ async function callDrive<T = unknown>(action: string, payload: Record<string, un
     throw new Error(await getDriveErrorMessage(action, error));
   }
   return data as T;
+}
+
+async function uploadSubmissionViaApi(
+  assignmentId: string,
+  file: File,
+  note?: string,
+): Promise<AssignmentSubmission> {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !sessionData.session?.access_token) {
+    throw new Error('Oturum doğrulanamadı. Lütfen tekrar giriş yapın.');
+  }
+
+  const formData = new FormData();
+  formData.set('assignmentId', assignmentId);
+  formData.set('file', file);
+  if (note?.trim()) {
+    formData.set('note', note.trim());
+  }
+
+  const response = await fetch('/api/assignment-submissions/upload', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${sessionData.session.access_token}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || 'Ödev teslimi yüklenemedi.');
+  }
+
+  const payload = (await response.json()) as { submission?: AssignmentSubmission };
+  if (!payload.submission) {
+    throw new Error('Teslim yanıtı geçersiz.');
+  }
+
+  return payload.submission;
 }
 
 // =============================================
@@ -150,16 +188,10 @@ export async function initAssignmentFolder(
  */
 export async function uploadSubmission(
   assignmentId: string,
-  file: File
+  file: File,
+  note?: string
 ): Promise<AssignmentSubmission> {
-  const base64 = await fileToBase64(file);
-  const res = await callDrive<{ submission: AssignmentSubmission }>('upload_submission', {
-    assignment_id: assignmentId,
-    file_name: file.name,
-    mime_type: file.type || detectMimeType(file.name),
-    file_data_base64: base64,
-  });
-  return res.submission;
+  return uploadSubmissionViaApi(assignmentId, file, note);
 }
 
 // =============================================

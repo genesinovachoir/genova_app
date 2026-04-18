@@ -290,3 +290,55 @@ body.song-edit-open nav,
 body.song-edit-open .fade-overlay {
   display: none !important;
 }
+
+@keyframes mini-player-marquee-track {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.mini-player-marquee-track {
+  animation: mini-player-marquee-track 11s linear infinite;
+  will-change: transform;
+}
+
+.reset-tiptap-styles .ProseMirror {
+  min-height: 3.75rem;
+}
+
+.reset-tiptap-styles .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--color-text-medium);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.ProseMirror a[href^="/"],
+.prose a[href^="/"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: rgba(192, 178, 131, 0.14);
+  padding: 0.05rem 0.45rem;
+  color: var(--color-accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.ProseMirror a[href^="/"]::before,
+.prose a[href^="/"]::before {
+  content: '';
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: 0 0 0.75rem;
+  background-image: url('/icons/dosya.png');
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}

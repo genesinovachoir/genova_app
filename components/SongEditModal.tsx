@@ -22,6 +22,7 @@ import {
 import { deleteDriveObject, deleteRepertoireFile, formatFileSize, uploadSongFile } from '@/lib/drive';
 import { useProtectedDriveFileUrl } from '@/hooks/useProtectedDriveFileUrl';
 import { SongAssignmentModal } from './SongAssignmentModal';
+import { LottieIcon } from '@/components/LottieIcon';
 import {
   normalizeRepertoireSong,
   RepertoireFile,
@@ -147,7 +148,7 @@ export function SongEditModal({
   const [newTagName, setNewTagName] = useState('');
 
   const [audioLabel, setAudioLabel] = useState('');
-  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [showAudioLabelHint, setShowAudioLabelHint] = useState(false);
 
   const [loadingSong, setLoadingSong] = useState(false);
   const [uploadingCover, setUploadingCover] = useState(false);
@@ -298,7 +299,7 @@ export function SongEditModal({
     setCurrentSong(song);
     setSelectedTagIds(new Set((song.tags ?? []).map((tag) => tag.id)));
     setAudioLabel('');
-    setAudioFile(null);
+    setShowAudioLabelHint(false);
     setNewTagName('');
     setPendingDeleteTag(null);
     setShowDeleteSongDialog(false);
@@ -547,7 +548,7 @@ export function SongEditModal({
     }
   };
 
-  const handleAudioFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAudioFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selected = event.target.files?.[0] ?? null;
     event.target.value = '';
 
@@ -565,11 +566,12 @@ export function SongEditModal({
     }
 
     setError(null);
-    setAudioFile(selected);
+    await handleAddAudio(selected);
   };
 
-  const handleAddAudio = async () => {
-    if (!audioFile) {
+  const handleAddAudio = async (pickedFile?: File) => {
+    const fileToUpload = pickedFile ?? null;
+    if (!fileToUpload) {
       setError('Önce MP3 dosyası seçin.');
       return;
     }
@@ -601,12 +603,12 @@ export function SongEditModal({
       await uploadSongFile(
         context.songId,
         context.folderId,
-        audioFile,
+        fileToUpload,
         'audio',
         label,
       );
-      setAudioFile(null);
       setAudioLabel('');
+      setShowAudioLabelHint(false);
       await refreshSong();
       await onSaved();
       showSuccess('MP3 eklendi.');
@@ -615,6 +617,20 @@ export function SongEditModal({
     } finally {
       setUploadingAudio(false);
     }
+  };
+
+  const handleAudioPickClick = () => {
+    if (uploadingAudio) {
+      return;
+    }
+
+    if (!audioLabel.trim()) {
+      setShowAudioLabelHint(true);
+      return;
+    }
+
+    setShowAudioLabelHint(false);
+    audioInputRef.current?.click();
   };
 
   const handleReplaceAudio = async (targetFile: RepertoireFile, file: File) => {
@@ -929,7 +945,14 @@ export function SongEditModal({
             <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
               {loadingSong ? (
                 <div className="flex items-center justify-center py-16">
-                  <Loader2 size={26} className="animate-spin text-[var(--color-accent)]" />
+                  <LottieIcon
+                    path="/lottie/Insider-loading.json"
+                    fallback={Loader2}
+                    size={84}
+                    loop
+                    autoPlay
+                    interactive={false}
+                  />
                 </div>
               ) : (
                 <div className="relative mt-2 border-l border-[var(--color-border-strong)] ml-4 md:ml-6 space-y-8 pb-4">
@@ -1143,8 +1166,13 @@ export function SongEditModal({
                         <input
                           type="text"
                           value={audioLabel}
-                          onChange={(event) => setAudioLabel(event.target.value)}
-                          placeholder="Etiket (Örn: Bass)"
+                          onChange={(event) => {
+                            setAudioLabel(event.target.value);
+                            if (event.target.value.trim()) {
+                              setShowAudioLabelHint(false);
+                            }
+                          }}
+                          placeholder="Paritsyon adı:"
                           className="editorial-input h-8 flex-1 !text-sm"
                         />
                         <input
@@ -1156,25 +1184,27 @@ export function SongEditModal({
                         />
                         <button
                           type="button"
-                          onClick={() => audioInputRef.current?.click()}
-                          className="flex h-8 items-center justify-center gap-1.5 rounded-[8px] bg-white/5 px-2.5 text-xs font-medium text-[var(--color-text-medium)] hover:text-white transition-colors"
+                          onClick={handleAudioPickClick}
+                          disabled={uploadingAudio}
+                          aria-disabled={!audioLabel.trim() || uploadingAudio}
+                          className={`flex h-8 items-center justify-center gap-1.5 rounded-[8px] px-2.5 text-xs font-medium transition-colors ${
+                            !audioLabel.trim() && !uploadingAudio
+                              ? 'cursor-not-allowed bg-white/5 text-[var(--color-text-low)]'
+                              : 'bg-white/5 text-[var(--color-text-medium)] hover:text-white'
+                          }`}
                           title="Dosya Seç"
                         >
-                          <Upload size={13} />
+                          {uploadingAudio ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                           <span className="max-w-[70px] truncate">
-                            {audioFile ? audioFile.name : 'Seç'}
+                            {uploadingAudio ? 'Yükleniyor' : 'Seç'}
                           </span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={handleAddAudio}
-                          disabled={uploadingAudio || !audioFile || !audioLabel.trim()}
-                          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-[var(--color-accent)] disabled:opacity-45"
-                          title="MP3 Ekle"
-                        >
-                          {uploadingAudio ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
-                        </button>
                       </div>
+                      {showAudioLabelHint && !audioLabel.trim() && (
+                        <div className="rounded-[6px] border border-orange-500/30 bg-orange-500/10 px-2.5 py-1.5 text-[0.66rem] text-orange-200">
+                          Lütfen önce partisyon ismi giriniz. Örneğin Bas 1, Soprano 2
+                        </div>
+                      )}
 
                       <div className="space-y-3">
                         {audioFiles.length === 0 ? (

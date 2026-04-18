@@ -21,6 +21,7 @@ describe('drive file token helpers', () => {
       driveFileId: 'file-123',
       fileName: 'partisyon.pdf',
       mimeType: 'application/pdf',
+      kind: 'repertoire',
     });
 
     expect(verifyDriveFileToken(token)).toMatchObject({
@@ -37,6 +38,7 @@ describe('drive file token helpers', () => {
       driveFileId: 'file-123',
       fileName: 'partisyon.pdf',
       mimeType: 'application/pdf',
+      kind: 'repertoire',
     });
 
     const [payload, signature] = token.split('.');
@@ -53,6 +55,7 @@ describe('drive file token helpers', () => {
         driveFileId: 'file-123',
         fileName: 'partisyon.pdf',
         mimeType: 'application/pdf',
+        kind: 'repertoire',
       },
       -1,
     );
