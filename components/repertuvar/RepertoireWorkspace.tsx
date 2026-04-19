@@ -1044,12 +1044,14 @@ export function RepertoireWorkspace({
       ? (hasCoverPage ? currentPage - 1 : currentPage)
       : null;
 
-  const sharedPreviewGroup: PreviewVoiceGroup = isChef
+  const sharedPreviewGroup: PreviewVoiceGroup = (isChef || isSectionLeader)
     ? previewVoiceGroup
     : normalizedVoiceGroup ?? 'ALL';
   const commentPreviewVoiceGroup: PreviewVoiceGroup = isChef
     ? previewVoiceGroup
-    : normalizedVoiceGroup ?? 'ALL';
+    : isSectionLeader
+      ? (previewVoiceGroup === 'ALL' ? (normalizedVoiceGroup ?? 'ALL') : previewVoiceGroup)
+      : normalizedVoiceGroup ?? 'ALL';
   const commentTargetVoiceGroup: VoiceGroup | null = isChef
     ? (previewVoiceGroup === 'ALL' ? null : previewVoiceGroup)
     : normalizedVoiceGroup ?? null;
@@ -1064,6 +1066,35 @@ export function RepertoireWorkspace({
         { label: 'Alt', personal: false, shared: true, previewVoiceGroup: 'Alto' },
         { label: 'Ten', personal: false, shared: true, previewVoiceGroup: 'Tenor' },
         { label: 'Bas', personal: false, shared: true, previewVoiceGroup: 'Bass' },
+      ];
+    }
+
+    if (isSectionLeader && normalizedVoiceGroup) {
+      return [
+        {
+          label: 'Hepsi',
+          personal: true,
+          shared: true,
+          previewVoiceGroup: 'ALL',
+        },
+        {
+          label: 'Siz',
+          personal: true,
+          shared: false,
+          previewVoiceGroup: 'ALL',
+        },
+        {
+          label: 'Tüm Koro',
+          personal: false,
+          shared: true,
+          previewVoiceGroup: 'ALL',
+        },
+        {
+          label: getLayerLabel(makeSharedVoiceGroupLayerKey(normalizedVoiceGroup)),
+          personal: false,
+          shared: true,
+          previewVoiceGroup: normalizedVoiceGroup,
+        },
       ];
     }
 
@@ -1087,14 +1118,14 @@ export function RepertoireWorkspace({
         previewVoiceGroup: normalizedVoiceGroup ?? 'ALL',
       },
     ];
-  }, [isChef, normalizedVoiceGroup]);
+  }, [isChef, isSectionLeader, normalizedVoiceGroup]);
 
   const activeVisibilityMode =
     visibilityModeOptions.find(
       (option) =>
         option.personal === visibility.personal &&
         option.shared === visibility.shared &&
-        (!isChef || option.previewVoiceGroup === previewVoiceGroup),
+        (!(isChef || isSectionLeader) || option.previewVoiceGroup === previewVoiceGroup),
     ) ?? visibilityModeOptions[0];
 
   const activeContextKey = selectedPdf && activePdfPageNumber
@@ -1123,7 +1154,7 @@ export function RepertoireWorkspace({
 
   const sharedVoiceGroupContextKeys = selectedPdf && activePdfPageNumber
     ? sharedPreviewGroup === 'ALL'
-      ? isChef
+      ? (isChef || isSectionLeader)
         ? VOICE_GROUPS.map((group) =>
             makeLayerPageKey({
               fileId: selectedPdf.id,
@@ -1624,7 +1655,7 @@ export function RepertoireWorkspace({
     setActiveLayerKey(layerKey);
     setActiveTool(null);
 
-    if (isChef) {
+    if (isChef || isSectionLeader) {
       if (layerKey === 'shared_all') {
         setPreviewVoiceGroup('ALL');
       } else if (layerKey.startsWith('shared_voice_group:')) {
@@ -1665,7 +1696,7 @@ export function RepertoireWorkspace({
       toggleVisibility('shared');
     }
 
-    if (isChef) {
+    if (isChef || isSectionLeader) {
       setPreviewVoiceGroup(option.previewVoiceGroup);
     }
   }

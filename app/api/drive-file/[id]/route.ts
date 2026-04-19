@@ -76,6 +76,36 @@ async function proxyStorageFile(requestMethod: string, tokenPayload: ReturnType<
   });
 }
 
+// Parse a single "bytes=start-end" range header value against a known total size.
+// Returns null if the header is absent/malformed, or { start, end } (inclusive) otherwise.
+function parseRangeHeader(rangeHeader: string | null, totalSize: number): { start: number; end: number } | null {
+  if (!rangeHeader) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+  if (!match) return null;
+  const rawStart = match[1];
+  const rawEnd = match[2];
+
+  let start: number;
+  let end: number;
+
+  if (rawStart === '' && rawEnd !== '') {
+    // Suffix range: bytes=-500 => last 500 bytes
+    const suffix = parseInt(rawEnd, 10);
+    start = Math.max(0, totalSize - suffix);
+    end = totalSize - 1;
+  } else {
+    start = rawStart !== '' ? parseInt(rawStart, 10) : 0;
+    end = rawEnd !== '' ? parseInt(rawEnd, 10) : totalSize - 1;
+  }
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= totalSize) {
+    return null;
+  }
+
+  end = Math.min(end, totalSize - 1);
+  return { start, end };
+}
+
 async function proxyDriveFile(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const token = request.nextUrl.searchParams.get('token');
@@ -96,18 +126,16 @@ async function proxyDriveFile(request: NextRequest, { params }: { params: Promis
     return proxyStorageFile(request.method, tokenPayload);
   }
 
+  const rangeHeader = request.headers.get('range');
+
+  // Fetch the full file from Drive WITHOUT forwarding the Range header.
+  // Google Drive's /uc?export=download endpoint ignores Range headers and always
+  // responds with 200 + the full body, so we handle byte-range slicing ourselves.
   const upstreamUrl = new URL('https://drive.google.com/uc');
   upstreamUrl.searchParams.set('export', 'download');
   upstreamUrl.searchParams.set('id', id);
 
-  const requestHeaders = new Headers();
-  const range = request.headers.get('range');
-  if (range) {
-    requestHeaders.set('range', range);
-  }
-
   const upstream = await fetch(upstreamUrl, {
-    headers: requestHeaders,
     redirect: 'follow',
     cache: 'no-store',
   });
@@ -116,9 +144,14 @@ async function proxyDriveFile(request: NextRequest, { params }: { params: Promis
   if (upstream.ok && isHtmlContentType(upstreamContentType) && !isHtmlContentType(tokenPayload.mimeType ?? null)) {
     return new Response('Drive indirilebilir dosya yerine HTML bir sayfa dondurdu.', {
       status: 502,
-      headers: {
-        'Cache-Control': 'private, no-store',
-      },
+      headers: { 'Cache-Control': 'private, no-store' },
+    });
+  }
+
+  if (!upstream.ok) {
+    return new Response('Drive dosyasi alinamadi.', {
+      status: upstream.status,
+      headers: { 'Cache-Control': 'private, no-store' },
     });
   }
 
@@ -128,31 +161,49 @@ async function proxyDriveFile(request: NextRequest, { params }: { params: Promis
     'application/octet-stream';
   const fileName = tokenPayload.fileName;
 
-  const responseHeaders = new Headers({
+  // Buffer entire response so we can serve byte ranges correctly.
+  const fullBuffer = await upstream.arrayBuffer();
+  const totalSize = fullBuffer.byteLength;
+
+  const baseHeaders = new Headers({
     'Content-Type': contentType,
     'Cache-Control': 'private, no-store',
-    'Accept-Ranges': getSafeHeader(upstream.headers, 'accept-ranges') || 'bytes',
+    'Accept-Ranges': 'bytes',
   });
-
-  const contentLength = getSafeHeader(upstream.headers, 'content-length');
-  if (contentLength) {
-    responseHeaders.set('Content-Length', contentLength);
-  }
-
-  const contentRange = getSafeHeader(upstream.headers, 'content-range');
-  if (contentRange) {
-    responseHeaders.set('Content-Range', contentRange);
-  }
-
   if (fileName) {
-    responseHeaders.set('Content-Disposition', makeContentDisposition(fileName));
+    baseHeaders.set('Content-Disposition', makeContentDisposition(fileName));
   }
 
-  return new Response(upstream.body, {
-    status: upstream.status,
-    statusText: upstream.statusText,
-    headers: responseHeaders,
-  });
+  // Serve a partial response when the client requested a range.
+  if (rangeHeader) {
+    const range = parseRangeHeader(rangeHeader, totalSize);
+    if (!range) {
+      // Range Not Satisfiable
+      const errorHeaders = new Headers(baseHeaders);
+      errorHeaders.set('Content-Range', `bytes */${totalSize}`);
+      return new Response(null, { status: 416, headers: errorHeaders });
+    }
+
+    const { start, end } = range;
+    const chunkSize = end - start + 1;
+    const chunk = fullBuffer.slice(start, end + 1);
+
+    const partialHeaders = new Headers(baseHeaders);
+    partialHeaders.set('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+    partialHeaders.set('Content-Length', String(chunkSize));
+
+    if (request.method === 'HEAD') {
+      return new Response(null, { status: 206, headers: partialHeaders });
+    }
+    return new Response(chunk, { status: 206, headers: partialHeaders });
+  }
+
+  // No range requested — return the full file.
+  baseHeaders.set('Content-Length', String(totalSize));
+  if (request.method === 'HEAD') {
+    return new Response(null, { status: 200, headers: baseHeaders });
+  }
+  return new Response(fullBuffer, { status: 200, headers: baseHeaders });
 }
 
 export function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
