@@ -174,6 +174,64 @@ function getReadableErrorMessage(error: unknown): string {
   return 'Veri yüklenemedi';
 }
 
+interface ReviewSubmissionResponse {
+  id: string;
+  status: 'approved' | 'rejected';
+  reviewer_note: string | null;
+  approved_at: string | null;
+  approved_by: string | null;
+  updated_at: string | null;
+}
+
+interface DeleteSubmissionResponse {
+  id: string;
+}
+
+async function getAccessToken() {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !sessionData.session?.access_token) {
+    throw new Error('Oturum doğrulanamadı. Lütfen tekrar giriş yapın.');
+  }
+  return sessionData.session.access_token;
+}
+
+async function postJsonWithAuth<T>(url: string, payload: Record<string, unknown>) {
+  const accessToken = await getAccessToken();
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `İstek başarısız (${response.status})`);
+  }
+
+  return (await response.json()) as T;
+}
+
+async function reviewAssignmentSubmission(params: {
+  submissionId: string;
+  status: 'approved' | 'rejected';
+  reviewerNote?: string;
+}) {
+  return postJsonWithAuth<ReviewSubmissionResponse>('/api/assignment-submissions/review', {
+    submissionId: params.submissionId,
+    status: params.status,
+    reviewerNote: params.reviewerNote ?? null,
+  });
+}
+
+async function deleteAssignmentSubmission(submissionId: string) {
+  return postJsonWithAuth<DeleteSubmissionResponse>('/api/assignment-submissions/delete', {
+    submissionId,
+  });
+}
+
 function SubmissionFileLink({
   submission,
   className,
@@ -555,20 +613,39 @@ export default function AssignmentDetailPage() {
 
   const deleteSubmissionMutation = useMutation({
     mutationFn: async (submissionId: string) => {
-      const { error } = await supabase.from('assignment_submissions').delete().eq('id', submissionId);
-      if (error) {
-        throw error;
-      }
-      return submissionId;
+      const result = await deleteAssignmentSubmission(submissionId);
+      return result.id;
     },
-    onSuccess: async () => {
+    onMutate: async (submissionId) => {
+      await queryClient.cancelQueries({ queryKey: detailQueryKey });
+      const previousData = queryClient.getQueryData<AssignmentDetailData>(detailQueryKey);
+
+      queryClient.setQueryData<AssignmentDetailData | undefined>(detailQueryKey, (current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          ...current,
+          submissions: current.submissions.filter((submission) => submission.id !== submissionId),
+          mySubmission: current.mySubmission?.id === submissionId ? null : current.mySubmission,
+        };
+      });
+
+      return { previousData };
+    },
+    onSuccess: () => {
       setSubmissionToDelete(null);
-      await queryClient.invalidateQueries({ queryKey: ['assignment-detail', assignmentIdentifier] });
-      await queryClient.invalidateQueries({ queryKey: ['assignments'] });
       toast.success('Teslim silindi.');
     },
-    onError: (error) => {
+    onError: (error, _submissionId, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(detailQueryKey, context.previousData);
+      }
       toast.error(error instanceof Error ? error.message : 'Teslim silinemedi.', 'Silme başarısız');
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: detailQueryKey });
+      await queryClient.invalidateQueries({ queryKey: ['assignments'] });
     },
   });
 
@@ -582,27 +659,7 @@ export default function AssignmentDetailPage() {
       status: 'approved' | 'rejected';
       reviewerNote?: string;
     }) => {
-      const reviewedAt = new Date().toISOString();
-      const { data, error } = await supabase
-        .from('assignment_submissions')
-        .update({
-          status,
-          reviewer_note: reviewerNote || null,
-          approved_at: reviewedAt,
-          approved_by: member!.id,
-        })
-        .eq('id', submissionId)
-        .select('id, status, reviewer_note, approved_at, approved_by, updated_at')
-        .maybeSingle();
-
-      if (error) throw error;
-      if (!data) {
-        throw new Error('Değerlendirme uygulanamadı. Yetki veya kayıt durumu nedeniyle değişiklik kaydedilemedi.');
-      }
-      return {
-        ...data,
-        status: data.status as 'approved' | 'rejected',
-      };
+      return reviewAssignmentSubmission({ submissionId, status, reviewerNote });
     },
     onMutate: async (variables) => {
       await queryClient.cancelQueries({ queryKey: detailQueryKey });
@@ -662,7 +719,7 @@ export default function AssignmentDetailPage() {
       toast.error(error instanceof Error ? error.message : 'Değerlendirme kaydedilemedi.', 'Hata');
     },
     onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['assignment-detail', assignmentIdentifier] });
+      await queryClient.invalidateQueries({ queryKey: detailQueryKey });
     },
   });
 
