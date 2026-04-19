@@ -60,6 +60,9 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
   const progressRef = useRef<HTMLDivElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragTime, setDragTime] = useState<number | null>(null);
+  const holdTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const progressRectRef = useRef<DOMRect | null>(null);
   const [dropdownPos, setDropdownPos] = useState<{ bottom: number; left: number } | null>(null);
   const [speedDropdownPos, setSpeedDropdownPos] = useState<{ bottom: number; left: number } | null>(null);
   const currentIndex = useMemo(
@@ -100,8 +103,9 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
     const resolved = resolveAudioUrl(currentTrack.source);
     if (el.src !== resolved) {
       el.src = currentTrack.source;
-      if (Number.isFinite(currentTime) && currentTime > 0) {
-        el.currentTime = Math.max(0, currentTime);
+      // We'll seek in handleLoadedMetadata, but we can try here too if already ready.
+      if (el.readyState >= 1 && Number.isFinite(currentTime) && currentTime > 0) {
+        el.currentTime = currentTime;
       }
     } else if (Math.abs(el.currentTime - currentTime) > 2) {
       el.currentTime = Math.max(0, currentTime);
@@ -160,6 +164,10 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
     };
     const handleLoadedMetadata = () => {
       setPlaybackState({ duration: el.duration || 0 });
+      // If we just switched tracks, seek to the preserved time.
+      if (Number.isFinite(currentTime) && currentTime > 0) {
+        el.currentTime = Math.min(currentTime, el.duration || Infinity);
+      }
     };
     const handleEnded = () => setPlaybackState({ isPlaying: false });
 
@@ -215,7 +223,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
     }
     const target = tracks[currentIndex - 1];
     setCurrentTrackId(target.id);
-    setPlaybackState({ currentTime: 0, isPlaying: true });
+    setPlaybackState({ isPlaying: true });
   }
 
   function handleNext() {
@@ -224,7 +232,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
     }
     const target = tracks[currentIndex + 1];
     setCurrentTrackId(target.id);
-    setPlaybackState({ currentTime: 0, isPlaying: true });
+    setPlaybackState({ isPlaying: true });
   }
 
   function handlePlayPause() {
@@ -262,52 +270,112 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
     reset();
   }
 
-  function handleSeekStart(event: React.MouseEvent<HTMLDivElement>) {
-    if (!duration || duration <= 0) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-    const target = ratio * duration;
-    
-    const el = audioRef.current;
-    if (el) {
-      el.currentTime = target;
-    }
-    setPlaybackState({ currentTime: target });
-    
+  function getProgressValue(clientX: number, rect: DOMRect) {
+    if (!duration || duration <= 0) return 0;
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    return ratio * duration;
+  }
+
+  function startDragging(time: number) {
     setIsDragging(true);
-    setDragTime(target);
+    setDragTime(time);
+  }
+
+  function handleSeekStart(event: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) {
+    if (!duration || duration <= 0) return;
+    
+    const rect = event.currentTarget.getBoundingClientRect();
+    progressRectRef.current = rect;
+    
+    const clientX = 'touches' in event ? event.touches[0].clientX : event.clientX;
+    const clientY = 'touches' in event ? event.touches[0].clientY : event.clientY;
+    const targetTime = getProgressValue(clientX, rect);
+
+    // Store start position for touch jitter check
+    if ('touches' in event) {
+      touchStartPosRef.current = { x: clientX, y: clientY };
+    }
+
+    // Set hold timer
+    holdTimerRef.current = setTimeout(() => {
+      startDragging(targetTime);
+      // Immediately update audio if needed, or wait for move
+    }, 200);
+
+    // If it's a mouse click, we might want immediate seek on click?
+    // User requested "hold. yapıp basılı tutarak sürükleyebilmek"
+    // I'll make it so it seeks immediately ONLY on mouse click, but hold on touch?
+    // Actually, consistency is better. Let's make it hold for both.
   }
 
   useEffect(() => {
-    if (!isDragging || !progressRef.current || !duration) return;
-
-    const handleMouseMove = (event: MouseEvent) => {
-      const rect = progressRef.current!.getBoundingClientRect();
-      const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-      setDragTime(ratio * duration);
-    };
-
-    const handleMouseUp = (event: MouseEvent) => {
-      const rect = progressRef.current!.getBoundingClientRect();
-      const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-      const newTime = ratio * duration;
-      
-      const el = audioRef.current;
-      if (el) {
-        el.currentTime = newTime;
+    const handleGlobalUp = () => {
+      if (holdTimerRef.current) {
+        clearTimeout(holdTimerRef.current);
+        holdTimerRef.current = null;
       }
-      setPlaybackState({ currentTime: newTime });
-      setIsDragging(false);
-      setDragTime(null);
+      
+      if (isDragging) {
+        const el = audioRef.current;
+        if (el && dragTime !== null) {
+          el.currentTime = dragTime;
+          setPlaybackState({ currentTime: dragTime });
+        }
+        setIsDragging(false);
+        setDragTime(null);
+      }
+      touchStartPosRef.current = null;
     };
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    if (isDragging || holdTimerRef.current) {
+      window.addEventListener('mouseup', handleGlobalUp);
+      window.addEventListener('touchend', handleGlobalUp);
+    }
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('mouseup', handleGlobalUp);
+      window.removeEventListener('touchend', handleGlobalUp);
     };
-  }, [isDragging, duration, setPlaybackState]);
+  }, [isDragging, dragTime, setPlaybackState]);
+
+  useEffect(() => {
+    if (!isDragging && !holdTimerRef.current) return;
+
+    const handleMove = (clientX: number, clientY: number) => {
+      if (!progressRectRef.current || !duration) return;
+
+      // If we are just holding but haven't started dragging yet, check for jitter
+      if (!isDragging && touchStartPosRef.current) {
+        const dx = clientX - touchStartPosRef.current.x;
+        const dy = clientY - touchStartPosRef.current.y;
+        if (Math.sqrt(dx * dx + dy * dy) > 10) {
+          // Moved too much before hold triggered, cancel hold
+          if (holdTimerRef.current) {
+            clearTimeout(holdTimerRef.current);
+            holdTimerRef.current = null;
+          }
+        }
+      }
+
+      if (isDragging) {
+        const time = getProgressValue(clientX, progressRectRef.current);
+        setDragTime(time);
+      }
+    };
+
+    const onMouseMove = (e: MouseEvent) => handleMove(e.clientX, e.clientY);
+    const onTouchMove = (e: TouchEvent) => {
+      // Prevent scrolling while scrubbing
+      if (isDragging) e.preventDefault();
+      handleMove(e.touches[0].clientX, e.touches[0].clientY);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('touchmove', onTouchMove);
+    };
+  }, [isDragging, duration]);
 
   if (!isActive || !currentTrack?.source) {
     return null;
@@ -410,18 +478,23 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
 
           <div className="mt-3 flex items-center">
             <div
-              className="group relative flex h-4 flex-1 cursor-pointer items-center"
+              className="group relative flex h-6 flex-1 cursor-pointer items-center touch-none"
               onMouseDown={handleSeekStart}
+              onTouchStart={handleSeekStart}
               ref={progressRef}
               role="slider"
               aria-valuemin={0}
               aria-valuemax={Math.max(1, duration)}
               aria-valuenow={Math.max(0, activeTime)}
             >
-              <div className="relative w-full h-[3px] rounded-full bg-[var(--color-soft-bg-hover)] overflow-hidden">
+              <div className={`relative w-full transition-[height] duration-200 rounded-full bg-[var(--color-soft-bg-hover)] overflow-visible ${isDragging ? 'h-1.5' : 'h-[3px]'}`}>
                 <div
                   className="absolute inset-y-0 left-0 rounded-full bg-[var(--color-accent)]"
                   style={{ width: `${progress}%` }}
+                />
+                <div
+                  className={`absolute top-1/2 -translate-y-1/2 h-3.5 w-3.5 rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.5)] transition-all duration-200 pointer-events-none ${isDragging ? 'opacity-100 scale-110' : 'opacity-0 scale-50'}`}
+                  style={{ left: `calc(${progress}% - 7px)` }}
                 />
               </div>
             </div>
@@ -458,7 +531,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
                     type="button"
                     onClick={() => {
                       setCurrentTrackId(track.id);
-                      setPlaybackState({ currentTime: 0, isPlaying: true });
+                      setPlaybackState({ isPlaying: true });
                       setPartitionOpen(false);
                       setDropdownPos(null);
                     }}

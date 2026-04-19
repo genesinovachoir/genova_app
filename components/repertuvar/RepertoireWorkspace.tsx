@@ -225,6 +225,9 @@ function AudioPanel({
   const [playbackRate, setPlaybackRate] = useState<number>(1);
   const [isDragging, setIsDragging] = useState(false);
   const [dragValue, setDragValue] = useState(0);
+  const holdTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const progressRectRef = useRef<DOMRect | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const progressRef = useRef<HTMLDivElement | null>(null);
   const setMiniSession = useMiniAudioPlayerStore((state) => state.setSession);
@@ -311,50 +314,89 @@ function AudioPanel({
   }
 
   // Progress bar interaction
-  function getProgressFromEvent(e: React.MouseEvent | React.TouchEvent) {
-    const bar = progressRef.current;
-    if (!bar || !duration) return null;
-    const rect = bar.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+  function getProgressFromEvent(clientX: number, rect: DOMRect) {
+    if (!duration) return null;
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
     return ratio * duration;
   }
 
-  function handleProgressMouseDown(e: React.MouseEvent) {
-    const val = getProgressFromEvent(e);
+  function handleProgressStart(e: React.MouseEvent | React.TouchEvent) {
+    if (!duration || duration <= 0) return;
+    
+    const rect = progressRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    progressRectRef.current = rect;
+    
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const val = getProgressFromEvent(clientX, rect);
     if (val === null) return;
-    setIsDragging(true);
-    setDragValue(val);
+
+    if ('touches' in e) {
+      touchStartPosRef.current = { x: clientX, y: clientY };
+    }
+
+    holdTimerRef.current = setTimeout(() => {
+      setIsDragging(true);
+      setDragValue(val);
+    }, 200);
   }
 
   useEffect(() => {
-    if (!isDragging) return;
-    function onMove(e: MouseEvent) {
-      const bar = progressRef.current;
-      if (!bar || !duration) return;
-      const rect = bar.getBoundingClientRect();
-      const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-      setDragValue(ratio * duration);
-    }
-    function onUp(e: MouseEvent) {
-      const bar = progressRef.current;
-      if (!bar || !duration) return;
-      const rect = bar.getBoundingClientRect();
-      const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-      const seekTo = ratio * duration;
-      if (audioRef.current) {
-        audioRef.current.currentTime = seekTo;
+    const handleUp = () => {
+      if (holdTimerRef.current) {
+        clearTimeout(holdTimerRef.current);
+        holdTimerRef.current = null;
       }
-      setCurrentTime(seekTo);
-      setIsDragging(false);
-    }
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      
+      if (isDragging) {
+        if (audioRef.current) {
+          audioRef.current.currentTime = dragValue;
+        }
+        setCurrentTime(dragValue);
+        setIsDragging(false);
+      }
+      touchStartPosRef.current = null;
     };
-  }, [isDragging, duration, audioRef]);
+
+    const handleMove = (clientX: number, clientY: number, e?: TouchEvent) => {
+      if (!duration || !progressRectRef.current) return;
+
+      if (!isDragging && touchStartPosRef.current) {
+        const dx = clientX - touchStartPosRef.current.x;
+        const dy = clientY - touchStartPosRef.current.y;
+        if (Math.sqrt(dx * dx + dy * dy) > 10) {
+          if (holdTimerRef.current) {
+            clearTimeout(holdTimerRef.current);
+            holdTimerRef.current = null;
+          }
+        }
+      }
+
+      if (isDragging) {
+        if (e) e.preventDefault();
+        const val = getProgressFromEvent(clientX, progressRectRef.current);
+        if (val !== null) setDragValue(val);
+      }
+    };
+
+    const onMouseMove = (e: MouseEvent) => handleMove(e.clientX, e.clientY);
+    const onTouchMove = (e: TouchEvent) => handleMove(e.touches[0].clientX, e.touches[0].clientY, e);
+
+    if (isDragging || holdTimerRef.current) {
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', handleUp);
+      window.addEventListener('touchmove', onTouchMove, { passive: false });
+      window.addEventListener('touchend', handleUp);
+    }
+    
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', handleUp);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', handleUp);
+    };
+  }, [isDragging, dragValue, duration, audioRef]);
 
   const displayTime = isDragging ? dragValue : currentTime;
   const progress = duration > 0 ? (displayTime / duration) * 100 : 0;
@@ -467,10 +509,9 @@ function AudioPanel({
 
     const resolved = resolveAudioUrl(selectedAudioSource);
     if (el.src !== resolved) {
-      const shouldSwitchSource = intendedPlayState.current || !el.src;
-      if (shouldSwitchSource) {
-        el.src = selectedAudioSource;
-      }
+      // Always switch source if it's different to ensure context switching.
+      // Setting el.src will also stop current playback if any.
+      el.src = selectedAudioSource;
     }
   }, [selectedAudioSource]);
 
@@ -504,14 +545,11 @@ function AudioPanel({
     const sessionState = useMiniAudioPlayerStore.getState();
     const matchesSelection = Boolean(el && isSourceMatch(el, selectedAudioSource));
 
-    // Another song is actively mounted/playing; don't hijack mini player metadata.
+    // Allow hijacking mini player metadata when switching song pages.
     const differentActiveSong =
       sessionState.isActive &&
       Boolean(sessionState.songId) &&
       sessionState.songId !== songId;
-    if (!matchesSelection && differentActiveSong) {
-      return;
-    }
 
     // Fetch protected URLs for ALL audio files in parallel so every partition appears in the list.
     let cancelled = false;
@@ -608,9 +646,18 @@ function AudioPanel({
       isUnmountingRef.current = true;
       const sharedAudio = audioElementRef.current;
       const isActuallyPlaying = Boolean(sharedAudio && !sharedAudio.paused);
-      if (isActuallyPlaying || intendedPlayState.current || latestIsPlayingRef.current) {
+      
+      // Only keep playing in the mini player if it was actively playing when leaving.
+      if (isActuallyPlaying) {
         setMiniPlaybackState({
           isPlaying: true,
+          currentTime: sharedAudio?.currentTime ?? latestCurrentTimeRef.current,
+          duration: sharedAudio?.duration ?? latestDurationRef.current,
+        });
+      } else {
+        // If it was paused, ensure the mini player is also paused.
+        setMiniPlaybackState({
+          isPlaying: false,
           currentTime: sharedAudio?.currentTime ?? latestCurrentTimeRef.current,
           duration: sharedAudio?.duration ?? latestDurationRef.current,
         });
@@ -765,28 +812,22 @@ function AudioPanel({
           <div className="space-y-1.5">
             <div
               ref={progressRef}
-              onMouseDown={handleProgressMouseDown}
-              onTouchStart={(event) => {
-                const val = getProgressFromEvent(event);
-                if (val === null) return;
-                if (audioRef.current) {
-                  audioRef.current.currentTime = val;
-                }
-                setCurrentTime(val);
-                intendedTimeRef.current = val;
-              }}
-              className="group relative h-1.5 w-full cursor-pointer rounded-full bg-white/10 overflow-visible"
+              onMouseDown={handleProgressStart}
+              onTouchStart={handleProgressStart}
+              className="group relative h-4 w-full cursor-pointer rounded-full bg-white/10 overflow-visible flex items-center touch-none"
             >
-              {/* Filled portion */}
-              <div
-                className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-[var(--color-accent)] transition-[width] duration-75"
-                style={{ width: `${progress}%` }}
-              />
-              {/* Thumb dot */}
-              <div
-                className="pointer-events-none absolute top-1/2 -translate-y-1/2 h-3 w-3 rounded-full bg-white shadow-md shadow-black/50 transition-[left] duration-75 opacity-0 group-hover:opacity-100"
-                style={{ left: `calc(${progress}% - 6px)` }}
-              />
+              <div className={`relative w-full transition-[height] duration-200 rounded-full bg-white/10 overflow-visible ${isDragging ? 'h-1.5' : 'h-1'}`}>
+                {/* Filled portion */}
+                <div
+                  className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-[var(--color-accent)]"
+                  style={{ width: `${progress}%` }}
+                />
+                {/* Thumb dot */}
+                <div
+                  className={`pointer-events-none absolute top-1/2 -translate-y-1/2 h-3.5 w-3.5 rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.5)] transition-all duration-200 ${isDragging ? 'opacity-100 scale-110' : 'opacity-0 scale-50'}`}
+                  style={{ left: `calc(${progress}% - 7px)` }}
+                />
+              </div>
             </div>
           </div>
         </div>

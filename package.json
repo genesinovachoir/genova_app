@@ -11,6 +11,11 @@
     "test:unit": "vitest run"
   },
   "dependencies": {
+    "@capacitor/android": "^8.3.1",
+    "@capacitor/cli": "^8.3.1",
+    "@capacitor/core": "^8.3.1",
+    "@capacitor/ios": "^8.3.1",
+    "@capacitor/status-bar": "^8.0.2",
     "@google/genai": "^1.17.0",
     "@hookform/resolvers": "^5.2.1",
     "@lottiefiles/dotlottie-react": "^0.19.0",
