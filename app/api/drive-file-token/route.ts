@@ -19,17 +19,21 @@ export async function POST(request: Request) {
       return new NextResponse('Geçersiz Drive dosya kimliği.', { status: 400 });
     }
 
+    console.log(`[DRIVE_FILE_TOKEN] Generating token for file ${body.driveFileId}, user ${user.id}`);
     const authorizedFile = await authorizeDriveFileAccess(user.id, body.driveFileId);
     if (!authorizedFile) {
+      console.warn(`[DRIVE_FILE_TOKEN] Access denied for file ${body.driveFileId}, user ${user.id}`);
       return new NextResponse('Bu dosyaya erişim yetkiniz yok.', { status: 403 });
     }
 
     const { token, expiresAt } = createDriveFileToken(authorizedFile, DRIVE_FILE_TOKEN_TTL_MS);
+    console.log(`[DRIVE_FILE_TOKEN] Token generated successfully for ${body.driveFileId}`);
     return NextResponse.json({
       url: `/api/drive-file/${encodeURIComponent(authorizedFile.driveFileId)}?token=${encodeURIComponent(token)}`,
       expiresAt,
     });
-  } catch (error) {
+  } catch (error: any) {
+    console.error(`[DRIVE_FILE_TOKEN] Error generating token:`, error);
     const message = error instanceof Error ? error.message : 'Unauthorized';
     const status = message === 'Unauthorized' ? 401 : 500;
     return new NextResponse(message, { status });

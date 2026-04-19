@@ -78,10 +78,6 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
-const pdfOptions = {
-  cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
-  standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/standard_fonts/`,
-};
 
 const COVER_PARTITION_LABEL = '__cover__';
 const DEFAULT_PAGE_ASPECT_RATIO = 1.414;
@@ -541,6 +537,9 @@ function AudioPanel({
     };
 
     const handleError = () => {
+      const err = el.error;
+      console.error(`[AUDIO_PLAYER_ERROR] Workspace player error for src: ${el.src}. Error code: ${err?.code}, message: ${err?.message}`);
+      
       intendedPlayState.current = false;
       const matchesSelection = isSourceMatch(el, selectedAudioSource);
       if (!matchesSelection) {
@@ -905,6 +904,11 @@ export function RepertoireWorkspace({
   isChef,
   isSectionLeader,
 }: RepertoireWorkspaceProps) {
+  const memoizedPdfOptions = useMemo(() => ({
+    cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
+    standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/standard_fonts/`,
+  }), []);
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const saveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -2017,7 +2021,7 @@ export function RepertoireWorkspace({
                       PDF yüklenemedi.
                     </div>
                   }
-                  options={pdfOptions}
+                  options={memoizedPdfOptions}
                   onLoadError={(error) => {
                     setDocumentError(error.message);
                     setTotalPages(0);

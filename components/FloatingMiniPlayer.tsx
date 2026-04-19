@@ -206,6 +206,8 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
     };
     const handleEnded = () => setPlaybackState({ isPlaying: false });
     const handleError = () => {
+      const err = el.error;
+      console.error(`[AUDIO_PLAYER_ERROR] Mini player error for id: ${currentTrackId}, src: ${el.src}. Error code: ${err?.code}, message: ${err?.message}`);
       isSwitchingRef.current = false;
       setPlaybackState({ isPlaying: false });
     };
