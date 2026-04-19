@@ -1722,12 +1722,12 @@ export function RepertoireWorkspace({
 
   function renderWorkspaceControls(extraClassName?: string) {
     return (
-      <div className={`flex flex-wrap items-center gap-2 ${extraClassName ?? ''}`}>
+      <div className={`flex flex-wrap items-center gap-1 ${extraClassName ?? ''}`}>
         {canEdit && (
           <button
             type="button"
             onClick={handleEditToggle}
-            className={`shrink-0 inline-flex items-center justify-center rounded-[8px] border px-2.5 py-1.5 transition-colors ${
+            className={`shrink-0 inline-flex h-8 items-center justify-center rounded-[8px] border px-2 transition-colors ${
               isEditMode
                 ? 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
                 : 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)]'
@@ -1746,24 +1746,23 @@ export function RepertoireWorkspace({
           </button>
         )}
 
-        <span className="h-4 w-px bg-[var(--color-border)] mr-1" />
         <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
             disabled={!canGoPrevPage}
-            className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-40"
+            className="inline-flex h-8 w-6 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-40"
           >
             <ChevronLeft size={15} />
           </button>
-          <div className="h-8 inline-flex items-center rounded-[8px] border border-[var(--color-border)] bg-white/4 px-2.5 text-[0.62rem] font-bold uppercase tracking-[0.12em] text-[var(--color-text-medium)]">
+          <div className="h-8 inline-flex items-center rounded-[8px] border border-[var(--color-border)] bg-white/4 px-2 text-[0.62rem] font-bold uppercase tracking-[0.12em] text-[var(--color-text-medium)]">
             {currentPage} / {totalDisplayPages || 0}
           </div>
           <button
             type="button"
             onClick={() => setCurrentPage(Math.min(totalDisplayPages, currentPage + 1))}
             disabled={!canGoNextPage}
-            className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-40"
+            className="inline-flex h-8 w-6 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-40"
           >
             <ChevronRight size={15} />
           </button>
@@ -1772,7 +1771,7 @@ export function RepertoireWorkspace({
         <button
           type="button"
           onClick={handleVisibilityCycle}
-          className={`inline-flex items-center gap-1.5 rounded-[8px] border px-2.5 py-1.5 text-[0.62rem] font-bold uppercase tracking-[0.14em] ${
+          className={`inline-flex h-8 items-center gap-1.5 rounded-[8px] border px-1.5 text-[0.62rem] font-bold uppercase tracking-[0.14em] ${
             visibility.personal || visibility.shared
               ? 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
               : 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)]'
@@ -1801,7 +1800,7 @@ export function RepertoireWorkspace({
         )}
 
         {isEditMode && (
-          <div className="flex flex-wrap items-center gap-1.5 rounded-[8px] border border-[var(--color-accent)]/25 bg-white/3 px-2 py-1.5">
+          <div className="flex items-center gap-1.5 rounded-[8px] border border-[var(--color-accent)]/25 bg-white/3 px-2 py-1.5">
             <button
               type="button"
               onClick={handleLayerCycle}
@@ -1873,6 +1872,51 @@ export function RepertoireWorkspace({
     );
   }
 
+  function renderToolbar(extraClassName?: string, hideEmptyWarning?: boolean) {
+    return (
+      <div className={`flex items-start justify-between gap-1 ${extraClassName ?? ''}`}>
+        <div className="flex flex-wrap items-center gap-1">
+          {!hideEmptyWarning && sheetFiles.length === 0 && (
+            <div className="rounded-[8px] border border-[var(--color-border)] bg-white/4 px-3 py-2 text-xs text-[var(--color-text-medium)]">
+              PDF bulunamadı
+            </div>
+          )}
+
+          {renderWorkspaceControls()}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={zoomOut}
+            disabled={zoomLevel <= MIN_ZOOM}
+            className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] disabled:opacity-40"
+            title="Küçült"
+          >
+            <ZoomOut size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={resetZoom}
+            className="h-8 inline-flex items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 px-1.5 text-[0.62rem] font-bold tracking-[0.12em] text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)]"
+            title="Sıfırla"
+          >
+            %{Math.round(zoomLevel * 100)}
+          </button>
+          <button
+            type="button"
+            onClick={zoomIn}
+            disabled={zoomLevel >= MAX_ZOOM}
+            className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] disabled:opacity-40"
+            title="Büyüt"
+          >
+            <ZoomIn size={13} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* AudioPanel — ses lojiği, görsel arayüz yok */}
@@ -1904,49 +1948,11 @@ export function RepertoireWorkspace({
         </div>
       )}
 
-      {/* PDF Çerçevesi — tam genişlik, dış section kaldırıldı */}
-      <div className="relative overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-pdf-stage-bg)] p-2 sm:p-4">
+      {/* PDF Çerçevesi — tam genişlik, üstten boşluk ve negatif margin ayarlı */}
+      <div className="relative mt-4 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-pdf-stage-bg)] p-1 sm:p-2 -mx-[18px] sm:mx-0">
 
-        {/* Araç çubuğu: kontroller + zoom */}
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          {sheetFiles.length === 0 && (
-            <div className="rounded-[8px] border border-[var(--color-border)] bg-white/4 px-3 py-2 text-xs text-[var(--color-text-medium)]">
-              PDF bulunamadı
-            </div>
-          )}
-
-          {renderWorkspaceControls()}
-
-          {/* Zoom kontrolleri */}
-          <div className="ml-auto flex items-center gap-1">
-            <button
-              type="button"
-              onClick={zoomOut}
-              disabled={zoomLevel <= MIN_ZOOM}
-              className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] disabled:opacity-40"
-              title="Küçült"
-            >
-              <ZoomOut size={13} />
-            </button>
-            <button
-              type="button"
-              onClick={resetZoom}
-              className="h-8 inline-flex items-center rounded-[8px] border border-[var(--color-border)] bg-white/4 px-2.5 text-[0.62rem] font-bold uppercase tracking-[0.12em] text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)]"
-              title="Zoom'u sıfırla"
-            >
-              {Math.round(zoomLevel * 100)}%
-            </button>
-            <button
-              type="button"
-              onClick={zoomIn}
-              disabled={zoomLevel >= MAX_ZOOM}
-              className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] disabled:opacity-40"
-              title="Büyüt"
-            >
-              <ZoomIn size={13} />
-            </button>
-          </div>
-        </div>
+        {/* Araç çubuğu: kontroller + zoom (Üst) */}
+        {renderToolbar('mb-3')}
 
         {!selectedPdf && !hasCoverPage ? (
           <div className="flex min-h-[360px] flex-col items-center justify-center px-6 py-12 text-center">
@@ -1965,7 +1971,7 @@ export function RepertoireWorkspace({
             </p>
           </div>
         ) : (
-          <div ref={containerRef} className="mx-auto w-full max-w-[980px] overflow-x-auto">
+          <div ref={containerRef} className="mx-auto w-full max-w-[1200px] overflow-x-auto">
             {viewerWidth > 0 && (
               selectedPdfSource ? (
                 <Document
@@ -2132,6 +2138,11 @@ export function RepertoireWorkspace({
               </div>
             )}
           </div>
+        )}
+
+        {/* Araç çubuğu: kontroller + zoom (Alt) */}
+        {!(!selectedPdf && !hasCoverPage) && (selectedPdfSource || selectedPdf || hasCoverPage) && (
+          renderToolbar('mt-3', true)
         )}
       </div>
 
