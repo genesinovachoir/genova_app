@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const DRIVE_FILE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+const DRIVE_FILE_TOKEN_TTL_MS = 60 * 60_000;
 
 export async function POST(request: Request) {
   try {
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
       return new NextResponse('Bu dosyaya erişim yetkiniz yok.', { status: 403 });
     }
 
-    const { token, expiresAt } = createDriveFileToken(authorizedFile);
+    const { token, expiresAt } = createDriveFileToken(authorizedFile, DRIVE_FILE_TOKEN_TTL_MS);
     return NextResponse.json({
       url: `/api/drive-file/${encodeURIComponent(authorizedFile.driveFileId)}?token=${encodeURIComponent(token)}`,
       expiresAt,

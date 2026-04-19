@@ -241,6 +241,7 @@ function AudioPanel({
   const intendedPlayState = useRef(false);
   const intendedTimeRef = useRef(0);
   const prevSourceRef = useRef(selectedAudioSource);
+  const prevSongIdRef = useRef(songId);
 
   useEffect(() => {
     if (prevSourceRef.current !== selectedAudioSource) {
@@ -279,13 +280,23 @@ function AudioPanel({
     if (selectedAudioSource && !isSourceMatch(el, selectedAudioSource)) {
       el.src = selectedAudioSource;
       intendedPlayState.current = true;
-      el.play().catch(console.error);
+      el.play().catch(() => {
+        intendedPlayState.current = false;
+        setIsPlaying(false);
+        setAudioState({ isPlaying: false });
+        setMiniPlaybackState({ isPlaying: false });
+      });
       return;
     }
 
     if (el.paused) {
       intendedPlayState.current = true;
-      el.play().catch(console.error);
+      el.play().catch(() => {
+        intendedPlayState.current = false;
+        setIsPlaying(false);
+        setAudioState({ isPlaying: false });
+        setMiniPlaybackState({ isPlaying: false });
+      });
     } else {
       intendedPlayState.current = false;
       el.pause();
@@ -314,11 +325,11 @@ function AudioPanel({
   }
 
   // Progress bar interaction
-  function getProgressFromEvent(clientX: number, rect: DOMRect) {
+  const getProgressFromEvent = useCallback((clientX: number, rect: DOMRect) => {
     if (!duration) return null;
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
     return ratio * duration;
-  }
+  }, [duration]);
 
   function handleProgressStart(e: React.MouseEvent | React.TouchEvent) {
     if (!duration || duration <= 0) return;
@@ -396,7 +407,7 @@ function AudioPanel({
       window.removeEventListener('touchmove', onTouchMove);
       window.removeEventListener('touchend', handleUp);
     };
-  }, [isDragging, dragValue, duration, audioRef]);
+  }, [audioRef, dragValue, duration, getProgressFromEvent, isDragging]);
 
   const displayTime = isDragging ? dragValue : currentTime;
   const progress = duration > 0 ? (displayTime / duration) * 100 : 0;
@@ -410,6 +421,40 @@ function AudioPanel({
       audioRef.current = null;
     };
   }, [audioRef]);
+
+  useEffect(() => {
+    if (prevSongIdRef.current === songId) {
+      return;
+    }
+
+    prevSongIdRef.current = songId;
+    intendedPlayState.current = false;
+    intendedTimeRef.current = 0;
+
+    const el = audioElementRef.current;
+    if (el) {
+      el.pause();
+      el.removeAttribute('src');
+      el.load();
+    }
+
+    setAudioState({ isPlaying: false, currentTime: 0, duration: 0 });
+    setMiniPlaybackState({ isPlaying: false, currentTime: 0, duration: 0 });
+  }, [songId, setAudioState, setMiniPlaybackState]);
+
+  useEffect(() => {
+    const el = audioElementRef.current;
+    if (!el || selectedAudioSource) {
+      return;
+    }
+
+    intendedPlayState.current = false;
+    el.pause();
+    el.removeAttribute('src');
+    el.load();
+    setAudioState({ isPlaying: false, currentTime: 0, duration: 0 });
+    setMiniPlaybackState({ isPlaying: false, currentTime: 0, duration: 0 });
+  }, [selectedAudioSource, setAudioState, setMiniPlaybackState]);
 
   useEffect(() => {
     const el = audioElementRef.current;
@@ -429,7 +474,7 @@ function AudioPanel({
       const matchesSelection = isSourceMatch(el, selectedAudioSource);
       setIsPlaying(matchesSelection && !el.paused);
       setAudioState({ isPlaying: matchesSelection && !el.paused });
-      setMiniPlaybackState({ isPlaying: !el.paused });
+      setMiniPlaybackState({ isPlaying: matchesSelection && !el.paused });
       intendedPlayState.current = true;
     };
 
@@ -453,8 +498,8 @@ function AudioPanel({
         }
         setDuration(d);
         setAudioState({ currentTime: t, duration: d });
+        setMiniPlaybackState({ currentTime: t, duration: d });
       }
-      setMiniPlaybackState({ currentTime: t, duration: d });
     };
 
     const handleLoadedMetadata = () => {
@@ -470,12 +515,15 @@ function AudioPanel({
         setAudioState({ currentTime: targetTime, duration: d });
         setCurrentTime(targetTime);
         setMiniPlaybackState({ currentTime: targetTime, duration: d });
-      } else {
-        setMiniPlaybackState({ duration: d });
       }
 
       if (intendedPlayState.current) {
-        el.play().catch(console.error);
+        el.play().catch(() => {
+          intendedPlayState.current = false;
+          setIsPlaying(false);
+          setAudioState({ isPlaying: false });
+          setMiniPlaybackState({ isPlaying: false });
+        });
       }
     };
 
@@ -486,11 +534,24 @@ function AudioPanel({
       setMiniPlaybackState({ isPlaying: false });
     };
 
+    const handleError = () => {
+      intendedPlayState.current = false;
+      const matchesSelection = isSourceMatch(el, selectedAudioSource);
+      if (!matchesSelection) {
+        return;
+      }
+
+      setIsPlaying(false);
+      setAudioState({ isPlaying: false });
+      setMiniPlaybackState({ isPlaying: false });
+    };
+
     el.addEventListener('play', handlePlay);
     el.addEventListener('pause', handlePause);
     el.addEventListener('timeupdate', handleTimeUpdate);
     el.addEventListener('loadedmetadata', handleLoadedMetadata);
     el.addEventListener('ended', handleEnded);
+    el.addEventListener('error', handleError);
 
     return () => {
       el.removeEventListener('play', handlePlay);
@@ -498,6 +559,7 @@ function AudioPanel({
       el.removeEventListener('timeupdate', handleTimeUpdate);
       el.removeEventListener('loadedmetadata', handleLoadedMetadata);
       el.removeEventListener('ended', handleEnded);
+      el.removeEventListener('error', handleError);
     };
   }, [isDragging, playbackRate, selectedAudioSource, setAudioState, setMiniPlaybackState]);
 
@@ -541,16 +603,6 @@ function AudioPanel({
   }, [selectedAudioSource, setAudioState]);
 
   useEffect(() => {
-    const el = audioElementRef.current;
-    const sessionState = useMiniAudioPlayerStore.getState();
-    const matchesSelection = Boolean(el && isSourceMatch(el, selectedAudioSource));
-
-    // Allow hijacking mini player metadata when switching song pages.
-    const differentActiveSong =
-      sessionState.isActive &&
-      Boolean(sessionState.songId) &&
-      sessionState.songId !== songId;
-
     // Fetch protected URLs for ALL audio files in parallel so every partition appears in the list.
     let cancelled = false;
     async function buildAndSetTracks() {
@@ -590,6 +642,10 @@ function AudioPanel({
       const elNow = audioElementRef.current;
       const sameSongSession = latestSession.isActive && latestSession.songId === songId;
       const canUseLiveAudioState = Boolean(sameSongSession && elNow && elNow.src);
+      const defaultTrackId = selectedAudio?.id ?? miniTracks[0]?.id ?? null;
+      const sessionTrackIdIsValid = Boolean(
+        latestSession.currentTrackId && miniTracks.some((track) => track.id === latestSession.currentTrackId),
+      );
 
       // Keep the live playback snapshot intact until this page has a confirmed audio source.
       // Otherwise the floating player briefly receives 0s/1x state and snaps back to the start.
@@ -599,8 +655,8 @@ function AudioPanel({
         coverSource,
         tracks: miniTracks,
         currentTrackId: sameSongSession
-          ? (latestSession.currentTrackId ?? selectedAudio?.id ?? null)
-          : selectedAudio?.id ?? null,
+          ? (sessionTrackIdIsValid ? latestSession.currentTrackId : defaultTrackId)
+          : defaultTrackId,
         currentTime: canUseLiveAudioState && elNow
           ? (Number.isFinite(elNow.currentTime) ? elNow.currentTime : 0)
           : sameSongSession
@@ -819,12 +875,12 @@ function AudioPanel({
               <div className={`relative w-full transition-[height] duration-200 rounded-full bg-white/10 overflow-visible ${isDragging ? 'h-1.5' : 'h-1'}`}>
                 {/* Filled portion */}
                 <div
-                  className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-[var(--color-accent)]"
+                  className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-[var(--color-accent)] transition-[width] duration-75"
                   style={{ width: `${progress}%` }}
                 />
                 {/* Thumb dot */}
                 <div
-                  className={`pointer-events-none absolute top-1/2 -translate-y-1/2 h-3.5 w-3.5 rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.5)] transition-all duration-200 ${isDragging ? 'opacity-100 scale-110' : 'opacity-0 scale-50'}`}
+                  className={`pointer-events-none absolute top-1/2 -translate-y-1/2 h-3.5 w-3.5 rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.5)] transition-[opacity,transform,box-shadow] duration-200 ${isDragging ? 'opacity-100 scale-110' : 'opacity-0 scale-50'}`}
                   style={{ left: `calc(${progress}% - 7px)` }}
                 />
               </div>
@@ -857,6 +913,7 @@ export function RepertoireWorkspace({
   const [offlineStatus, setOfflineStatus] = useState<string | null>(null);
   const [offlineError, setOfflineError] = useState<string | null>(null);
   const [offlineLastSyncedAt, setOfflineLastSyncedAt] = useState<number | null>(null);
+  const [offlineSyncedVersion, setOfflineSyncedVersion] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const store = useRepertoireWorkspaceStore();
   const {
@@ -963,7 +1020,8 @@ export function RepertoireWorkspace({
   const { url: protectedSelectedPdfSource } = useProtectedDriveFileUrl(selectedPdf);
   const { url: protectedSelectedCoverSource } = useProtectedDriveFileUrl(selectedCover);
   const { url: protectedSelectedAudioSource } = useProtectedDriveFileUrl(selectedAudio);
-  const allowOfflineFallback = offlineEnabled && !isOnline;
+  const hasFreshOfflineSnapshot = offlineEnabled && offlineSyncedVersion === offlineSongVersion;
+  const allowOfflineFallback = offlineEnabled && (!isOnline || hasFreshOfflineSnapshot);
   const selectedPdfSource = getInlineFileSource(selectedPdf, protectedSelectedPdfSource, allowOfflineFallback);
   const selectedCoverSource = getInlineFileSource(selectedCover, protectedSelectedCoverSource, allowOfflineFallback);
   const selectedCoverPreviewSource = selectedCoverSource;
@@ -1170,6 +1228,7 @@ export function RepertoireWorkspace({
       const result: OfflineSyncResult = await syncSongFilesForOffline(song.id, filesToSync);
       markOfflineSongSynced(song.id, offlineSongVersion, result.syncedAt);
       setOfflineLastSyncedAt(result.syncedAt);
+      setOfflineSyncedVersion(offlineSongVersion);
       setOfflineStatus(`${result.cachedCount} dosya offline kullanıma hazır.`);
       attemptedAutoSyncVersionRef.current = null;
       return result;
@@ -1201,6 +1260,7 @@ export function RepertoireWorkspace({
         const result = await removeOfflineSongFiles(song.id);
         clearOfflineSongSyncState(song.id);
         setOfflineLastSyncedAt(null);
+        setOfflineSyncedVersion(null);
         setOfflineStatus(result.removedCount > 0 ? 'Offline dosyalar kaldırıldı.' : 'Offline kullanım kapatıldı.');
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Offline dosyalar kaldırılamadı.';
@@ -1238,12 +1298,14 @@ export function RepertoireWorkspace({
     if (!supported) {
       setOfflineEnabledState(false);
       setOfflineLastSyncedAt(null);
+      setOfflineSyncedVersion(null);
       return;
     }
 
     const settings = getOfflineSongSettings(song.id);
     setOfflineEnabledState(settings.enabled);
     setOfflineLastSyncedAt(settings.lastSyncedAt);
+    setOfflineSyncedVersion(settings.version);
   }, [song.id]);
 
   useEffect(() => {

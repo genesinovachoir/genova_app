@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pause, Play, SkipBack, SkipForward, X, ChevronDown } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
@@ -63,6 +63,9 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
   const holdTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const progressRectRef = useRef<DOMRect | null>(null);
+  const isSwitchingRef = useRef(false);
+  const pendingSeekTimeRef = useRef(0);
+  const latestCurrentTimeRef = useRef(0);
   const [dropdownPos, setDropdownPos] = useState<{ bottom: number; left: number } | null>(null);
   const [speedDropdownPos, setSpeedDropdownPos] = useState<{ bottom: number; left: number } | null>(null);
   const currentIndex = useMemo(
@@ -75,6 +78,10 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
     const sharedAudio = getSharedAudioElement();
     audioRef.current = sharedAudio;
   }, []);
+
+  useEffect(() => {
+    latestCurrentTimeRef.current = Number.isFinite(currentTime) ? Math.max(0, currentTime) : 0;
+  }, [currentTime]);
 
   useEffect(() => {
     if (typeof document === 'undefined') {
@@ -102,12 +109,17 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
 
     const resolved = resolveAudioUrl(currentTrack.source);
     if (el.src !== resolved) {
+      isSwitchingRef.current = true;
+      pendingSeekTimeRef.current = Number.isFinite(el.currentTime)
+        ? Math.max(0, el.currentTime)
+        : latestCurrentTimeRef.current;
       el.src = currentTrack.source;
       // We'll seek in handleLoadedMetadata, but we can try here too if already ready.
-      if (el.readyState >= 1 && Number.isFinite(currentTime) && currentTime > 0) {
-        el.currentTime = currentTime;
+      if (el.readyState >= 1 && pendingSeekTimeRef.current > 0) {
+        el.currentTime = Math.min(pendingSeekTimeRef.current, el.duration || pendingSeekTimeRef.current);
       }
     } else if (Math.abs(el.currentTime - currentTime) > 2) {
+      pendingSeekTimeRef.current = Math.max(0, currentTime);
       el.currentTime = Math.max(0, currentTime);
     }
   }, [currentTrack?.source, currentTime]);
@@ -118,10 +130,20 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
       return;
     }
 
+    const safeDuration = Number.isFinite(el.duration) ? el.duration : 0;
+    if (isSwitchingRef.current) {
+      setPlaybackState({
+        isPlaying: !el.paused,
+        currentTime: Math.max(0, pendingSeekTimeRef.current),
+        duration: safeDuration,
+      });
+      return;
+    }
+
     setPlaybackState({
       isPlaying: !el.paused,
       currentTime: Number.isFinite(el.currentTime) ? el.currentTime : 0,
-      duration: Number.isFinite(el.duration) ? el.duration : 0,
+      duration: safeDuration,
     });
   }, [currentTrack?.id, setPlaybackState]);
 
@@ -157,25 +179,43 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
     const handlePlay = () => setPlaybackState({ isPlaying: true });
     const handlePause = () => setPlaybackState({ isPlaying: false });
     const handleTimeUpdate = () => {
+      // Ignore time updates while switching to prevent snapping back to 0
+      if (isSwitchingRef.current) return;
+      pendingSeekTimeRef.current = Number.isFinite(el.currentTime) ? Math.max(0, el.currentTime) : 0;
       setPlaybackState({
         currentTime: el.currentTime,
         duration: el.duration || 0,
       });
     };
     const handleLoadedMetadata = () => {
-      setPlaybackState({ duration: el.duration || 0 });
-      // If we just switched tracks, seek to the preserved time.
-      if (Number.isFinite(currentTime) && currentTime > 0) {
-        el.currentTime = Math.min(currentTime, el.duration || Infinity);
+      const targetTime = Number.isFinite(pendingSeekTimeRef.current)
+        ? Math.max(0, pendingSeekTimeRef.current)
+        : latestCurrentTimeRef.current;
+      if (targetTime > 0) {
+        el.currentTime = Math.min(targetTime, el.duration || targetTime);
       }
+      pendingSeekTimeRef.current = Number.isFinite(el.currentTime) ? Math.max(0, el.currentTime) : 0;
+      setPlaybackState({
+        currentTime: pendingSeekTimeRef.current,
+        duration: el.duration || 0,
+      });
+      // Delay clearing the switching flag slightly to let the first timeupdate settle
+      setTimeout(() => {
+        isSwitchingRef.current = false;
+      }, 50);
     };
     const handleEnded = () => setPlaybackState({ isPlaying: false });
+    const handleError = () => {
+      isSwitchingRef.current = false;
+      setPlaybackState({ isPlaying: false });
+    };
 
     el.addEventListener('play', handlePlay);
     el.addEventListener('pause', handlePause);
     el.addEventListener('timeupdate', handleTimeUpdate);
     el.addEventListener('loadedmetadata', handleLoadedMetadata);
     el.addEventListener('ended', handleEnded);
+    el.addEventListener('error', handleError);
 
     return () => {
       el.removeEventListener('play', handlePlay);
@@ -183,6 +223,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
       el.removeEventListener('timeupdate', handleTimeUpdate);
       el.removeEventListener('loadedmetadata', handleLoadedMetadata);
       el.removeEventListener('ended', handleEnded);
+      el.removeEventListener('error', handleError);
     };
   }, [setPlaybackState]);
 
@@ -217,13 +258,23 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
   const canGoPrev = currentIndex > 0;
   const canGoNext = currentIndex >= 0 && currentIndex < tracks.length - 1;
 
+  function getSafeResumeTime() {
+    const el = audioRef.current;
+    if (el && Number.isFinite(el.currentTime)) {
+      return Math.max(0, el.currentTime);
+    }
+    return latestCurrentTimeRef.current;
+  }
+
   function handlePrev() {
     if (!canGoPrev) {
       return;
     }
     const target = tracks[currentIndex - 1];
+    const resumeTime = getSafeResumeTime();
+    pendingSeekTimeRef.current = resumeTime;
     setCurrentTrackId(target.id);
-    setPlaybackState({ isPlaying: true });
+    setPlaybackState({ isPlaying: true, currentTime: resumeTime });
   }
 
   function handleNext() {
@@ -231,8 +282,10 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
       return;
     }
     const target = tracks[currentIndex + 1];
+    const resumeTime = getSafeResumeTime();
+    pendingSeekTimeRef.current = resumeTime;
     setCurrentTrackId(target.id);
-    setPlaybackState({ isPlaying: true });
+    setPlaybackState({ isPlaying: true, currentTime: resumeTime });
   }
 
   function handlePlayPause() {
@@ -242,6 +295,8 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
     }
 
     if (currentTrack?.source && !isSourceMatch(el, currentTrack.source)) {
+      isSwitchingRef.current = true;
+      pendingSeekTimeRef.current = getSafeResumeTime();
       el.src = currentTrack.source;
     }
 
@@ -265,16 +320,18 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
     const el = audioRef.current;
     if (el) {
       el.pause();
-      el.src = '';
+      el.removeAttribute('src');
+      el.load();
     }
+    pendingSeekTimeRef.current = 0;
     reset();
   }
 
-  function getProgressValue(clientX: number, rect: DOMRect) {
+  const getProgressValue = useCallback((clientX: number, rect: DOMRect) => {
     if (!duration || duration <= 0) return 0;
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
     return ratio * duration;
-  }
+  }, [duration]);
 
   function startDragging(time: number) {
     setIsDragging(true);
@@ -375,7 +432,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('touchmove', onTouchMove);
     };
-  }, [isDragging, duration]);
+  }, [isDragging, duration, getProgressValue]);
 
   if (!isActive || !currentTrack?.source) {
     return null;
@@ -442,7 +499,10 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
                   } else {
                     const rect = partitionBtnRef.current?.getBoundingClientRect();
                     if (rect) {
-                      setDropdownPos({ bottom: window.innerHeight - rect.top + 8, left: rect.left });
+                      const dropdownWidth = 180; // matching min-w-[180px]
+                      const margin = 12;
+                      const left = Math.max(margin, Math.min(rect.left, window.innerWidth - dropdownWidth - margin));
+                      setDropdownPos({ bottom: window.innerHeight - rect.top + 8, left });
                     }
                     setPartitionOpen(true);
                   }
@@ -464,7 +524,10 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
                 } else {
                   const rect = speedBtnRef.current?.getBoundingClientRect();
                   if (rect) {
-                    setSpeedDropdownPos({ bottom: window.innerHeight - rect.top + 8, left: rect.left });
+                    const dropdownWidth = 100; // matching min-w-[100px]
+                    const margin = 12;
+                    const left = Math.max(margin, Math.min(rect.left, window.innerWidth - dropdownWidth - margin));
+                    setSpeedDropdownPos({ bottom: window.innerHeight - rect.top + 8, left });
                   }
                   setSpeedOpen(true);
                 }
@@ -489,11 +552,11 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
             >
               <div className={`relative w-full transition-[height] duration-200 rounded-full bg-[var(--color-soft-bg-hover)] overflow-visible ${isDragging ? 'h-1.5' : 'h-[3px]'}`}>
                 <div
-                  className="absolute inset-y-0 left-0 rounded-full bg-[var(--color-accent)]"
+                  className="absolute inset-y-0 left-0 rounded-full bg-[var(--color-accent)] transition-[width] duration-75"
                   style={{ width: `${progress}%` }}
                 />
                 <div
-                  className={`absolute top-1/2 -translate-y-1/2 h-3.5 w-3.5 rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.5)] transition-all duration-200 pointer-events-none ${isDragging ? 'opacity-100 scale-110' : 'opacity-0 scale-50'}`}
+                  className={`absolute top-1/2 -translate-y-1/2 h-3.5 w-3.5 rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.5)] transition-[opacity,transform,box-shadow] duration-200 pointer-events-none ${isDragging ? 'opacity-100 scale-110' : 'opacity-0 scale-50'}`}
                   style={{ left: `calc(${progress}% - 7px)` }}
                 />
               </div>
@@ -530,8 +593,16 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
                     key={track.id}
                     type="button"
                     onClick={() => {
+                      if (track.id === currentTrackId) {
+                        setPlaybackState({ isPlaying: true });
+                        setPartitionOpen(false);
+                        setDropdownPos(null);
+                        return;
+                      }
+                      const resumeTime = getSafeResumeTime();
+                      pendingSeekTimeRef.current = resumeTime;
                       setCurrentTrackId(track.id);
-                      setPlaybackState({ isPlaying: true });
+                      setPlaybackState({ isPlaying: true, currentTime: resumeTime });
                       setPartitionOpen(false);
                       setDropdownPos(null);
                     }}

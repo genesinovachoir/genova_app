@@ -7,6 +7,7 @@ import { AuthProvider } from '@/components/AuthProvider';
 const notoSerif = Noto_Serif({
   subsets: ['latin'],
   variable: '--font-noto-serif',
+  preload: false,
 });
 
 const manrope = Manrope({

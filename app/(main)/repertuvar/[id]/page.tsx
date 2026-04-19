@@ -174,6 +174,7 @@ export default function SongDetailPage({ params }: { params: Promise<{ id: strin
           )}
 
           <RepertoireWorkspace
+            key={song.id}
             song={song}
             memberId={member?.id ?? null}
             voiceGroup={member?.voice_group ?? null}
