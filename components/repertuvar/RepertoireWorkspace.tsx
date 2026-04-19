@@ -23,6 +23,8 @@ import {
   Trash2,
   Undo2,
   Users,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import { Document, Page, pdfjs } from 'react-pdf';
 
@@ -83,6 +85,10 @@ const pdfOptions = {
 
 const COVER_PARTITION_LABEL = '__cover__';
 const DEFAULT_PAGE_ASPECT_RATIO = 1.414;
+
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2.0;
+const ZOOM_STEP = 0.1;
 
 interface RepertoireWorkspaceProps {
   song: RepertoireSong;
@@ -907,6 +913,7 @@ export function RepertoireWorkspace({
   const attemptedAutoSyncVersionRef = useRef<string | null>(null);
 
   const [viewerWidth, setViewerWidth] = useState(0);
+  const [zoomLevel, setZoomLevel] = useState(1.0);
   const [offlineSupported, setOfflineSupported] = useState(false);
   const [offlineEnabled, setOfflineEnabledState] = useState(false);
   const [offlineSyncing, setOfflineSyncing] = useState(false);
@@ -1696,9 +1703,22 @@ export function RepertoireWorkspace({
     setActiveColor(COLOR_OPTIONS[(idx + 1) % COLOR_OPTIONS.length]);
   }
 
+  function zoomIn() {
+    setZoomLevel((prev) => Math.min(MAX_ZOOM, Math.round((prev + ZOOM_STEP) * 10) / 10));
+  }
+
+  function zoomOut() {
+    setZoomLevel((prev) => Math.max(MIN_ZOOM, Math.round((prev - ZOOM_STEP) * 10) / 10));
+  }
+
+  function resetZoom() {
+    setZoomLevel(1.0);
+  }
+
   const activeToolInfo = TOOL_CYCLE.find((o) => o.tool === activeTool) ?? null;
   const ToolIcon = activeToolInfo?.Icon ?? Pencil;
   const toolLabel = activeToolInfo?.label ?? '—';
+  const zoomedWidth = viewerWidth > 0 ? Math.floor(viewerWidth * zoomLevel) : 0;
 
   function renderWorkspaceControls(extraClassName?: string) {
     return (
@@ -1855,241 +1875,265 @@ export function RepertoireWorkspace({
 
   return (
     <>
-      <section className="glass-panel p-5 sm:p-6">
-        <div className="space-y-3">
-          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_280px]">
-          <div className="space-y-3">
-            {sheetFiles.length === 0 && (
-              <div className="rounded-[8px] border border-[var(--color-border)] bg-white/4 px-3 py-2 text-xs text-[var(--color-text-medium)]">
-                PDF bulunamadı
-              </div>
-            )}
+      {/* AudioPanel — ses lojiği, görsel arayüz yok */}
+      <AudioPanel
+        songId={song.id}
+        songTitle={song.title}
+        coverSource={selectedCoverPreviewSource}
+        audioFiles={audioFiles}
+        selectedAudio={selectedAudio ?? null}
+        selectedAudioSource={selectedAudioSource}
+        allowOfflineFallback={allowOfflineFallback}
+        audioRef={audioRef}
+        setSelectedAudioId={setSelectedAudioId}
+        setAudioState={setAudioState}
+        renderUi={false}
+      />
 
-            {renderWorkspaceControls()}
+      {saveState === 'error' && saveError && (
+        <div className="flex items-center gap-2 rounded-[10px] border border-red-500/30 bg-red-500/10 px-4 py-3">
+          <AlertCircle size={14} className="text-red-400" />
+          <p className="text-sm text-red-400">{saveError}</p>
+        </div>
+      )}
+
+      {annotationError && (
+        <div className="flex items-center gap-2 rounded-[10px] border border-orange-500/30 bg-orange-500/10 px-4 py-3">
+          <AlertCircle size={14} className="text-orange-300" />
+          <p className="text-sm text-orange-200">{annotationError}</p>
+        </div>
+      )}
+
+      {/* PDF Çerçevesi — tam genişlik, dış section kaldırıldı */}
+      <div className="relative overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-pdf-stage-bg)] p-2 sm:p-4">
+
+        {/* Araç çubuğu: kontroller + zoom */}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          {sheetFiles.length === 0 && (
+            <div className="rounded-[8px] border border-[var(--color-border)] bg-white/4 px-3 py-2 text-xs text-[var(--color-text-medium)]">
+              PDF bulunamadı
+            </div>
+          )}
+
+          {renderWorkspaceControls()}
+
+          {/* Zoom kontrolleri */}
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              onClick={zoomOut}
+              disabled={zoomLevel <= MIN_ZOOM}
+              className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] disabled:opacity-40"
+              title="Küçült"
+            >
+              <ZoomOut size={13} />
+            </button>
+            <button
+              type="button"
+              onClick={resetZoom}
+              className="h-8 inline-flex items-center rounded-[8px] border border-[var(--color-border)] bg-white/4 px-2.5 text-[0.62rem] font-bold uppercase tracking-[0.12em] text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)]"
+              title="Zoom'u sıfırla"
+            >
+              {Math.round(zoomLevel * 100)}%
+            </button>
+            <button
+              type="button"
+              onClick={zoomIn}
+              disabled={zoomLevel >= MAX_ZOOM}
+              className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] disabled:opacity-40"
+              title="Büyüt"
+            >
+              <ZoomIn size={13} />
+            </button>
           </div>
-
-          <AudioPanel
-            songId={song.id}
-            songTitle={song.title}
-            coverSource={selectedCoverPreviewSource}
-            audioFiles={audioFiles}
-            selectedAudio={selectedAudio ?? null}
-            selectedAudioSource={selectedAudioSource}
-            allowOfflineFallback={allowOfflineFallback}
-            audioRef={audioRef}
-            setSelectedAudioId={setSelectedAudioId}
-            setAudioState={setAudioState}
-            renderUi={false}
-          />
         </div>
 
-        {saveState === 'error' && saveError && (
-          <div className="flex items-center gap-2 rounded-[10px] border border-red-500/30 bg-red-500/10 px-4 py-3">
-            <AlertCircle size={14} className="text-red-400" />
-            <p className="text-sm text-red-400">{saveError}</p>
+        {!selectedPdf && !hasCoverPage ? (
+          <div className="flex min-h-[360px] flex-col items-center justify-center px-6 py-12 text-center">
+            <FileText size={48} className="text-[var(--color-text-medium)]/40" />
+            <h4 className="mt-4 font-serif text-2xl tracking-[-0.04em]">PDF bulunamadı</h4>
+            <p className="mt-2 max-w-md text-sm text-[var(--color-text-medium)]">
+              Çalışma alanı için önce nota PDF yüklenmeli.
+            </p>
           </div>
-        )}
-
-        {annotationError && (
-          <div className="flex items-center gap-2 rounded-[10px] border border-orange-500/30 bg-orange-500/10 px-4 py-3">
-            <AlertCircle size={14} className="text-orange-300" />
-            <p className="text-sm text-orange-200">{annotationError}</p>
+        ) : !selectedPdfSource && selectedPdf && !hasCoverPage ? (
+          <div className="flex min-h-[360px] flex-col items-center justify-center px-6 py-12 text-center">
+            <FileText size={48} className="text-[var(--color-text-medium)]/40" />
+            <h4 className="mt-4 font-serif text-2xl tracking-[-0.04em]">Bu PDF uygulama içinde açılamıyor</h4>
+            <p className="mt-2 max-w-md text-sm text-[var(--color-text-medium)]">
+              Doğrudan indirme bağlantısı olmadığı için bu sekmede inline görüntüleme pasif. Alttaki dosya listesinden dış bağlantıyı kullanabilirsin.
+            </p>
           </div>
-        )}
-
-          <div className="relative overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-pdf-stage-bg)] p-2 sm:p-4">
-            {!selectedPdf && !hasCoverPage ? (
-              <div className="flex min-h-[360px] flex-col items-center justify-center px-6 py-12 text-center">
-                <FileText size={48} className="text-[var(--color-text-medium)]/40" />
-                <h4 className="mt-4 font-serif text-2xl tracking-[-0.04em]">PDF bulunamadı</h4>
-                <p className="mt-2 max-w-md text-sm text-[var(--color-text-medium)]">
-                  Çalışma alanı için önce nota PDF yüklenmeli.
-                </p>
-              </div>
-            ) : !selectedPdfSource && selectedPdf && !hasCoverPage ? (
-              <div className="flex min-h-[360px] flex-col items-center justify-center px-6 py-12 text-center">
-                <FileText size={48} className="text-[var(--color-text-medium)]/40" />
-                <h4 className="mt-4 font-serif text-2xl tracking-[-0.04em]">Bu PDF uygulama içinde açılamıyor</h4>
-                <p className="mt-2 max-w-md text-sm text-[var(--color-text-medium)]">
-                  Doğrudan indirme bağlantısı olmadığı için bu sekmede inline görüntüleme pasif. Alttaki dosya listesinden dış bağlantıyı kullanabilirsin.
-                </p>
-              </div>
-            ) : (
-              <div ref={containerRef} className="mx-auto w-full max-w-[980px]">
-                {viewerWidth > 0 && (
-                  selectedPdfSource ? (
-                    <Document
-                      file={selectedPdfSource}
-                      loading={
-                        <div className="flex min-h-[360px] items-center justify-center">
-                          <Loader2 className="animate-spin text-[var(--color-accent)]" size={28} />
-                        </div>
-                      }
-                      noData={
-                        <div className="flex min-h-[360px] items-center justify-center text-sm text-[var(--color-text-medium)]">
-                          PDF yüklenemedi.
-                        </div>
-                      }
-                      options={pdfOptions}
-                      onLoadError={(error) => {
-                        setDocumentError(error.message);
-                        setTotalPages(0);
-                      }}
-                      onLoadSuccess={({ numPages }) => {
-                        setDocumentError(null);
-                        setTotalPages(numPages);
-                        const nextTotal = numPages + (hasCoverPage ? 1 : 0);
-                        if (currentPage > nextTotal) {
-                          setCurrentPage(nextTotal);
-                        }
-                      }}
-                    >
-                      <div
-                        className="repertoire-pdf-stage relative mx-auto overflow-hidden rounded-[8px]"
-                        style={{
-                          width: viewerWidth,
-                          height: viewerWidth * stageAspectRatio,
-                        }}
-                      >
-                        {isCoverPage && selectedCoverPreviewSource ? (
-                          selectedCoverIsPdf ? (
-                            <iframe
-                              src={`${selectedCoverPreviewSource}#page=1&toolbar=0&navpanes=0&scrollbar=0`}
-                              title={`${song.title} kapak PDF`}
-                              className="h-full w-full border-0"
-                            />
-                          ) : (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={selectedCoverPreviewSource}
-                              alt={`${song.title} kapak`}
-                              className="h-full w-full object-cover"
-                            />
-                          )
-                        ) : (
-                          <>
-                            <Page
-                              pageNumber={activePdfPageNumber ?? 1}
-                              width={viewerWidth}
-                              renderAnnotationLayer={false}
-                              renderTextLayer={false}
-                              onLoadSuccess={(page) => {
-                                const viewport = page.getViewport({ scale: 1 });
-                                setPageAspectRatio(viewport.height / viewport.width);
-                              }}
-                            />
-
-                            {activePdfPageNumber && pageAspectRatio && (
-                              <AnnotationStage
-                                key={`${selectedPdf?.id ?? 'none'}:${activePdfPageNumber}:${activeLayerKey}:${activeTool ?? 'none'}:${isEditMode ? 'edit' : 'read'}`}
-                                width={viewerWidth}
-                                height={viewerWidth * stageAspectRatio}
-                                items={visibleAnnotationEntries}
-                                activeItems={activeItems}
-                                activeTool={activeTool}
-                                activeColor={activeColor}
-                                isEditMode={isEditMode}
-                                onCommitActiveItems={commitActiveItems}
-                              />
-                            )}
-                          </>
-                        )}
-
-                        {annotationLoading && (
-                          <div className="pointer-events-none absolute inset-0 z-20 flex items-start justify-end p-4">
-                            <div className="inline-flex items-center gap-2 rounded-[999px] border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-3 py-2 text-[0.62rem] font-bold uppercase tracking-[0.18em] text-[var(--color-text-medium)]">
-                              <Loader2 size={13} className="animate-spin" />
-                              Notlar yükleniyor
-                            </div>
-                          </div>
-                        )}
-
-                        {!isEditMode && totalDisplayPages > 0 && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                              disabled={!canGoPrevPage}
-                              className="absolute inset-y-0 left-0 z-10 w-[18%] min-w-[56px] max-w-[112px] bg-transparent disabled:pointer-events-none"
-                              aria-label="Önceki sayfa"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setCurrentPage(Math.min(totalDisplayPages, currentPage + 1))}
-                              disabled={!canGoNextPage}
-                              className="absolute inset-y-0 right-0 z-10 w-[18%] min-w-[56px] max-w-[112px] bg-transparent disabled:pointer-events-none"
-                              aria-label="Sonraki sayfa"
-                            />
-                          </>
-                        )}
-                      </div>
-                    </Document>
-                  ) : (
-                    <div
-                      className="repertoire-pdf-stage relative mx-auto overflow-hidden rounded-[8px]"
-                      style={{
-                        width: viewerWidth,
-                        height: viewerWidth * stageAspectRatio,
-                      }}
-                    >
-                      {selectedCoverPreviewSource ? (
-                        selectedCoverIsPdf ? (
-                          <iframe
-                            src={`${selectedCoverPreviewSource}#page=1&toolbar=0&navpanes=0&scrollbar=0`}
-                            title={`${song.title} kapak PDF`}
-                            className="h-full w-full border-0"
-                          />
-                        ) : (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={selectedCoverPreviewSource}
-                            alt={`${song.title} kapak`}
-                            className="h-full w-full object-cover"
-                          />
-                        )
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center">
-                          <FileText size={48} className="text-[var(--color-text-medium)]/40" />
-                        </div>
-                      )}
-
-                      {!isEditMode && totalDisplayPages > 0 && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                            disabled={!canGoPrevPage}
-                            className="absolute inset-y-0 left-0 z-10 w-[18%] min-w-[56px] max-w-[112px] bg-transparent disabled:pointer-events-none"
-                            aria-label="Önceki sayfa"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setCurrentPage(Math.min(totalDisplayPages, currentPage + 1))}
-                            disabled={!canGoNextPage}
-                            className="absolute inset-y-0 right-0 z-10 w-[18%] min-w-[56px] max-w-[112px] bg-transparent disabled:pointer-events-none"
-                            aria-label="Sonraki sayfa"
-                          />
-                        </>
-                      )}
+        ) : (
+          <div ref={containerRef} className="mx-auto w-full max-w-[980px] overflow-x-auto">
+            {viewerWidth > 0 && (
+              selectedPdfSource ? (
+                <Document
+                  file={selectedPdfSource}
+                  loading={
+                    <div className="flex min-h-[360px] items-center justify-center">
+                      <Loader2 className="animate-spin text-[var(--color-accent)]" size={28} />
                     </div>
-                  )
-                )}
+                  }
+                  noData={
+                    <div className="flex min-h-[360px] items-center justify-center text-sm text-[var(--color-text-medium)]">
+                      PDF yüklenemedi.
+                    </div>
+                  }
+                  options={pdfOptions}
+                  onLoadError={(error) => {
+                    setDocumentError(error.message);
+                    setTotalPages(0);
+                  }}
+                  onLoadSuccess={({ numPages }) => {
+                    setDocumentError(null);
+                    setTotalPages(numPages);
+                    const nextTotal = numPages + (hasCoverPage ? 1 : 0);
+                    if (currentPage > nextTotal) {
+                      setCurrentPage(nextTotal);
+                    }
+                  }}
+                >
+                  <div
+                    className="repertoire-pdf-stage relative mx-auto overflow-hidden rounded-[8px]"
+                    style={{
+                      width: zoomedWidth,
+                      height: zoomedWidth * stageAspectRatio,
+                    }}
+                  >
+                    {isCoverPage && selectedCoverPreviewSource ? (
+                      selectedCoverIsPdf ? (
+                        <iframe
+                          src={`${selectedCoverPreviewSource}#page=1&toolbar=0&navpanes=0&scrollbar=0`}
+                          title={`${song.title} kapak PDF`}
+                          className="h-full w-full border-0"
+                        />
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={selectedCoverPreviewSource}
+                          alt={`${song.title} kapak`}
+                          className="h-full w-full object-cover"
+                        />
+                      )
+                    ) : (
+                      <>
+                        <Page
+                          pageNumber={activePdfPageNumber ?? 1}
+                          width={zoomedWidth}
+                          renderAnnotationLayer={false}
+                          renderTextLayer={false}
+                          onLoadSuccess={(page) => {
+                            const viewport = page.getViewport({ scale: 1 });
+                            setPageAspectRatio(viewport.height / viewport.width);
+                          }}
+                        />
 
-                {documentError && (
-                  <div className="mt-3 flex items-center gap-2 rounded-[10px] border border-red-500/30 bg-red-500/10 px-4 py-3">
-                    <AlertCircle size={14} className="text-red-400" />
-                    <p className="text-sm text-red-400">{documentError}</p>
+                        {activePdfPageNumber && pageAspectRatio && (
+                          <AnnotationStage
+                            key={`${selectedPdf?.id ?? 'none'}:${activePdfPageNumber}:${activeLayerKey}:${activeTool ?? 'none'}:${isEditMode ? 'edit' : 'read'}`}
+                            width={zoomedWidth}
+                            height={zoomedWidth * stageAspectRatio}
+                            items={visibleAnnotationEntries}
+                            activeItems={activeItems}
+                            activeTool={activeTool}
+                            activeColor={activeColor}
+                            isEditMode={isEditMode}
+                            onCommitActiveItems={commitActiveItems}
+                          />
+                        )}
+                      </>
+                    )}
+
+                    {annotationLoading && (
+                      <div className="pointer-events-none absolute inset-0 z-20 flex items-start justify-end p-4">
+                        <div className="inline-flex items-center gap-2 rounded-[999px] border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-3 py-2 text-[0.62rem] font-bold uppercase tracking-[0.18em] text-[var(--color-text-medium)]">
+                          <Loader2 size={13} className="animate-spin" />
+                          Notlar yükleniyor
+                        </div>
+                      </div>
+                    )}
+
+                    {!isEditMode && totalDisplayPages > 0 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                          disabled={!canGoPrevPage}
+                          className="absolute inset-y-0 left-0 z-10 w-[18%] min-w-[56px] max-w-[112px] bg-transparent disabled:pointer-events-none"
+                          aria-label="Önceki sayfa"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setCurrentPage(Math.min(totalDisplayPages, currentPage + 1))}
+                          disabled={!canGoNextPage}
+                          className="absolute inset-y-0 right-0 z-10 w-[18%] min-w-[56px] max-w-[112px] bg-transparent disabled:pointer-events-none"
+                          aria-label="Sonraki sayfa"
+                        />
+                      </>
+                    )}
                   </div>
-                )}
+                </Document>
+              ) : (
+                <div
+                  className="repertoire-pdf-stage relative mx-auto overflow-hidden rounded-[8px]"
+                  style={{
+                    width: zoomedWidth,
+                    height: zoomedWidth * stageAspectRatio,
+                  }}
+                >
+                  {selectedCoverPreviewSource ? (
+                    selectedCoverIsPdf ? (
+                      <iframe
+                        src={`${selectedCoverPreviewSource}#page=1&toolbar=0&navpanes=0&scrollbar=0`}
+                        title={`${song.title} kapak PDF`}
+                        className="h-full w-full border-0"
+                      />
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={selectedCoverPreviewSource}
+                        alt={`${song.title} kapak`}
+                        className="h-full w-full object-cover"
+                      />
+                    )
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center">
+                      <FileText size={48} className="text-[var(--color-text-medium)]/40" />
+                    </div>
+                  )}
 
-                <div className="mt-3">
-                  {renderWorkspaceControls()}
+                  {!isEditMode && totalDisplayPages > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                        disabled={!canGoPrevPage}
+                        className="absolute inset-y-0 left-0 z-10 w-[18%] min-w-[56px] max-w-[112px] bg-transparent disabled:pointer-events-none"
+                        aria-label="Önceki sayfa"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(Math.min(totalDisplayPages, currentPage + 1))}
+                        disabled={!canGoNextPage}
+                        className="absolute inset-y-0 right-0 z-10 w-[18%] min-w-[56px] max-w-[112px] bg-transparent disabled:pointer-events-none"
+                        aria-label="Sonraki sayfa"
+                      />
+                    </>
+                  )}
                 </div>
+              )
+            )}
+
+            {documentError && (
+              <div className="mt-3 flex items-center gap-2 rounded-[10px] border border-red-500/30 bg-red-500/10 px-4 py-3">
+                <AlertCircle size={14} className="text-red-400" />
+                <p className="text-sm text-red-400">{documentError}</p>
               </div>
             )}
           </div>
-        </div>
-      </section>
+        )}
+      </div>
 
       <ChefCommentSection
         key={`${song.id}:${commentPreviewVoiceGroup}`}
