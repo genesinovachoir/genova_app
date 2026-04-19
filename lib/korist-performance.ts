@@ -1,5 +1,6 @@
 import type { Attendance, Assignment, AssignmentSubmission, ChoirMember, Rehearsal } from './supabase';
 import { supabase } from './supabase';
+import { getRoleDisplayLabel } from './role-labels';
 
 export const PERFORMANCE_ROOT_QUERY_KEY = ['korist-performance'] as const;
 export const VOICE_GROUP_ORDER = ['Soprano', 'Alto', 'Tenor', 'Bass'] as const;
@@ -27,6 +28,13 @@ type AssignmentTargetRow = {
   member_id: string;
 };
 
+type ChoirMemberRoleRow = {
+  member_id: string;
+  roles?: { name?: string | null } | Array<{ name?: string | null }> | null;
+};
+
+const LEADERSHIP_ROLE_NAMES = new Set(['sef', 'partisyon sefi']);
+
 interface PerformanceMember extends ChoirMember {
   school_name: string | null;
   department_name: string | null;
@@ -36,18 +44,19 @@ interface PerformanceMember extends ChoirMember {
 }
 
 export interface PerformanceMemberMetrics {
+  show_homework_metrics: boolean;
   total_rehearsals: number;
   attended_rehearsals: number;
   pending_rehearsals: number;
   missed_rehearsals: number;
-  total_assignments: number;
-  approved_assignments: number;
-  submitted_assignments: number;
-  pending_assignments: number;
-  rejected_assignments: number;
   attendance_percent: number;
-  homework_percent: number;
-  continuity_percent: number;
+  total_assignments: number | null;
+  approved_assignments: number | null;
+  submitted_assignments: number | null;
+  pending_assignments: number | null;
+  rejected_assignments: number | null;
+  homework_percent: number | null;
+  continuity_percent: number | null;
 }
 
 export interface PerformanceRosterMember extends PerformanceMember, PerformanceMemberMetrics {}
@@ -70,12 +79,15 @@ export interface PerformanceHomeworkEntry {
 
 export interface PerformanceOverview {
   scope_label: string;
+  show_homework_metrics: boolean;
   members: PerformanceRosterMember[];
   summary: PerformanceSummary;
+  groupSummaries: Array<PerformanceSummary & { groupName: string }>;
 }
 
 export interface PerformanceMemberDetail {
   scope_label: string;
+  show_homework_metrics: boolean;
   member: PerformanceRosterMember;
   rehearsals: PerformanceRehearsalEntry[];
   homework: PerformanceHomeworkEntry[];
@@ -136,12 +148,50 @@ function formatMetricPercent(numerator: number, denominator: number) {
   return Math.max(0, Math.min(100, Math.round((numerator / denominator) * 100)));
 }
 
+function normalizeRoleName(value: string) {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ş/gi, 's')
+    .replace(/ı/gi, 'i')
+    .toLocaleLowerCase('tr-TR')
+    .trim();
+}
+
+function collectRoleNames(value: ChoirMemberRoleRow['roles']) {
+  if (!value) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((role) => role?.name)
+      .filter((roleName): roleName is string => Boolean(roleName))
+      .map((roleName) => normalizeRoleName(roleName));
+  }
+  return value.name ? [normalizeRoleName(value.name)] : [];
+}
+
+function getOrderedVoiceGroups(members: Array<Pick<PerformanceMember, 'voice_group'>>, includeAllCoreGroups: boolean) {
+  const voiceGroups = [...new Set(members.map((member) => member.voice_group).filter((voiceGroup): voiceGroup is string => Boolean(voiceGroup)))];
+  const orderedDetected = [
+    ...VOICE_GROUP_ORDER.filter((voiceGroup) => voiceGroups.includes(voiceGroup)),
+    ...voiceGroups.filter((voiceGroup) => !VOICE_GROUP_ORDER.includes(voiceGroup as (typeof VOICE_GROUP_ORDER)[number])),
+  ];
+
+  if (!includeAllCoreGroups) {
+    return orderedDetected;
+  }
+
+  const extraGroups = orderedDetected.filter((voiceGroup) => !VOICE_GROUP_ORDER.includes(voiceGroup as (typeof VOICE_GROUP_ORDER)[number]));
+  return [...VOICE_GROUP_ORDER, ...extraGroups];
+}
+
 function getScopeLabel(member: ChoirMember | null, isChef: boolean, isSectionLeader: boolean) {
   if (isChef) {
     return 'Tüm koristler';
   }
-  if (isSectionLeader && member?.voice_group) {
-    return `${member.voice_group} partisi`;
+  if (isSectionLeader) {
+    return getRoleDisplayLabel('Partisyon Şefi', member?.voice_group ?? null);
   }
   return 'Koristler';
 }
@@ -219,10 +269,15 @@ function buildAssignmentMemberMap(
   assignments: AssignmentQueryRow[],
   scopeMembers: PerformanceMember[],
   targetRows: AssignmentTargetRow[],
+  homeworkEligibleMemberIds: Set<string>,
 ) {
   const assignmentTargetMap = new Map<string, Set<string>>();
 
   for (const row of targetRows) {
+    if (!homeworkEligibleMemberIds.has(row.member_id)) {
+      continue;
+    }
+
     const existing = assignmentTargetMap.get(row.assignment_id) ?? new Set<string>();
     existing.add(row.member_id);
     assignmentTargetMap.set(row.assignment_id, existing);
@@ -236,8 +291,8 @@ function buildAssignmentMemberMap(
     }
 
     const fallbackMembers = assignment.target_voice_group?.trim()
-      ? scopeMembers.filter((member) => member.voice_group === assignment.target_voice_group)
-      : scopeMembers;
+      ? scopeMembers.filter((member) => member.voice_group === assignment.target_voice_group && homeworkEligibleMemberIds.has(member.id))
+      : scopeMembers.filter((member) => homeworkEligibleMemberIds.has(member.id));
 
     assignmentTargetMap.set(assignment.id, new Set(fallbackMembers.map((member) => member.id)));
   }
@@ -253,7 +308,8 @@ function buildMemberMetrics(
   assignmentTargetMap: Map<string, Set<string>>,
   submissionRows: AssignmentSubmission[],
   todayKey: string,
-) {
+  includeHomeworkMetrics: boolean,
+): PerformanceMemberMetrics {
   const memberInviteeIds = new Set(
     inviteRows.filter((row) => row.member_id === member.id).map((row) => row.rehearsal_id),
   );
@@ -261,9 +317,6 @@ function buildMemberMetrics(
     const rehearsalDateKey = toDateKey(rehearsal.date);
     if (!isPastOrToday(rehearsalDateKey, todayKey)) {
       return false;
-    }
-    if (memberInviteeIds.size === 0) {
-      return true;
     }
     return memberInviteeIds.has(rehearsal.id);
   });
@@ -291,6 +344,26 @@ function buildMemberMetrics(
       continue;
     }
     missedRehearsals += 1;
+  }
+
+  const attendancePercent = formatMetricPercent(attendedRehearsals, relevantRehearsals.length);
+
+  if (!includeHomeworkMetrics) {
+    return {
+      show_homework_metrics: false,
+      total_rehearsals: relevantRehearsals.length,
+      attended_rehearsals: attendedRehearsals,
+      pending_rehearsals: pendingRehearsals,
+      missed_rehearsals: missedRehearsals,
+      total_assignments: null,
+      approved_assignments: null,
+      submitted_assignments: null,
+      pending_assignments: null,
+      rejected_assignments: null,
+      attendance_percent: attendancePercent,
+      homework_percent: null,
+      continuity_percent: null,
+    };
   }
 
   const latestSubmissionMap = getLatestSubmissionMap(submissionRows);
@@ -330,7 +403,6 @@ function buildMemberMetrics(
     }
   }
 
-  const attendancePercent = formatMetricPercent(attendedRehearsals, relevantRehearsals.length);
   const homeworkPercent = formatMetricPercent(approvedAssignments, totalAssignments);
   const continuityPercent = formatMetricPercent(
     attendedRehearsals + approvedAssignments,
@@ -338,6 +410,7 @@ function buildMemberMetrics(
   );
 
   return {
+    show_homework_metrics: true,
     total_rehearsals: relevantRehearsals.length,
     attended_rehearsals: attendedRehearsals,
     pending_rehearsals: pendingRehearsals,
@@ -353,6 +426,18 @@ function buildMemberMetrics(
   };
 }
 
+interface PerformanceDataset {
+  show_homework_metrics: boolean;
+  scopeMembers: PerformanceMember[];
+  leadershipMemberIds: Set<string>;
+  rehearsals: Rehearsal[];
+  inviteRows: RehearsalInviteRow[];
+  attendanceRows: Attendance[];
+  assignments: AssignmentQueryRow[];
+  targetRows: AssignmentTargetRow[];
+  submissionRows: AssignmentSubmission[];
+}
+
 async function loadPerformanceDataset(member: ChoirMember | null, isChef: boolean, isSectionLeader: boolean) {
   if (!member?.id) {
     return null;
@@ -361,6 +446,22 @@ async function loadPerformanceDataset(member: ChoirMember | null, isChef: boolea
   if (!isChef && !isSectionLeader) {
     return null;
   }
+
+  if (!isChef && isSectionLeader && !member.voice_group) {
+    return {
+      show_homework_metrics: false,
+      scopeMembers: [],
+      leadershipMemberIds: new Set<string>(),
+      rehearsals: [],
+      inviteRows: [],
+      attendanceRows: [],
+      assignments: [],
+      targetRows: [],
+      submissionRows: [],
+    };
+  }
+
+  const showHomeworkMetrics = isChef || isSectionLeader;
 
   let memberQuery = supabase
     .from('choir_members')
@@ -373,10 +474,9 @@ async function loadPerformanceDataset(member: ChoirMember | null, isChef: boolea
       departments(name),
       repertoire:favorite_song_id(title, composer)
     `)
-    .eq('is_active', true)
-    .not('voice_group', 'is', null);
+    .eq('is_active', true);
 
-  if (!isChef && isSectionLeader && member.voice_group) {
+  if (!isChef && isSectionLeader) {
     memberQuery = memberQuery.eq('voice_group', member.voice_group);
   }
 
@@ -393,10 +493,12 @@ async function loadPerformanceDataset(member: ChoirMember | null, isChef: boolea
     .eq('collect_attendance', true)
     .order('date', { ascending: true });
 
-  const assignmentQuery = supabase
-    .from('assignments')
-    .select('id, title, description, deadline, target_voice_group, drive_folder_id, created_by, is_active, created_at, updated_at')
-    .order('created_at', { ascending: true });
+  const assignmentQuery = showHomeworkMetrics
+    ? supabase
+        .from('assignments')
+        .select('id, title, description, deadline, target_voice_group, drive_folder_id, created_by, is_active, created_at, updated_at')
+        .order('created_at', { ascending: true })
+    : Promise.resolve({ data: [], error: null as null });
 
   const [{ data: rehearsalRows, error: rehearsalError }, { data: assignmentRows, error: assignmentError }] =
     await Promise.all([rehearsalQuery, assignmentQuery]);
@@ -409,10 +511,18 @@ async function loadPerformanceDataset(member: ChoirMember | null, isChef: boolea
   }
 
   const rehearsals = (rehearsalRows ?? []) as Rehearsal[];
-  const assignments = (assignmentRows ?? []) as AssignmentQueryRow[];
+  const assignments = showHomeworkMetrics ? ((assignmentRows ?? []) as AssignmentQueryRow[]) : [];
   const rehearsalIds = rehearsals.map((row) => row.id);
   const scopeMemberIds = scopeMembers.map((row) => row.id);
   const assignmentIds = assignments.map((row) => row.id);
+
+  const roleRowsPromise =
+    scopeMemberIds.length > 0
+      ? supabase
+          .from('choir_member_roles')
+          .select('member_id, roles(name)')
+          .in('member_id', scopeMemberIds)
+      : Promise.resolve({ data: [], error: null as null });
 
   const invitePromise =
     rehearsalIds.length > 0
@@ -429,12 +539,12 @@ async function loadPerformanceDataset(member: ChoirMember | null, isChef: boolea
       : Promise.resolve({ data: [], error: null as null });
 
   const targetPromise =
-    assignmentIds.length > 0
+    showHomeworkMetrics && assignmentIds.length > 0
       ? supabase.from('assignment_targets').select('assignment_id, member_id').in('assignment_id', assignmentIds)
       : Promise.resolve({ data: [], error: null as null });
 
   const submissionPromise =
-    assignmentIds.length > 0 && scopeMemberIds.length > 0
+    showHomeworkMetrics && assignmentIds.length > 0 && scopeMemberIds.length > 0
       ? supabase
           .from('assignment_submissions')
           .select(
@@ -449,7 +559,8 @@ async function loadPerformanceDataset(member: ChoirMember | null, isChef: boolea
     { data: attendanceRows, error: attendanceError },
     { data: targetRows, error: targetError },
     { data: submissionRows, error: submissionError },
-  ] = await Promise.all([invitePromise, attendancePromise, targetPromise, submissionPromise]);
+    { data: roleRows, error: roleRowsError },
+  ] = await Promise.all([invitePromise, attendancePromise, targetPromise, submissionPromise, roleRowsPromise]);
 
   if (inviteError) {
     throw inviteError;
@@ -463,9 +574,26 @@ async function loadPerformanceDataset(member: ChoirMember | null, isChef: boolea
   if (submissionError) {
     throw submissionError;
   }
+  if (roleRowsError) {
+    throw roleRowsError;
+  }
+
+  const leadershipMemberIds = new Set<string>();
+  for (const row of (roleRows ?? []) as ChoirMemberRoleRow[]) {
+    const roleNames = collectRoleNames(row.roles);
+    if (roleNames.some((roleName) => LEADERSHIP_ROLE_NAMES.has(roleName))) {
+      leadershipMemberIds.add(row.member_id);
+    }
+  }
+
+  if (scopeMemberIds.includes(member.id) && (isChef || isSectionLeader)) {
+    leadershipMemberIds.add(member.id);
+  }
 
   return {
+    show_homework_metrics: showHomeworkMetrics,
     scopeMembers,
+    leadershipMemberIds,
     rehearsals,
     inviteRows: (inviteRows ?? []) as RehearsalInviteRow[],
     attendanceRows: (attendanceRows ?? []) as Attendance[],
@@ -475,19 +603,30 @@ async function loadPerformanceDataset(member: ChoirMember | null, isChef: boolea
   };
 }
 
-function buildScopeSummary(
-  scopeMembers: PerformanceMember[],
-  rehearsals: Rehearsal[],
-  inviteRows: RehearsalInviteRow[],
-  attendanceRows: Attendance[],
-  assignments: AssignmentQueryRow[],
-  targetRows: AssignmentTargetRow[],
-  submissionRows: AssignmentSubmission[],
-) {
+function buildScopeSummary(dataset: PerformanceDataset): {
+  members: PerformanceRosterMember[];
+  summary: PerformanceSummary;
+  groupSummaries: Array<PerformanceSummary & { groupName: string }>;
+} {
+  const { scopeMembers, leadershipMemberIds, rehearsals, inviteRows, attendanceRows, assignments, targetRows, submissionRows, show_homework_metrics } = dataset;
   const todayKey = getTodayKey();
-  const assignmentTargetMap = buildAssignmentMemberMap(assignments, scopeMembers, targetRows);
+  const homeworkEligibleMemberIds = new Set(
+    scopeMembers.filter((member) => !leadershipMemberIds.has(member.id)).map((member) => member.id),
+  );
+  const assignmentTargetMap = show_homework_metrics
+    ? buildAssignmentMemberMap(assignments, scopeMembers, targetRows, homeworkEligibleMemberIds)
+    : new Map<string, Set<string>>();
   const memberMetrics = scopeMembers.map((member) =>
-    buildMemberMetrics(member, rehearsals, inviteRows, attendanceRows, assignmentTargetMap, submissionRows, todayKey),
+    buildMemberMetrics(
+      member,
+      rehearsals,
+      inviteRows,
+      attendanceRows,
+      assignmentTargetMap,
+      submissionRows,
+      todayKey,
+      show_homework_metrics && homeworkEligibleMemberIds.has(member.id),
+    ),
   );
 
   const members = scopeMembers.map((member, index) => ({
@@ -502,40 +641,96 @@ function buildScopeSummary(
       acc.attended_rehearsals += member.attended_rehearsals;
       acc.pending_rehearsals += member.pending_rehearsals;
       acc.missed_rehearsals += member.missed_rehearsals;
-      acc.total_assignments += member.total_assignments;
-      acc.approved_assignments += member.approved_assignments;
-      acc.submitted_assignments += member.submitted_assignments;
-      acc.pending_assignments += member.pending_assignments;
-      acc.rejected_assignments += member.rejected_assignments;
+      if (show_homework_metrics) {
+        acc.total_assignments = (acc.total_assignments ?? 0) + (member.total_assignments ?? 0);
+        acc.approved_assignments = (acc.approved_assignments ?? 0) + (member.approved_assignments ?? 0);
+        acc.submitted_assignments = (acc.submitted_assignments ?? 0) + (member.submitted_assignments ?? 0);
+        acc.pending_assignments = (acc.pending_assignments ?? 0) + (member.pending_assignments ?? 0);
+        acc.rejected_assignments = (acc.rejected_assignments ?? 0) + (member.rejected_assignments ?? 0);
+      }
       return acc;
     },
     {
+      show_homework_metrics: show_homework_metrics,
       member_count: 0,
       total_rehearsals: 0,
       attended_rehearsals: 0,
       pending_rehearsals: 0,
       missed_rehearsals: 0,
-      total_assignments: 0,
-      approved_assignments: 0,
-      submitted_assignments: 0,
-      pending_assignments: 0,
-      rejected_assignments: 0,
+      total_assignments: show_homework_metrics ? 0 : null,
+      approved_assignments: show_homework_metrics ? 0 : null,
+      submitted_assignments: show_homework_metrics ? 0 : null,
+      pending_assignments: show_homework_metrics ? 0 : null,
+      rejected_assignments: show_homework_metrics ? 0 : null,
       attendance_percent: 0,
-      homework_percent: 0,
-      continuity_percent: 0,
+      homework_percent: show_homework_metrics ? 0 : null,
+      continuity_percent: show_homework_metrics ? 0 : null,
     },
   );
 
   summary.attendance_percent = formatMetricPercent(summary.attended_rehearsals, summary.total_rehearsals);
-  summary.homework_percent = formatMetricPercent(summary.approved_assignments, summary.total_assignments);
-  summary.continuity_percent = formatMetricPercent(
-    summary.attended_rehearsals + summary.approved_assignments,
-    summary.total_rehearsals + summary.total_assignments,
-  );
+  if (show_homework_metrics) {
+    summary.homework_percent = formatMetricPercent(summary.approved_assignments ?? 0, summary.total_assignments ?? 0);
+    summary.continuity_percent = formatMetricPercent(
+      summary.attended_rehearsals + (summary.approved_assignments ?? 0),
+      summary.total_rehearsals + (summary.total_assignments ?? 0),
+    );
+  }
+
+  const groupNames = getOrderedVoiceGroups(members, show_homework_metrics);
+  const groupSummaries = groupNames.map((groupName) => {
+    const groupMembers = members.filter((m) => m.voice_group === groupName);
+    const groupSummary: PerformanceSummary & { groupName: string } = groupMembers.reduce(
+      (acc, m) => {
+        acc.member_count += 1;
+        acc.total_rehearsals += m.total_rehearsals;
+        acc.attended_rehearsals += m.attended_rehearsals;
+        acc.pending_rehearsals += m.pending_rehearsals;
+        acc.missed_rehearsals += m.missed_rehearsals;
+        if (show_homework_metrics) {
+          acc.total_assignments = (acc.total_assignments ?? 0) + (m.total_assignments ?? 0);
+          acc.approved_assignments = (acc.approved_assignments ?? 0) + (m.approved_assignments ?? 0);
+          acc.submitted_assignments = (acc.submitted_assignments ?? 0) + (m.submitted_assignments ?? 0);
+          acc.pending_assignments = (acc.pending_assignments ?? 0) + (m.pending_assignments ?? 0);
+          acc.rejected_assignments = (acc.rejected_assignments ?? 0) + (m.rejected_assignments ?? 0);
+        }
+        return acc;
+      },
+      {
+        groupName,
+        show_homework_metrics,
+        member_count: 0,
+        total_rehearsals: 0,
+        attended_rehearsals: 0,
+        pending_rehearsals: 0,
+        missed_rehearsals: 0,
+        total_assignments: show_homework_metrics ? 0 : null,
+        approved_assignments: show_homework_metrics ? 0 : null,
+        submitted_assignments: show_homework_metrics ? 0 : null,
+        pending_assignments: show_homework_metrics ? 0 : null,
+        rejected_assignments: show_homework_metrics ? 0 : null,
+        attendance_percent: 0,
+        homework_percent: show_homework_metrics ? 0 : null,
+        continuity_percent: show_homework_metrics ? 0 : null,
+      },
+    );
+
+    groupSummary.attendance_percent = formatMetricPercent(groupSummary.attended_rehearsals, groupSummary.total_rehearsals);
+    if (show_homework_metrics) {
+      groupSummary.homework_percent = formatMetricPercent(groupSummary.approved_assignments ?? 0, groupSummary.total_assignments ?? 0);
+      groupSummary.continuity_percent = formatMetricPercent(
+        groupSummary.attended_rehearsals + (groupSummary.approved_assignments ?? 0),
+        groupSummary.total_rehearsals + (groupSummary.total_assignments ?? 0),
+      );
+    }
+
+    return groupSummary;
+  });
 
   return {
     members,
     summary,
+    groupSummaries,
   };
 }
 
@@ -545,20 +740,14 @@ export async function loadPerformanceOverview(member: ChoirMember | null, isChef
     return null;
   }
 
-  const { members, summary } = buildScopeSummary(
-    dataset.scopeMembers,
-    dataset.rehearsals,
-    dataset.inviteRows,
-    dataset.attendanceRows,
-    dataset.assignments,
-    dataset.targetRows,
-    dataset.submissionRows,
-  );
+  const { members, summary, groupSummaries } = buildScopeSummary(dataset);
 
   return {
     scope_label: getScopeLabel(member, isChef, isSectionLeader),
+    show_homework_metrics: dataset.show_homework_metrics,
     members,
     summary,
+    groupSummaries,
   };
 }
 
@@ -573,15 +762,7 @@ export async function loadPerformanceMemberDetail(
     return null;
   }
 
-  const scopeResult = buildScopeSummary(
-    dataset.scopeMembers,
-    dataset.rehearsals,
-    dataset.inviteRows,
-    dataset.attendanceRows,
-    dataset.assignments,
-    dataset.targetRows,
-    dataset.submissionRows,
-  );
+  const scopeResult = buildScopeSummary(dataset);
 
   const selectedMember = scopeResult.members.find((row) => row.id === targetMemberId) ?? null;
   if (!selectedMember) {
@@ -601,7 +782,7 @@ export async function loadPerformanceMemberDetail(
   const rehearsals = dataset.rehearsals.map((rehearsal) => {
     const rehearsalDateKey = toDateKey(rehearsal.date);
     const attendance = attendanceByRehearsal.get(rehearsal.id) ?? null;
-    const isRelevant = memberInviteeIds.size === 0 ? true : memberInviteeIds.has(rehearsal.id);
+    const isRelevant = memberInviteeIds.has(rehearsal.id);
     const isFuture = !isPastOrToday(rehearsalDateKey, todayKey);
 
     let status: PerformanceRehearsalEntry['status'] = 'no-rehearsal';
@@ -624,38 +805,48 @@ export async function loadPerformanceMemberDetail(
     };
   });
 
-  const assignmentTargetMap = buildAssignmentMemberMap(dataset.assignments, dataset.scopeMembers, dataset.targetRows);
-  const latestSubmissionMap = getLatestSubmissionMap(dataset.submissionRows);
-  const homework = dataset.assignments
-    .filter((assignment) => (assignmentTargetMap.get(assignment.id) ?? new Set<string>()).has(targetMemberId))
-    .map((assignment) => {
-      const submission = latestSubmissionMap.get(`${assignment.id}:${targetMemberId}`) ?? null;
-      let status: PerformanceHomeworkEntry['status'] = 'missing';
-      if (submission?.status === 'approved') {
-        status = 'approved';
-      } else if (submission?.status === 'pending' || !submission?.status) {
-        status = submission ? 'pending' : 'missing';
-      } else if (submission?.status === 'rejected') {
-        status = 'rejected';
-      }
+  const showHomeworkForSelectedMember = dataset.show_homework_metrics && selectedMember.show_homework_metrics;
 
-      return {
-        assignment,
-        submission,
-        status,
-      };
-    })
-    .sort((a, b) => {
-      const aDeadline = a.assignment.deadline ? new Date(a.assignment.deadline).getTime() : Number.POSITIVE_INFINITY;
-      const bDeadline = b.assignment.deadline ? new Date(b.assignment.deadline).getTime() : Number.POSITIVE_INFINITY;
-      if (aDeadline !== bDeadline) {
-        return aDeadline - bDeadline;
-      }
-      return new Date(b.assignment.created_at).getTime() - new Date(a.assignment.created_at).getTime();
-    });
+  const homework = showHomeworkForSelectedMember
+    ? (() => {
+        const homeworkEligibleMemberIds = new Set(
+          dataset.scopeMembers.filter((scopeMember) => !dataset.leadershipMemberIds.has(scopeMember.id)).map((scopeMember) => scopeMember.id),
+        );
+        const assignmentTargetMap = buildAssignmentMemberMap(dataset.assignments, dataset.scopeMembers, dataset.targetRows, homeworkEligibleMemberIds);
+        const latestSubmissionMap = getLatestSubmissionMap(dataset.submissionRows);
+        return dataset.assignments
+          .filter((assignment) => (assignmentTargetMap.get(assignment.id) ?? new Set<string>()).has(targetMemberId))
+          .map((assignment) => {
+            const submission = latestSubmissionMap.get(`${assignment.id}:${targetMemberId}`) ?? null;
+            let status: PerformanceHomeworkEntry['status'] = 'missing';
+            if (submission?.status === 'approved') {
+              status = 'approved';
+            } else if (submission?.status === 'pending' || !submission?.status) {
+              status = submission ? 'pending' : 'missing';
+            } else if (submission?.status === 'rejected') {
+              status = 'rejected';
+            }
+
+            return {
+              assignment,
+              submission,
+              status,
+            };
+          })
+          .sort((a, b) => {
+            const aDeadline = a.assignment.deadline ? new Date(a.assignment.deadline).getTime() : Number.POSITIVE_INFINITY;
+            const bDeadline = b.assignment.deadline ? new Date(b.assignment.deadline).getTime() : Number.POSITIVE_INFINITY;
+            if (aDeadline !== bDeadline) {
+              return aDeadline - bDeadline;
+            }
+            return new Date(b.assignment.created_at).getTime() - new Date(a.assignment.created_at).getTime();
+          });
+      })()
+    : [];
 
   return {
     scope_label: getScopeLabel(member, isChef, isSectionLeader),
+    show_homework_metrics: showHomeworkForSelectedMember,
     member: selectedMember,
     rehearsals,
     homework,

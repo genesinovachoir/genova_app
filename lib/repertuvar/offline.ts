@@ -3,6 +3,7 @@ import type { RepertoireFile } from '@/lib/supabase';
 const OFFLINE_SETTINGS_STORAGE_KEY = 'genova.repertoire.offline.v1';
 const OFFLINE_DRIVE_ROUTE_PREFIX = '/offline-drive/';
 const SERVICE_WORKER_MESSAGE_TIMEOUT_MS = 180_000;
+const IS_DEVELOPMENT = process.env.NODE_ENV === 'development';
 
 interface OfflineSongSettingsRow {
   enabled?: boolean;
@@ -47,7 +48,7 @@ function isBrowserEnvironment() {
 }
 
 export function isRepertoireOfflineSupported() {
-  if (!isBrowserEnvironment()) {
+  if (!isBrowserEnvironment() || IS_DEVELOPMENT) {
     return false;
   }
 

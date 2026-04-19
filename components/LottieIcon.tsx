@@ -16,6 +16,7 @@ interface LottieIconProps {
   interactive?: boolean;
   loop?: boolean;
   autoPlay?: boolean;
+  disableAnimation?: boolean;
 }
 
 export function LottieIcon({ 
@@ -27,21 +28,23 @@ export function LottieIcon({
   stopAtHalf,
   interactive = true,
   loop = false,
-  autoPlay = false
+  autoPlay = false,
+  disableAnimation = false,
 }: LottieIconProps) {
   const [animationData, setAnimationData] = useState<any>(null);
-  const [hasError, setHasError] = useState(false);
   const lottieRef = useRef<any>(null);
 
   useEffect(() => {
+    if (disableAnimation) return;
+
     fetch(path)
       .then((res) => {
         if (!res.ok) throw new Error('Not found');
         return res.json();
       })
       .then((data) => setAnimationData(data))
-      .catch(() => setHasError(true));
-  }, [path]);
+      .catch(() => setAnimationData(null));
+  }, [path, disableAnimation]);
 
   useEffect(() => {
     if (isActive && lottieRef.current && animationData) {
@@ -65,7 +68,7 @@ export function LottieIcon({
     }
   };
 
-  if (hasError || fallbackIfMissing(animationData)) {
+  if (disableAnimation || fallbackIfMissing(animationData)) {
     return <FallbackIcon size={size} className={className} />;
   }
 

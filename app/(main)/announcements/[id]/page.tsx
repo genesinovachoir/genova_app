@@ -157,7 +157,7 @@ export default function AnnouncementPage() {
         <div className="mb-6 h-px w-full bg-[var(--color-border)]" />
 
         <div
-          className="prose prose-invert max-w-none prose-headings:my-2 prose-p:my-1 prose-p:text-[14px] prose-p:leading-[1.55] prose-a:text-[var(--color-accent)] prose-ul:list-disc prose-ol:list-decimal prose-li:my-0.5 prose-img:max-h-[60vh] prose-img:w-full prose-img:rounded-[var(--radius-panel)] prose-img:border prose-img:border-[var(--color-border)] prose-img:object-cover"
+          className="prose max-w-none [--tw-prose-body:var(--color-text-high)] [--tw-prose-headings:var(--color-text-high)] [--tw-prose-links:var(--color-accent)] [--tw-prose-bold:var(--color-text-high)] [--tw-prose-bullets:var(--color-text-medium)] [--tw-prose-quotes:var(--color-text-high)] [--tw-prose-code:var(--color-text-high)] [--tw-prose-hr:var(--color-border)] prose-headings:my-2 prose-p:my-1 prose-p:text-[14px] prose-p:leading-[1.55] prose-a:text-[var(--color-accent)] prose-ul:list-disc prose-ol:list-decimal prose-li:my-0.5 prose-img:max-h-[60vh] prose-img:w-full prose-img:rounded-[var(--radius-panel)] prose-img:border prose-img:border-[var(--color-border)] prose-img:object-cover"
           dangerouslySetInnerHTML={{ __html: sanitizeRichText(announcement.description) }}
         />
       </motion.div>

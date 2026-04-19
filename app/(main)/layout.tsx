@@ -25,6 +25,30 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     }
   }, [session, isLoading, router]);
 
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined' || !('serviceWorker' in navigator)) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map((registration) => registration.unregister()));
+
+        if ('caches' in window) {
+          const cacheNames = await caches.keys();
+          await Promise.all(
+            cacheNames
+              .filter((cacheName) => cacheName.startsWith('genova-'))
+              .map((cacheName) => caches.delete(cacheName)),
+          );
+        }
+      } catch (error) {
+        console.warn('Dev service worker temizleme başarısız:', error);
+      }
+    })();
+  }, []);
+
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--color-background)]">

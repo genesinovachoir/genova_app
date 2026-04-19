@@ -44,7 +44,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="tr" className={`${notoSerif.variable} ${manrope.variable}`}>
+    <html lang="tr" suppressHydrationWarning className={`${notoSerif.variable} ${manrope.variable}`}>
       <body className="min-h-screen font-sans antialiased">
         <AppProviders>
           <AuthProvider>

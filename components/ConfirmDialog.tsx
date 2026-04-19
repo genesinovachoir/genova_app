@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Loader2, TriangleAlert, X } from 'lucide-react';
 
@@ -26,6 +27,22 @@ export function ConfirmDialog({
   onConfirm,
   onClose,
 }: ConfirmDialogProps) {
+  const [countdown, setCountdown] = useState(tone === 'danger' ? 5 : 0);
+
+  useEffect(() => {
+    if (!open || tone !== 'danger') {
+      setCountdown(0);
+      return;
+    }
+
+    setCountdown(5);
+    const timer = setInterval(() => {
+      setCountdown((prev) => (prev <= 0 ? 0 : prev - 1));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [open, tone]);
+
   const confirmClassName =
     tone === 'danger'
       ? 'bg-rose-500 text-white hover:bg-rose-600'
@@ -80,7 +97,7 @@ export function ConfirmDialog({
               <button
                 type="button"
                 onClick={onConfirm}
-                disabled={loading}
+                disabled={loading || countdown > 0}
                 className={`rounded-[var(--radius-panel)] py-3 text-xs font-bold uppercase tracking-[0.15em] transition-colors disabled:opacity-50 ${confirmClassName}`}
               >
                 {loading ? (
@@ -88,6 +105,8 @@ export function ConfirmDialog({
                     <Loader2 size={14} className="animate-spin" />
                     İşleniyor
                   </span>
+                ) : countdown > 0 ? (
+                  `${confirmLabel} (${countdown}s)`
                 ) : (
                   confirmLabel
                 )}

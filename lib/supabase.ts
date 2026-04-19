@@ -62,7 +62,13 @@ export interface Announcement {
   image_url: string | null;
   created_by: string;
   created_at: string;
-  choir_members?: { first_name: string; last_name: string };
+  choir_members?: { 
+    first_name: string; 
+    last_name: string;
+    choir_member_roles?: Array<{
+      roles?: { name: string } | null;
+    }> | null;
+  } | null;
 }
 
 export interface Rehearsal {
@@ -214,7 +220,14 @@ export interface Assignment {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-  choir_members?: { first_name: string; last_name: string };
+  choir_members?: { 
+    id: string;
+    first_name: string; 
+    last_name: string;
+    choir_member_roles?: Array<{
+      roles?: { name: string } | null;
+    }> | null;
+  } | null;
   submission?: AssignmentSubmission | null; // Mevcut kullanıcının teslimi
   submission_count?: number; // Şef için toplam teslim sayısı
 }

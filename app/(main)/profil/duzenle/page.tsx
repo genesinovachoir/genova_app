@@ -4,6 +4,7 @@ import { motion } from 'motion/react';
 import { ArrowLeft, SendHorizonal, Check, ChevronDown, LockKeyhole } from 'lucide-react';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthProvider';
+import { getRoleDisplayLabel } from '@/lib/role-labels';
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
@@ -258,15 +259,15 @@ export default function ProfilDuzenle() {
     <main className="page-shell pb-28 space-y-4 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
       {/* Header */}
       <div className="flex items-center gap-3 px-1 pt-2">
-        <Link href="/profil" className="flex h-9 w-9 items-center justify-center rounded-full bg-white/5 border border-white/10 text-[var(--color-text-medium)] hover:text-white transition-colors">
+        <Link href="/profil" className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-soft-bg)] text-[var(--color-text-medium)] hover:text-[var(--color-text-high)] transition-colors">
           <ArrowLeft size={16} />
         </Link>
-        <span className="font-serif text-xl tracking-tight font-medium text-white/90">Değişiklik Talebi</span>
+        <span className="font-serif text-xl tracking-tight font-medium text-[var(--color-text-high)]">Değişiklik Talebi</span>
       </div>
 
       {/* Bilgi notu */}
-      <div className="rounded-xl border border-[#C0B283]/20 bg-[#C0B283]/5 px-4 py-3 text-[0.78rem] text-[#E0D8B8]/70 leading-relaxed">
-        Aşağıdaki bilgilerde yaptığın değişiklikler <strong className="text-[#D4C8A0]">Şef onayına</strong> gönderilecek. Onaylandıktan sonra profilinde güncellenecek.
+      <div className="rounded-xl border border-[var(--status-pending-border)] bg-[var(--status-pending-bg)] px-4 py-3 text-[0.78rem] text-[var(--status-pending-text)] leading-relaxed">
+        Aşağıdaki bilgilerde yaptığın değişiklikler <strong className="text-[var(--color-text-high)]">Şef onayına</strong> gönderilecek. Onaylandıktan sonra profilinde güncellenecek.
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3 mt-4">
@@ -292,7 +293,7 @@ export default function ProfilDuzenle() {
             className="hidden"
             onChange={handlePhotoChange}
           />
-          <p className="text-[0.85rem] font-medium text-white/80 font-serif">{member?.first_name} {member?.last_name}</p>
+          <p className="text-[0.85rem] font-medium text-[var(--color-text-high)] font-serif">{member?.first_name} {member?.last_name}</p>
           <div className="flex flex-wrap justify-center gap-1.5 mt-1.5">
             {member?.voice_group && (
               <span className="status-pill text-[var(--color-accent)] border-[var(--color-accent-soft)] !py-1 !min-h-0 !text-[0.62rem]">
@@ -300,8 +301,8 @@ export default function ProfilDuzenle() {
               </span>
             )}
             {roles.map(role => (
-              <span key={role} className="status-pill border-white/10 bg-white/5 text-white/60 !py-1 !min-h-0 !text-[0.62rem]">
-                {role}
+              <span key={role} className="status-pill border-[var(--color-border)] bg-[var(--color-soft-bg)] text-[var(--color-text-medium)] !py-1 !min-h-0 !text-[0.62rem]">
+                {getRoleDisplayLabel(role, member?.voice_group)}
               </span>
             ))}
           </div>
@@ -324,7 +325,7 @@ export default function ProfilDuzenle() {
                   >
                     <option value="">-- Seçiniz --</option>
                     {field.options?.map(o => (
-                      <option key={o.id} value={o.id} className="bg-[#111]">{o.name}</option>
+                      <option key={o.id} value={o.id}>{o.name}</option>
                     ))}
                   </select>
                   <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-medium)]" />
@@ -334,7 +335,7 @@ export default function ProfilDuzenle() {
                   type={field.type}
                   value={form[field.key]}
                   onChange={e => setForm(f => ({ ...f, [field.key]: e.target.value }))}
-                  className={`editorial-input w-full ${field.type === 'date' ? '[color-scheme:dark]' : ''}`}
+                  className={`editorial-input w-full ${field.type === 'date' ? 'theme-date-input' : ''}`}
                   placeholder={field.placeholder}
                 />
               )}
@@ -383,11 +384,11 @@ export default function ProfilDuzenle() {
         className="glass-panel p-5 space-y-3 mt-4"
       >
         <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/5 border border-white/10 text-[var(--color-accent)]">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-soft-bg)] text-[var(--color-accent)]">
             <LockKeyhole size={14} />
           </div>
           <div>
-            <p className="text-[0.82rem] font-semibold text-white/90">Şifre Değiştir</p>
+            <p className="text-[0.82rem] font-semibold text-[var(--color-text-high)]">Şifre Değiştir</p>
           </div>
         </div>
 

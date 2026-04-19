@@ -138,7 +138,27 @@ async function fetchAttendanceStats(memberId: string, todayStr: string): Promise
     throw rehearsalsError;
   }
 
-  const rehearsalIds = (rehearsals ?? []).map((rehearsal) => rehearsal.id);
+  const allRehearsalIds = (rehearsals ?? []).map((rehearsal) => rehearsal.id);
+  
+  if (allRehearsalIds.length === 0) {
+    return {
+      attendedCount: 0,
+      missedCount: 0,
+      totalRehearsals: 0,
+    };
+  }
+
+  const { data: invitees, error: inviteeError } = await supabase
+    .from('rehearsal_invitees')
+    .select('rehearsal_id')
+    .eq('member_id', memberId)
+    .in('rehearsal_id', allRehearsalIds);
+
+  if (inviteeError) {
+    throw inviteeError;
+  }
+
+  const rehearsalIds = (invitees ?? []).map(i => i.rehearsal_id);
   const totalRehearsals = rehearsalIds.length;
 
   if (totalRehearsals === 0) {
@@ -485,7 +505,7 @@ export default function Dashboard() {
               <div className="flex items-center gap-3">
                 <span className="h-2 w-2 shrink-0 rounded-full bg-sky-300" />
                 <p className="whitespace-nowrap">
-                  Kritik eşik: <span className="font-bold text-[var(--color-text-high)]">%80</span>
+                  Kritik eşik: <span className="font-bold text-[var(--color-text-high)]">%75</span>
                 </p>
               </div>
               {statsQuery.isError ? (
@@ -495,7 +515,7 @@ export default function Dashboard() {
 
             <div className="relative h-28 w-28 shrink-0">
               <svg className="h-full w-full -rotate-90">
-                <circle className="text-white/8" cx="56" cy="56" fill="transparent" r="46" stroke="currentColor" strokeWidth="6" />
+                <circle className="text-white/8 [.light_&]:text-black/8" cx="56" cy="56" fill="transparent" r="46" stroke="currentColor" strokeWidth="6" />
                 <circle
                   className="text-[var(--color-accent)] transition-all duration-700"
                   cx="56"
@@ -541,7 +561,7 @@ export default function Dashboard() {
                 <div className="rounded-[4px] border border-[var(--color-border)] bg-white/4 p-4">
                   <p className="text-[0.68rem] uppercase tracking-[0.22em] text-[var(--color-text-medium)]">Not</p>
                   <div
-                    className="prose prose-invert mt-3 max-w-none text-[var(--color-text-high)] opacity-90 prose-p:my-0.5 prose-p:text-[14px] prose-p:leading-[1.4] prose-ul:list-disc prose-ol:list-decimal prose-li:my-0.5 prose-a:text-[var(--color-accent)] prose-img:my-2 prose-img:max-h-[30vh] prose-img:w-full prose-img:rounded-[8px] prose-img:border prose-img:border-[var(--color-border)] prose-img:object-cover"
+                    className="prose mt-3 max-w-none text-[var(--color-text-high)] opacity-90 [--tw-prose-body:var(--color-text-high)] [--tw-prose-headings:var(--color-text-high)] [--tw-prose-links:var(--color-accent)] [--tw-prose-bold:var(--color-text-high)] [--tw-prose-bullets:var(--color-text-medium)] [--tw-prose-quotes:var(--color-text-high)] [--tw-prose-code:var(--color-text-high)] [--tw-prose-hr:var(--color-border)] prose-p:my-0.5 prose-p:text-[14px] prose-p:leading-[1.4] prose-ul:list-disc prose-ol:list-decimal prose-li:my-0.5 prose-a:text-[var(--color-accent)] prose-img:my-2 prose-img:max-h-[30vh] prose-img:w-full prose-img:rounded-[8px] prose-img:border prose-img:border-[var(--color-border)] prose-img:object-cover"
                     dangerouslySetInnerHTML={{ __html: sanitizeRichText(todayRehearsal.notes) }}
                   />
                 </div>

@@ -5,7 +5,54 @@ import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
+import { markInputRule, markPasteRule } from '@tiptap/core';
+import TiptapBold from '@tiptap/extension-bold';
+import TiptapItalic from '@tiptap/extension-italic';
+import TiptapStrike from '@tiptap/extension-strike';
 import NextImage from 'next/image';
+
+const CustomBold = TiptapBold.extend({
+  addInputRules() {
+    return [
+      markInputRule({ find: /(?:^|\s)((?:\*\*)([^*]+)(?:\*\*))$/u, type: this.type }),
+      markInputRule({ find: /(?:^|\s)((?:__)([^_]+)(?:__))$/u, type: this.type })
+    ];
+  },
+  addPasteRules() {
+    return [
+      markPasteRule({ find: /(?:^|\s)((?:\*\*)([^*]+)(?:\*\*))/g, type: this.type }),
+      markPasteRule({ find: /(?:^|\s)((?:__)([^_]+)(?:__))/g, type: this.type })
+    ];
+  }
+});
+
+const CustomItalic = TiptapItalic.extend({
+  addInputRules() {
+    return [
+      markInputRule({ find: /(?:^|\s)((?:\*)([^*]+)(?:\*))$/u, type: this.type }),
+      markInputRule({ find: /(?:^|\s)((?:_)([^_]+)(?:_))$/u, type: this.type })
+    ];
+  },
+  addPasteRules() {
+    return [
+      markPasteRule({ find: /(?:^|\s)((?:\*)([^*]+)(?:\*))/g, type: this.type }),
+      markPasteRule({ find: /(?:^|\s)((?:_)([^_]+)(?:_))/g, type: this.type })
+    ];
+  }
+});
+
+const CustomStrike = TiptapStrike.extend({
+  addInputRules() {
+    return [
+      markInputRule({ find: /(?:^|\s)((?:~~)([^~]+)(?:~~))$/u, type: this.type })
+    ];
+  },
+  addPasteRules() {
+    return [
+      markPasteRule({ find: /(?:^|\s)((?:~~)([^~]+)(?:~~))/g, type: this.type })
+    ];
+  }
+});
 import { Bold, Italic, Strikethrough, List, ImageIcon, Loader2 } from 'lucide-react';
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
@@ -354,7 +401,6 @@ function resolveSlashSuggestions(
 export function RichTextEditor({
   content,
   onChange,
-  placeholder = 'Duyuru içeriğini buraya girin... (- yazıp boşluk bırakarak liste başlatabilirsiniz)',
   borderless = false,
 }: Props) {
   const toast = useToast();
@@ -478,7 +524,13 @@ export function RichTextEditor({
     extensions: [
       StarterKit.configure({
         link: false,
+        bold: false,
+        italic: false,
+        strike: false,
       }),
+      CustomBold,
+      CustomItalic,
+      CustomStrike,
       Link.configure({
         openOnClick: false,
         autolink: false,
@@ -494,11 +546,11 @@ export function RichTextEditor({
         inline: true,
         allowBase64: false,
         HTMLAttributes: {
-          class: 'max-w-full rounded-[var(--radius-panel)] border border-[var(--color-border)] my-4 object-cover max-h-[60vh] bg-black',
+          class: 'max-w-full rounded-[var(--radius-panel)] border border-[var(--color-border)] my-4 object-cover max-h-[60vh] bg-[var(--color-surface-solid)]',
         },
       }),
       Placeholder.configure({
-        placeholder,
+        placeholder: '',
         emptyEditorClass: 'is-editor-empty',
       }),
     ],
@@ -506,7 +558,7 @@ export function RichTextEditor({
     editorProps: {
       attributes: {
         class:
-          'prose prose-invert max-w-none focus:outline-none min-h-[60px] text-[15px] sm:text-[16px] leading-[1.3] prose-p:my-0.5 text-[var(--color-text-high)] opacity-90',
+          'prose max-w-none focus:outline-none min-h-[60px] text-[15px] sm:text-[16px] leading-[1.3] prose-p:my-0.5 text-[var(--color-text-high)] opacity-90 [--tw-prose-body:var(--color-text-high)] [--tw-prose-headings:var(--color-text-high)] [--tw-prose-links:var(--color-accent)] [--tw-prose-bold:var(--color-text-high)] [--tw-prose-bullets:var(--color-text-medium)] [--tw-prose-quotes:var(--color-text-high)] [--tw-prose-code:var(--color-text-high)] [--tw-prose-hr:var(--color-border)]',
       },
     },
     immediatelyRender: false,
@@ -819,26 +871,26 @@ export function RichTextEditor({
   if (!editor) return null;
 
   return (
-    <div className={`rounded-[var(--radius-panel)] ${borderless ? '' : 'border border-[var(--color-border)]'} bg-[#0A0A0A] overflow-hidden flex flex-col`}>
-      <div className="flex flex-wrap items-center gap-0.5 border-b border-[var(--color-border)] bg-[#111] px-2 py-1">
+    <div className={`rounded-[var(--radius-panel)] ${borderless ? '' : 'border border-[var(--color-border)]'} bg-[var(--color-surface-solid)] overflow-hidden flex flex-col`}>
+      <div className="flex flex-wrap items-center gap-0.5 border-b border-[var(--color-border)] bg-[var(--color-surface-strong)] px-2 py-1">
         <button
           type="button"
           onClick={() => editor.chain().focus().toggleBold().run()}
-          className={`p-1 rounded-[4px] hover:bg-white/10 transition-colors ${editor.isActive('bold') ? 'bg-white/10 text-[var(--color-accent)]' : 'text-[var(--color-text-medium)]'}`}
+          className={`p-1 rounded-[4px] hover:bg-[var(--color-soft-bg-hover)] transition-colors ${editor.isActive('bold') ? 'bg-[var(--color-soft-bg)] text-[var(--color-accent)]' : 'text-[var(--color-text-medium)]'}`}
         >
           <Bold size={13} strokeWidth={2.5} />
         </button>
         <button
           type="button"
           onClick={() => editor.chain().focus().toggleItalic().run()}
-          className={`p-1 rounded-[4px] hover:bg-white/10 transition-colors ${editor.isActive('italic') ? 'bg-white/10 text-[var(--color-accent)]' : 'text-[var(--color-text-medium)]'}`}
+          className={`p-1 rounded-[4px] hover:bg-[var(--color-soft-bg-hover)] transition-colors ${editor.isActive('italic') ? 'bg-[var(--color-soft-bg)] text-[var(--color-accent)]' : 'text-[var(--color-text-medium)]'}`}
         >
           <Italic size={13} strokeWidth={2.5} />
         </button>
         <button
           type="button"
           onClick={() => editor.chain().focus().toggleStrike().run()}
-          className={`p-1 rounded-[4px] hover:bg-white/10 transition-colors ${editor.isActive('strike') ? 'bg-white/10 text-[var(--color-accent)]' : 'text-[var(--color-text-medium)]'}`}
+          className={`p-1 rounded-[4px] hover:bg-[var(--color-soft-bg-hover)] transition-colors ${editor.isActive('strike') ? 'bg-[var(--color-soft-bg)] text-[var(--color-accent)]' : 'text-[var(--color-text-medium)]'}`}
         >
           <Strikethrough size={13} strokeWidth={2.5} />
         </button>
@@ -848,14 +900,14 @@ export function RichTextEditor({
         <button
           type="button"
           onClick={() => editor.chain().focus().toggleBulletList().run()}
-          className={`p-1 rounded-[4px] hover:bg-white/10 transition-colors ${editor.isActive('bulletList') ? 'bg-white/10 text-[var(--color-accent)]' : 'text-[var(--color-text-medium)]'}`}
+          className={`p-1 rounded-[4px] hover:bg-[var(--color-soft-bg-hover)] transition-colors ${editor.isActive('bulletList') ? 'bg-[var(--color-soft-bg)] text-[var(--color-accent)]' : 'text-[var(--color-text-medium)]'}`}
         >
           <List size={13} strokeWidth={2.5} />
         </button>
 
         <div className="w-px h-3.5 bg-[var(--color-border)] mx-1" />
 
-        <label className="p-1 rounded-[4px] hover:bg-white/10 transition-colors text-[var(--color-text-medium)] cursor-pointer flex items-center justify-center">
+        <label className="p-1 rounded-[4px] hover:bg-[var(--color-soft-bg-hover)] transition-colors text-[var(--color-text-medium)] cursor-pointer flex items-center justify-center">
           <input
             type="file"
             accept="image/jpeg,image/png,image/gif,image/webp"
@@ -871,7 +923,7 @@ export function RichTextEditor({
       </div>
 
       {pendingLink && (
-        <div className="border-b border-[var(--color-border)] bg-[#111] px-3 py-2">
+        <div className="border-b border-[var(--color-border)] bg-[var(--color-surface-strong)] px-3 py-2">
           <p className="text-[0.72rem] text-[var(--color-text-medium)] mb-1.5">Link algılandı. Başlık eklemek ister misin?</p>
           <div className="flex items-center gap-2">
             <input
@@ -881,12 +933,12 @@ export function RichTextEditor({
               placeholder="Bağlantı başlığı"
               autoComplete="off"
               spellCheck={false}
-              className="flex-1 rounded-md border border-[var(--color-border)] bg-black/30 px-2 py-1.5 text-[13px] text-[var(--color-text-high)] placeholder:text-[var(--color-text-medium)] focus:outline-none focus:border-[var(--color-accent)]"
+              className="flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-input-bg)] px-2 py-1.5 text-[13px] text-[var(--color-text-high)] placeholder:text-[var(--color-text-medium)] focus:outline-none focus:border-[var(--color-accent)]"
             />
             <button
               type="button"
               onClick={confirmLinkTitle}
-              className="rounded-md bg-[var(--color-accent)] px-2.5 py-1.5 text-[0.68rem] font-bold uppercase tracking-[0.12em] text-black transition-opacity hover:opacity-90"
+              className="rounded-md border border-[var(--color-border-strong)] bg-[var(--color-accent)] px-2.5 py-1.5 text-[0.68rem] font-bold uppercase tracking-[0.12em] text-[#1f170b] transition-opacity hover:opacity-90"
             >
               Onayla
             </button>
@@ -919,9 +971,9 @@ export function RichTextEditor({
                     type="button"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => handleSlashOptionClick(item)}
-                    className="flex h-10 w-full items-center gap-2.5 px-2.5 text-left transition-colors hover:bg-white/6"
+                    className="flex h-10 w-full items-center gap-2.5 px-2.5 text-left transition-colors hover:bg-[var(--color-soft-bg-hover)]"
                   >
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] border border-[var(--color-border)] bg-white/6 text-[var(--color-accent)]">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] border border-[var(--color-border)] bg-[var(--color-soft-bg)] text-[var(--color-accent)]">
                       <NextImage src="/icons/dosya.png" alt="" width={12} height={12} className="h-3 w-3 object-contain" />
                     </span>
                     <span className="min-w-0 flex-1">

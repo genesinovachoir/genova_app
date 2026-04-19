@@ -82,7 +82,7 @@ async function fetchMonthData(memberId: string, currentMonth: Date) {
   if (rehearsalIds.length > 0) {
     const { data: inviteeRows, error: inviteeError } = await supabase
       .from('rehearsal_invitees')
-      .select('rehearsal_id')
+      .select('rehearsal_id, member_id')
       .in('rehearsal_id', rehearsalIds);
 
     if (inviteeError) {
@@ -91,10 +91,12 @@ async function fetchMonthData(memberId: string, currentMonth: Date) {
 
     inviteeCountMap = (inviteeRows ?? []).reduce((map, row) => {
       map.set(row.rehearsal_id, (map.get(row.rehearsal_id) ?? 0) + 1);
+      if (row.member_id === memberId) myInvitedRehearsalIds.add(row.rehearsal_id);
       return map;
     }, new Map<string, number>());
   }
 
+  let myInvitedRehearsalIds = new Set<string>();
   let myAttendance: Attendance[] = [];
   if (rehearsalIds.length > 0) {
     const { data: attendanceRows, error: attendanceError } = await supabase
@@ -116,6 +118,7 @@ async function fetchMonthData(memberId: string, currentMonth: Date) {
       inviteeCount: inviteeCountMap.get(rehearsal.id) ?? 0,
     })),
     myAttendance,
+    myInvitedRehearsalIds,
   };
 }
 
@@ -174,7 +177,9 @@ export default function DevamsizlikPage() {
 
   const todayStr = useMemo(() => getTodayString(), []);
   const canApprove = isAdmin() || isSectionLeader();
-  const canManage = isAdmin();
+  const canManageAdmin = isAdmin();
+  const canManageSectionLeader = isSectionLeader();
+  const canManage = canManageAdmin || canManageSectionLeader;
   const monthKey = `${currentMonth.getFullYear()}-${currentMonth.getMonth()}`;
 
   const monthDataQuery = useQuery({
@@ -277,7 +282,19 @@ export default function DevamsizlikPage() {
       const dateStr = toLocalDateStr(year, month, day);
       const isToday = dateStr === todayStr;
       const isFuture = dateStr > todayStr;
-      const rehearsal = rehearsalMap.get(dateStr) ?? null;
+      
+      let rehearsal = rehearsalMap.get(dateStr) ?? null;
+      if (rehearsal) {
+        let isVisible = false;
+        if (canManageAdmin) isVisible = true;
+        else if (canManageSectionLeader && rehearsal.created_by === member?.id) isVisible = true;
+        else if (monthDataQuery.data?.myInvitedRehearsalIds?.has(rehearsal.id)) isVisible = true;
+        
+        if (!isVisible) {
+          rehearsal = null;
+        }
+      }
+
       const attendance = rehearsal ? attendanceMap.get(rehearsal.id) ?? null : null;
 
       let attendanceStatus: DayStatus = 'no-rehearsal';
@@ -448,17 +465,24 @@ export default function DevamsizlikPage() {
                         {selectedDay.rehearsal ? ` · ${selectedDay.rehearsal.title}` : ''}
                       </h3>
                     </div>
-                    {canManage ? (
-                      <button
-                        onClick={() => {
-                          setEditRehearsal(selectedDay.rehearsal);
-                          setShowEventForm(true);
-                        }}
-                        className="shrink-0 rounded-[6px] border border-[var(--color-border)] bg-white/4 px-3 py-1.5 text-[0.65rem] font-bold uppercase tracking-[0.15em] text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-accent)] active:scale-95"
-                      >
-                        {selectedDay.rehearsal ? 'Düzenle' : 'Oluştur'}
-                      </button>
-                    ) : null}
+                    {(() => {
+                      if (!canManage) return null;
+                      if (selectedDay.rehearsal) {
+                        const canEdit = canManageAdmin || (canManageSectionLeader && selectedDay.rehearsal.created_by === member?.id);
+                        if (!canEdit) return null;
+                      }
+                      return (
+                        <button
+                          onClick={() => {
+                            setEditRehearsal(selectedDay.rehearsal);
+                            setShowEventForm(true);
+                          }}
+                          className="shrink-0 rounded-[6px] border border-[var(--color-border)] bg-white/4 px-3 py-1.5 text-[0.65rem] font-bold uppercase tracking-[0.15em] text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-accent)] active:scale-95"
+                        >
+                          {selectedDay.rehearsal ? 'Düzenle' : 'Oluştur'}
+                        </button>
+                      );
+                    })()}
                   </div>
 
                   {selectedDay.rehearsal ? (

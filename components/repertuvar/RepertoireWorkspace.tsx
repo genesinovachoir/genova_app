@@ -731,7 +731,7 @@ function AudioPanel({
               <button
                 type="button"
                 onClick={handlePlayPause}
-                className="relative flex h-8 w-8 shrink-0 items-center justify-center text-white transition-all hover:text-[var(--color-accent)] active:scale-95"
+                className="relative flex h-8 w-8 shrink-0 items-center justify-center text-[var(--color-text-high)] transition-all hover:text-[var(--color-accent)] active:scale-95"
                 title={isPlaying ? 'Durdur' : 'Oynat'}
               >
                 {isPlaying ? <Pause size={20} /> : <Play size={20} className="translate-x-[1px]" />}
@@ -1794,10 +1794,10 @@ export function RepertoireWorkspace({
           </div>
         )}
 
-          <div className="relative overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[rgba(8,8,8,0.92)] p-2 sm:p-4">
+          <div className="relative overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-pdf-stage-bg)] p-2 sm:p-4">
             {!selectedPdf && !hasCoverPage ? (
               <div className="flex min-h-[360px] flex-col items-center justify-center px-6 py-12 text-center">
-                <FileText size={48} className="text-white/10" />
+                <FileText size={48} className="text-[var(--color-text-medium)]/40" />
                 <h4 className="mt-4 font-serif text-2xl tracking-[-0.04em]">PDF bulunamadı</h4>
                 <p className="mt-2 max-w-md text-sm text-[var(--color-text-medium)]">
                   Çalışma alanı için önce nota PDF yüklenmeli.
@@ -1805,7 +1805,7 @@ export function RepertoireWorkspace({
               </div>
             ) : !selectedPdfSource && selectedPdf && !hasCoverPage ? (
               <div className="flex min-h-[360px] flex-col items-center justify-center px-6 py-12 text-center">
-                <FileText size={48} className="text-white/10" />
+                <FileText size={48} className="text-[var(--color-text-medium)]/40" />
                 <h4 className="mt-4 font-serif text-2xl tracking-[-0.04em]">Bu PDF uygulama içinde açılamıyor</h4>
                 <p className="mt-2 max-w-md text-sm text-[var(--color-text-medium)]">
                   Doğrudan indirme bağlantısı olmadığı için bu sekmede inline görüntüleme pasif. Alttaki dosya listesinden dış bağlantıyı kullanabilirsin.
@@ -1894,7 +1894,7 @@ export function RepertoireWorkspace({
 
                         {annotationLoading && (
                           <div className="pointer-events-none absolute inset-0 z-20 flex items-start justify-end p-4">
-                            <div className="inline-flex items-center gap-2 rounded-[999px] border border-[var(--color-border)] bg-black/65 px-3 py-2 text-[0.62rem] font-bold uppercase tracking-[0.18em] text-[var(--color-text-medium)]">
+                            <div className="inline-flex items-center gap-2 rounded-[999px] border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-3 py-2 text-[0.62rem] font-bold uppercase tracking-[0.18em] text-[var(--color-text-medium)]">
                               <Loader2 size={13} className="animate-spin" />
                               Notlar yükleniyor
                             </div>
@@ -1946,7 +1946,7 @@ export function RepertoireWorkspace({
                         )
                       ) : (
                         <div className="flex h-full w-full items-center justify-center">
-                          <FileText size={48} className="text-white/10" />
+                          <FileText size={48} className="text-[var(--color-text-medium)]/40" />
                         </div>
                       )}
 

@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'motion/react';
-import { Music4, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
-import { LottieIcon } from '@/components/LottieIcon';
+import ThemeToggle from '@/components/ThemeToggle';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -37,35 +37,37 @@ export default function LoginPage() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#010101]">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--color-background)]">
         <Loader2 className="animate-spin text-[var(--color-accent)]" size={32} />
       </div>
     );
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-[#010101] px-5 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <main className="relative flex min-h-screen flex-col items-center justify-center bg-[var(--color-background)] px-5 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(75%_55%_at_50%_0%,var(--color-accent-soft),transparent_70%)]" />
+      <div className="absolute right-5 top-[calc(env(safe-area-inset-top)+1rem)] z-20">
+        <ThemeToggle />
+      </div>
       <motion.div
         initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="flex w-full max-w-sm flex-col"
+        className="relative z-10 flex w-full max-w-sm flex-col"
       >
         {/* Logo */}
         <div
-          className="flex flex-col items-center gap-0"
+          className="flex flex-col items-center gap-2"
           style={{
             // Move the logo block toward the golden-ratio anchor (~38.2% from top).
             marginTop: 'clamp(-6.5rem, -11.8vh, -2rem)',
           }}
         >
-          <div className="w-32 h-32 overflow-hidden flex items-center justify-center pointer-events-none">
-            <video
-              src="/login.mp4"
-              autoPlay
-              loop
-              muted
-              playsInline
+          <div className="flex h-28 w-28 items-center justify-center overflow-hidden pointer-events-none">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/login.png"
+              alt="Genova Login Logo"
               className="h-full w-full object-contain"
             />
           </div>
@@ -93,7 +95,7 @@ export default function LoginPage() {
               autoComplete="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
-              placeholder="isim@genovakorist.com"
+              placeholder="E-posta adresiniz"
               required
               className="editorial-input"
             />
@@ -136,7 +138,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="mt-2 flex w-full items-center justify-center gap-2 rounded-[var(--radius-panel)] bg-[var(--color-accent)] py-3.5 font-sans text-[0.8rem] font-bold uppercase tracking-[0.18em] text-[var(--color-background)] transition-all active:scale-[0.98] disabled:opacity-60"
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-[var(--radius-panel)] border border-[var(--color-border-strong)] bg-[linear-gradient(180deg,var(--color-accent),color-mix(in_srgb,var(--color-accent)_85%,#7d5f2a))] py-3.5 font-sans text-[0.8rem] font-bold uppercase tracking-[0.18em] text-[#1f170b] transition-all active:scale-[0.98] disabled:opacity-60"
           >
             {submitting ? (
               <><Loader2 size={16} className="animate-spin" /> Giriş yapılıyor...</>
@@ -146,9 +148,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p className="mt-6 text-center text-[0.65rem] text-[var(--color-text-medium)]">
-          Şifrenizi mi unuttunuz? Şefinizle iletişime geçin.
-        </p>
+
       </motion.div>
     </main>
   );

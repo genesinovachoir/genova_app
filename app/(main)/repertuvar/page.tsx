@@ -300,7 +300,7 @@ export default function Repertuvar() {
                 type="text"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                className="w-full rounded-full border border-white/10 bg-white/[0.02] py-2 pl-14 pr-8 font-serif text-[0.9rem] italic tracking-tight text-white outline-none transition-all duration-500"
+                className="themed-search-input w-full rounded-full py-2 pl-14 pr-8 font-serif text-[0.9rem] italic tracking-tight outline-none transition-all duration-500"
               />
 
               {/* Right side actions (Clear button) */}
@@ -312,7 +312,7 @@ export default function Repertuvar() {
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.8 }}
                       onClick={() => setSearch('')}
-                      className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-white/40 transition-all active:scale-90"
+                      className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-soft-bg)] text-[var(--color-text-medium)] transition-all active:scale-90"
                     >
                       <Plus size={18} className="rotate-45" />
                     </motion.button>

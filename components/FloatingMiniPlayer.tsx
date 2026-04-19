@@ -320,22 +320,22 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
   return (
     <>
       <div className={`fixed inset-x-0 z-[55] px-3 ${shouldDockToBottom ? 'bottom-[calc(0.5rem+env(safe-area-inset-bottom))]' : 'bottom-[calc(6.7rem+env(safe-area-inset-bottom))]'}`}>
-        <div className={`relative mx-auto w-[calc(100%-0.25rem)] max-w-md rounded-[12px] border border-[var(--color-border-strong)] bg-[rgba(8,8,10,0.94)] px-2.5 shadow-[0_10px_30px_rgba(0,0,0,0.45)] ${isOwnSongPage ? 'py-4' : 'py-2.5'}`}>
+        <div className={`relative mx-auto w-[calc(100%-0.25rem)] max-w-md rounded-[12px] border border-[var(--color-border-strong)] bg-[var(--color-player-bg)] px-2.5 shadow-[0_10px_30px_rgba(0,0,0,0.45)] ${isOwnSongPage ? 'py-4' : 'py-2.5'}`}>
           <button
             type="button"
             onClick={handleClose}
-            className="absolute -top-2 -left-2 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--color-border)] bg-[#0d0d10] text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)]"
+            className="absolute -top-2 -left-2 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-player-solid)] text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)]"
             title="Kapat"
           >
             <X size={11} />
           </button>
           <div className="flex items-center gap-2">
-            <div className="h-8 w-8 shrink-0 overflow-hidden rounded-[4px] border border-white/10 bg-white/5">
+            <div className="h-8 w-8 shrink-0 overflow-hidden rounded-[4px] border border-[var(--color-border)] bg-[var(--color-soft-bg)]">
               {coverSource ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={coverSource} alt={songTitle} className="h-full w-full object-cover" loading="lazy" />
               ) : (
-                <div className="h-full w-full bg-white/5" />
+                <div className="h-full w-full bg-[var(--color-soft-bg)]" />
               )}
             </div>
 
@@ -379,7 +379,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
                     setPartitionOpen(true);
                   }
                 }}
-                className="inline-flex shrink-0 items-center gap-1 rounded-[8px] border border-[var(--color-border)] bg-white/5 pl-2 pr-1.5 py-1 text-[0.58rem] font-bold uppercase tracking-[0.12em] text-[var(--color-text-medium)] hover:text-[var(--color-text-high)] focus:outline-none"
+                className="inline-flex shrink-0 items-center gap-1 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-soft-bg)] pl-2 pr-1.5 py-1 text-[0.58rem] font-bold uppercase tracking-[0.12em] text-[var(--color-text-medium)] hover:text-[var(--color-text-high)] focus:outline-none"
               >
                 <span className="max-w-[80px] truncate">{currentTrack.label}</span>
                 <ChevronDown size={11} className={`transition-transform duration-200 ${partitionOpen ? 'rotate-180' : ''}`} />
@@ -401,7 +401,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
                   setSpeedOpen(true);
                 }
               }}
-              className="inline-flex shrink-0 items-center gap-1 rounded-[8px] border border-[var(--color-border)] bg-white/5 pl-2 pr-1.5 py-1 text-[0.58rem] font-bold text-[var(--color-text-medium)] hover:text-[var(--color-text-high)] focus:outline-none"
+              className="inline-flex shrink-0 items-center gap-1 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-soft-bg)] pl-2 pr-1.5 py-1 text-[0.58rem] font-bold text-[var(--color-text-medium)] hover:text-[var(--color-text-high)] focus:outline-none"
             >
               <span>{playbackRate}x</span>
               <ChevronDown size={11} className={`transition-transform duration-200 ${speedOpen ? 'rotate-180' : ''}`} />
@@ -418,7 +418,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
               aria-valuemax={Math.max(1, duration)}
               aria-valuenow={Math.max(0, activeTime)}
             >
-              <div className="relative w-full h-[3px] rounded-full bg-white/10 overflow-hidden">
+              <div className="relative w-full h-[3px] rounded-full bg-[var(--color-soft-bg-hover)] overflow-hidden">
                 <div
                   className="absolute inset-y-0 left-0 rounded-full bg-[var(--color-accent)]"
                   style={{ width: `${progress}%` }}
@@ -445,7 +445,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
               exit={{ opacity: 0, y: 10, scale: 0.95 }}
               transition={{ duration: 0.15, ease: [0.23, 1, 0.32, 1] }}
               style={{ bottom: dropdownPos.bottom, left: dropdownPos.left }}
-              className="fixed z-[200] min-w-[180px] max-h-[40vh] overflow-y-auto rounded-[12px] border border-[var(--color-border-strong)] bg-[#0d0d12] p-1 shadow-[0_20px_60px_rgba(0,0,0,0.7)] backdrop-blur-xl origin-bottom-left"
+              className="fixed z-[200] min-w-[180px] max-h-[40vh] overflow-y-auto rounded-[12px] border border-[var(--color-border-strong)] bg-[var(--color-player-solid)] p-1 shadow-[0_20px_60px_rgba(0,0,0,0.7)] backdrop-blur-xl origin-bottom-left"
             >
               <div className="px-3 py-2 border-b border-white/5 mb-1">
                 <span className="text-[0.5rem] font-bold uppercase tracking-widest text-[var(--color-text-low)]">Partisyon Seçimi</span>
@@ -463,7 +463,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
                       setDropdownPos(null);
                     }}
                     className={`flex w-full items-center gap-3 rounded-[6px] px-3 py-2.5 text-left text-[0.62rem] font-semibold uppercase tracking-[0.08em] transition-all ${
-                      active ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]' : 'text-[var(--color-text-medium)] hover:bg-white/5 hover:text-white'
+                      active ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]' : 'text-[var(--color-text-medium)] hover:bg-[var(--color-soft-bg)] hover:text-[var(--color-text-high)]'
                     }`}
                   >
                     <div className={`h-1.5 w-1.5 shrink-0 rounded-full transition-colors ${active ? 'bg-[var(--color-accent)]' : 'border border-white/20'}`} />
@@ -491,7 +491,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
               exit={{ opacity: 0, y: 10, scale: 0.95 }}
               transition={{ duration: 0.15, ease: [0.23, 1, 0.32, 1] }}
               style={{ bottom: speedDropdownPos.bottom, left: speedDropdownPos.left }}
-              className="fixed z-[200] min-w-[100px] overflow-hidden rounded-[12px] border border-[var(--color-border-strong)] bg-[#0d0d12] p-1 shadow-[0_20px_60px_rgba(0,0,0,0.7)] backdrop-blur-xl origin-bottom-left"
+              className="fixed z-[200] min-w-[100px] overflow-hidden rounded-[12px] border border-[var(--color-border-strong)] bg-[var(--color-player-solid)] p-1 shadow-[0_20px_60px_rgba(0,0,0,0.7)] backdrop-blur-xl origin-bottom-left"
             >
               <div className="px-3 py-2 border-b border-white/5 mb-1 text-center">
                 <span className="text-[0.5rem] font-bold uppercase tracking-widest text-[var(--color-text-low)]">Oynatma Hızı</span>
@@ -508,7 +508,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
                       setSpeedDropdownPos(null);
                     }}
                     className={`flex w-full items-center justify-center rounded-[6px] px-3 py-2 text-center text-[0.62rem] font-bold transition-all ${
-                      active ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]' : 'text-[var(--color-text-medium)] hover:bg-white/5 hover:text-white'
+                      active ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]' : 'text-[var(--color-text-medium)] hover:bg-[var(--color-soft-bg)] hover:text-[var(--color-text-high)]'
                     }`}
                   >
                     {speed}x

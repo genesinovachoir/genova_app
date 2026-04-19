@@ -66,7 +66,10 @@ function formatShortDate(dateStr: string | null | undefined) {
   });
 }
 
-function formatPercent(value: number) {
+function formatPercent(value: number | null | undefined) {
+  if (value == null) {
+    return '—';
+  }
   return `%${Math.max(0, Math.min(100, Math.round(value)))}`;
 }
 
@@ -79,7 +82,7 @@ function MemberAvatar({ detail }: { detail: PerformanceMemberDetail }) {
   const member = detail.member;
 
   return (
-    <div className="flex h-[88px] w-[88px] items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[var(--color-accent)] to-[#b48600] text-3xl font-serif font-medium text-[var(--color-background)] shadow-[0_0_24px_rgba(192,178,131,0.28)] ring-[3px] ring-black">
+    <div className="flex h-[88px] w-[88px] items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[var(--color-accent)] to-[#b48600] text-3xl font-serif font-medium text-[var(--color-background)] shadow-[0_0_24px_rgba(192,178,131,0.28)] ring-[3px] ring-[var(--color-panel-bg)]">
       {member.photo_url && !imgError ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -111,7 +114,7 @@ function InfoRow({
       </div>
       <div className="flex min-w-0 flex-col">
         <span className="text-[0.6rem] uppercase tracking-wider text-[var(--color-text-medium)]">{label}</span>
-        <span className={`truncate text-[0.88rem] font-medium ${value ? 'text-white/90' : 'text-white/30 italic'}`}>
+        <span className={`truncate text-[0.88rem] font-medium ${value ? 'text-[var(--color-text-high)]' : 'text-[var(--color-text-medium)] opacity-30 italic'}`}>
           {value || 'Belirtilmemiş'}
         </span>
       </div>
@@ -288,7 +291,7 @@ function MetricBox({
   note,
 }: {
   label: string;
-  percent: number;
+  percent: number | null;
   counts: string;
   note?: string;
 }) {
@@ -337,6 +340,7 @@ export default function KoristDetailPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rehearsals' }, invalidate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rehearsal_invitees' }, invalidate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'choir_member_roles' }, invalidate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'assignments' }, invalidate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'assignment_targets' }, invalidate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'assignment_submissions' }, invalidate)
@@ -371,8 +375,6 @@ export default function KoristDetailPage() {
 
   const selectedDay = calendarDays.find((day) => day.date === resolvedSelectedDate) ?? null;
   const selectedRehearsal = selectedDay?.rehearsal ?? null;
-  const approvedHomework = detail?.homework.filter((item) => item.status === 'approved') ?? [];
-  const openHomework = detail?.homework.filter((item) => item.status !== 'approved') ?? [];
 
   if (!privileged) {
     return (
@@ -423,7 +425,16 @@ export default function KoristDetailPage() {
   }
 
   const member = detail.member;
-  const continuityFormula = `${member.attended_rehearsals} prova + ${member.approved_assignments} ödev / ${member.total_rehearsals} prova + ${member.total_assignments} ödev`;
+  const showHomeworkMetrics = detail.show_homework_metrics;
+  const continuityFormula = showHomeworkMetrics
+    ? `${member.attended_rehearsals} prova + ${member.approved_assignments ?? 0} ödev / ${member.total_rehearsals} prova + ${member.total_assignments ?? 0} ödev`
+    : null;
+  const approvedHomework = showHomeworkMetrics ? detail.homework.filter((item) => item.status === 'approved') : [];
+  const openHomework = showHomeworkMetrics ? detail.homework.filter((item) => item.status !== 'approved') : [];
+  const pendingHomeworkCount = showHomeworkMetrics ? detail.homework.filter((item) => item.status === 'pending').length : 0;
+  const rejectedHomeworkCount = showHomeworkMetrics ? detail.homework.filter((item) => item.status === 'rejected').length : 0;
+  const missingHomeworkCount = showHomeworkMetrics ? detail.homework.filter((item) => item.status === 'missing').length : 0;
+  const contentGridClass = showHomeworkMetrics ? 'grid gap-6 lg:grid-cols-[1.1fr_0.9fr]' : 'grid gap-6';
 
   return (
     <main className="page-shell space-y-6 pb-28 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
@@ -435,9 +446,7 @@ export default function KoristDetailPage() {
           <ArrowLeft size={18} />
           <span className="text-xs font-medium uppercase tracking-[0.1em]">Geri</span>
         </button>
-        <span className="status-pill !min-h-0 !rounded-full !px-3 !py-1 !text-[0.58rem]">
-          {detail.scope_label}
-        </span>
+
       </div>
 
       <motion.section
@@ -445,75 +454,63 @@ export default function KoristDetailPage() {
         animate={{ opacity: 1, y: 0 }}
         className="glass-panel p-6 sm:p-7"
       >
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex min-w-0 gap-4">
+        <div className="flex flex-col gap-7">
+          <div className="flex items-center gap-5">
             <MemberAvatar detail={detail} />
-
-            <div className="min-w-0 flex-1">
-              <span className="page-kicker">Mini Korist Profili</span>
-              <h1 className="mt-4 font-serif text-[2rem] tracking-[-0.06em] sm:text-[2.6rem]">
+            <div className="min-w-0">
+              <span className="page-kicker">Korist Performansı</span>
+              <h1 className="mt-2 font-serif text-[1.6rem] tracking-[-0.04em] text-[var(--color-text-high)] sm:text-[2rem]">
                 {member.first_name} {member.last_name}
               </h1>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {member.voice_group ? <span className="status-pill !min-h-0 !rounded-full !px-3 !py-1 !text-[0.58rem]">{member.voice_group}</span> : null}
-                {member.sub_voice_group && member.sub_voice_group !== member.voice_group ? (
-                  <span className="status-pill !min-h-0 !rounded-full !px-3 !py-1 !text-[0.58rem]">{member.sub_voice_group}</span>
-                ) : null}
-                {member.favorite_song_title ? (
-                  <span className="status-pill !min-h-0 !rounded-full !px-3 !py-1 !text-[0.58rem]">
-                    Favori eser: {member.favorite_song_title}
-                  </span>
-                ) : null}
-              </div>
-
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                <InfoRow icon={<Mail size={15} />} label="E-posta" value={member.email} />
-                <InfoRow icon={<Phone size={15} />} label="Telefon" value={member.phone} />
-                <InfoRow icon={<Cake size={15} />} label="Doğum Tarihi" value={formatDate(member.birth_date)} />
-                <InfoRow icon={<CalendarDays size={15} />} label="Katılım Tarihi" value={formatDate(member.join_date)} />
-                <InfoRow icon={<School2 size={15} />} label="Okul" value={member.school_name} />
-                <InfoRow icon={<GraduationCap size={15} />} label="Bölüm" value={member.department_name} />
-              </div>
             </div>
           </div>
 
-          <div className="min-w-[260px] max-w-md rounded-[10px] border border-[var(--color-border)] bg-white/4 p-4">
-            <p className="text-[0.6rem] font-bold uppercase tracking-[0.2em] text-[var(--color-text-medium)]">Toplam devamlılık</p>
-            <div className="mt-3 flex items-end justify-between gap-3">
-              <span className="font-serif text-[2.3rem] leading-none tracking-[-0.06em] text-[var(--color-text-high)]">
-                {formatPercent(member.continuity_percent)}
-              </span>
-              <span className="text-[0.62rem] uppercase tracking-[0.16em] text-[var(--color-text-medium)]">
-                {member.attended_rehearsals + member.approved_assignments} / {member.total_rehearsals + member.total_assignments}
-              </span>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-[var(--color-text-medium)]">{continuityFormula}</p>
+          <div className="grid gap-x-8 gap-y-4 border-t border-[var(--color-border)] pt-6 sm:grid-cols-2 lg:grid-cols-3">
+            <InfoRow icon={<Mail size={15} />} label="E-posta" value={member.email} />
+            <InfoRow icon={<Phone size={15} />} label="Telefon" value={member.phone} />
+            <InfoRow icon={<Cake size={15} />} label="Doğum Tarihi" value={formatDate(member.birth_date)} />
+            <InfoRow icon={<CalendarDays size={15} />} label="Katılım Tarihi" value={formatDate(member.join_date)} />
+            <InfoRow icon={<School2 size={15} />} label="Okul" value={member.school_name} />
+            <InfoRow icon={<GraduationCap size={15} />} label="Bölüm" value={member.department_name} />
           </div>
         </div>
       </motion.section>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <MetricBox
-          label="Genel prova katılımı"
-          percent={member.attendance_percent}
-          counts={`${member.attended_rehearsals}/${member.total_rehearsals}`}
-          note={`${member.pending_rehearsals} prova onay bekliyor`}
-        />
-        <MetricBox
-          label="Genel ödev yapma"
-          percent={member.homework_percent}
-          counts={`${member.approved_assignments}/${member.total_assignments}`}
-          note={`${member.submitted_assignments} teslim, ${member.pending_assignments} bekliyor`}
-        />
-        <MetricBox
-          label="Genel devamlılık"
-          percent={member.continuity_percent}
-          counts={`${member.attended_rehearsals + member.approved_assignments}/${member.total_rehearsals + member.total_assignments}`}
-          note="Prova ve ödev yükümlülüklerinin birlikte değerlendirilmiş hali"
-        />
+      <div className="mt-4 grid grid-cols-3 divide-x divide-[var(--color-border)] border border-[var(--color-border)] rounded-[12px] bg-white/4 overflow-hidden">
+        {showHomeworkMetrics ? (
+          <>
+            <div className="flex flex-col items-center justify-center px-6 py-5 text-center">
+              <span className="text-[0.58rem] font-bold uppercase tracking-[0.2em] text-[var(--color-text-medium)] opacity-70">PROVA KATILIMI</span>
+              <span className="mt-2 font-serif text-[1.8rem] font-medium leading-none tracking-[-0.04em] text-[var(--color-text-high)]">
+                {formatPercent(member.attendance_percent)}
+              </span>
+            </div>
+            <div className="flex flex-col items-center justify-center px-6 py-5 text-center">
+              <span className="text-[0.58rem] font-bold uppercase tracking-[0.2em] text-[var(--color-text-medium)] opacity-70">ÖDEV BAŞARISI</span>
+              <span className="mt-2 font-serif text-[1.8rem] font-medium leading-none tracking-[-0.04em] text-[var(--color-text-high)]">
+                {formatPercent(member.homework_percent)}
+              </span>
+            </div>
+            <div className="flex flex-col items-center justify-center px-6 py-5 text-center">
+              <span className="text-[0.58rem] font-bold uppercase tracking-[0.2em] text-[var(--color-text-medium)] opacity-70">GENEL DEVAMLILIK</span>
+              <span className="mt-2 font-serif text-[1.8rem] font-medium leading-none tracking-[-0.04em] text-[var(--color-text-high)]">
+                {formatPercent(member.continuity_percent)}
+              </span>
+            </div>
+          </>
+        ) : (
+          <div className="col-span-3">
+            <div className="flex flex-col items-center justify-center px-6 py-5 text-center">
+              <span className="text-[0.58rem] font-bold uppercase tracking-[0.2em] text-[var(--color-text-medium)] opacity-70">NORMAL DEVAMLILIK</span>
+              <span className="mt-2 font-serif text-[1.8rem] font-medium leading-none tracking-[-0.04em] text-[var(--color-text-high)]">
+                {formatPercent(member.attendance_percent)}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+      <div className={contentGridClass}>
         <motion.section
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
@@ -598,7 +595,7 @@ export default function KoristDetailPage() {
                           ? 'Onay bekleniyor'
                           : selectedDay.status === 'missed'
                             ? 'Katılmadı'
-                            : 'Yaklaşan prova'}
+                            : 'Yaklaşan'}
                     </span>
                   ) : (
                     <span className="status-pill !min-h-0 !rounded-full !px-3 !py-1 !text-[0.58rem]">Prova yok</span>
@@ -611,7 +608,7 @@ export default function KoristDetailPage() {
                     <p>📍 {selectedRehearsal.rehearsal?.location}</p>
                     {selectedRehearsal.rehearsal?.notes ? (
                       <div
-                        className="prose prose-invert mt-3 max-w-none text-[var(--color-text-high)] opacity-90 prose-p:my-0.5 prose-p:text-[14px] prose-p:leading-[1.4]"
+                        className="prose mt-3 max-w-none text-[var(--color-text-high)] opacity-90 [--tw-prose-body:var(--color-text-high)] [--tw-prose-headings:var(--color-text-high)] [--tw-prose-links:var(--color-accent)] [--tw-prose-bold:var(--color-text-high)] [--tw-prose-bullets:var(--color-text-medium)] [--tw-prose-quotes:var(--color-text-high)] [--tw-prose-code:var(--color-text-high)] [--tw-prose-hr:var(--color-border)] prose-p:my-0.5 prose-p:text-[14px] prose-p:leading-[1.4]"
                         dangerouslySetInnerHTML={{ __html: sanitizeRichText(selectedRehearsal.rehearsal.notes) }}
                       />
                     ) : null}
@@ -624,57 +621,59 @@ export default function KoristDetailPage() {
           </AnimatePresence>
         </motion.section>
 
-        <motion.section
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="space-y-5"
-        >
-          <div className="glass-panel p-5 sm:p-6">
-            <span className="page-kicker">Ödevler</span>
-            <div className="mt-4 grid gap-3 sm:grid-cols-4">
-              <div className="rounded-[10px] border border-[var(--color-border)] bg-white/4 p-3">
-                <p className="text-[0.58rem] uppercase tracking-[0.16em] text-[var(--color-text-medium)]">Tamamlanan</p>
-                <p className="mt-2 font-serif text-2xl tracking-[-0.05em]">{approvedHomework.length}</p>
-              </div>
-              <div className="rounded-[10px] border border-[var(--color-border)] bg-white/4 p-3">
-                <p className="text-[0.58rem] uppercase tracking-[0.16em] text-[var(--color-text-medium)]">Bekleyen</p>
-                <p className="mt-2 font-serif text-2xl tracking-[-0.05em]">{detail.homework.filter((item) => item.status === 'pending').length}</p>
-              </div>
-              <div className="rounded-[10px] border border-[var(--color-border)] bg-white/4 p-3">
-                <p className="text-[0.58rem] uppercase tracking-[0.16em] text-[var(--color-text-medium)]">Reddedilen</p>
-                <p className="mt-2 font-serif text-2xl tracking-[-0.05em]">{detail.homework.filter((item) => item.status === 'rejected').length}</p>
-              </div>
-              <div className="rounded-[10px] border border-[var(--color-border)] bg-white/4 p-3">
-                <p className="text-[0.58rem] uppercase tracking-[0.16em] text-[var(--color-text-medium)]">Eksik</p>
-                <p className="mt-2 font-serif text-2xl tracking-[-0.05em]">{detail.homework.filter((item) => item.status === 'missing').length}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-4">
+        {showHomeworkMetrics ? (
+          <motion.section
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-5"
+          >
             <div className="glass-panel p-5 sm:p-6">
-              <span className="page-kicker">Tamamlananlar</span>
-              <div className="mt-4 space-y-3">
-                {approvedHomework.length === 0 ? (
-                  <p className="text-sm text-[var(--color-text-medium)]">Henüz tamamlanan ödev yok.</p>
-                ) : (
-                  approvedHomework.map((item) => <HomeworkCard key={item.assignment.id} item={item} />)
-                )}
+              <span className="page-kicker">Ödevler</span>
+              <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                <div className="rounded-[10px] border border-[var(--color-border)] bg-white/4 p-3">
+                  <p className="text-[0.58rem] uppercase tracking-[0.16em] text-[var(--color-text-medium)]">Tamamlanan</p>
+                  <p className="mt-2 font-serif text-2xl tracking-[-0.05em]">{approvedHomework.length}</p>
+                </div>
+                <div className="rounded-[10px] border border-[var(--color-border)] bg-white/4 p-3">
+                  <p className="text-[0.58rem] uppercase tracking-[0.16em] text-[var(--color-text-medium)]">Bekleyen</p>
+                  <p className="mt-2 font-serif text-2xl tracking-[-0.05em]">{pendingHomeworkCount}</p>
+                </div>
+                <div className="rounded-[10px] border border-[var(--color-border)] bg-white/4 p-3">
+                  <p className="text-[0.58rem] uppercase tracking-[0.16em] text-[var(--color-text-medium)]">Reddedilen</p>
+                  <p className="mt-2 font-serif text-2xl tracking-[-0.05em]">{rejectedHomeworkCount}</p>
+                </div>
+                <div className="rounded-[10px] border border-[var(--color-border)] bg-white/4 p-3">
+                  <p className="text-[0.58rem] uppercase tracking-[0.16em] text-[var(--color-text-medium)]">Eksik</p>
+                  <p className="mt-2 font-serif text-2xl tracking-[-0.05em]">{missingHomeworkCount}</p>
+                </div>
               </div>
             </div>
 
-            <div className="glass-panel p-5 sm:p-6">
-              <span className="page-kicker">Eksikler ve bekleyenler</span>
-              <div className="mt-4 space-y-3">
-                {openHomework.length === 0 ? (
-                  <p className="text-sm text-[var(--color-text-medium)]">Eksik ödev yok.</p>
-                ) : (
-                  openHomework.map((item) => <HomeworkCard key={item.assignment.id} item={item} />)
-                )}
+            <div className="space-y-4">
+              <div className="glass-panel p-5 sm:p-6">
+                <span className="page-kicker">Tamamlananlar</span>
+                <div className="mt-4 space-y-3">
+                  {approvedHomework.length === 0 ? (
+                    <p className="text-sm text-[var(--color-text-medium)]">Henüz tamamlanan ödev yok.</p>
+                  ) : (
+                    approvedHomework.map((item) => <HomeworkCard key={item.assignment.id} item={item} />)
+                  )}
+                </div>
+              </div>
+
+              <div className="glass-panel p-5 sm:p-6">
+                <span className="page-kicker">Eksikler ve bekleyenler</span>
+                <div className="mt-4 space-y-3">
+                  {openHomework.length === 0 ? (
+                    <p className="text-sm text-[var(--color-text-medium)]">Eksik ödev yok.</p>
+                  ) : (
+                    openHomework.map((item) => <HomeworkCard key={item.assignment.id} item={item} />)
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        </motion.section>
+          </motion.section>
+        ) : null}
       </div>
     </main>
   );

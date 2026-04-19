@@ -25,6 +25,33 @@ const ALLOWED_MIME_TYPES = new Set([
 ]);
 const SUBMISSION_SELECT_COLUMNS =
   'id, assignment_id, member_id, drive_file_id, drive_web_view_link, drive_download_link, file_name, mime_type, file_size_bytes, drive_member_folder_id, submitted_at, updated_at, status, submission_note, reviewer_note, approved_at, approved_by';
+const SUBMISSION_SNAPSHOT_COLUMNS =
+  'id, assignment_id, member_id, drive_file_id, drive_web_view_link, drive_download_link, file_name, mime_type, file_size_bytes, drive_member_folder_id, submitted_at, updated_at, status, submission_note, reviewer_note, approved_at, approved_by';
+
+interface SubmissionSnapshot {
+  id: string;
+  assignment_id: string;
+  member_id: string;
+  drive_file_id: string | null;
+  drive_web_view_link: string | null;
+  drive_download_link: string | null;
+  file_name: string;
+  mime_type: string | null;
+  file_size_bytes: number | null;
+  drive_member_folder_id: string | null;
+  submitted_at: string;
+  updated_at: string | null;
+  status: string | null;
+  submission_note: string | null;
+  reviewer_note: string | null;
+  approved_at: string | null;
+  approved_by: string | null;
+}
+
+interface ExistingSubmissionRef {
+  id: string;
+  drive_file_id: string | null;
+}
 
 function getSafeFileExtension(fileName: string) {
   const ext = fileName.split('.').pop()?.toLowerCase();
@@ -101,6 +128,41 @@ function makeStorageDriveFileId(existingDriveFileId: string | null | undefined) 
   return `storage_${crypto.randomUUID().replace(/-/g, '')}`;
 }
 
+async function archiveSubmissionSnapshot(
+  serviceClient: ReturnType<typeof createSupabaseServiceClient>,
+  snapshot: SubmissionSnapshot | null,
+) {
+  if (!snapshot?.id) {
+    return;
+  }
+
+  const { error: archiveError } = await serviceClient
+    .from('assignment_submission_history')
+    .insert({
+      assignment_id: snapshot.assignment_id,
+      member_id: snapshot.member_id,
+      source_submission_id: snapshot.id,
+      drive_file_id: snapshot.drive_file_id,
+      drive_web_view_link: snapshot.drive_web_view_link,
+      drive_download_link: snapshot.drive_download_link,
+      file_name: snapshot.file_name,
+      mime_type: snapshot.mime_type,
+      file_size_bytes: snapshot.file_size_bytes,
+      drive_member_folder_id: snapshot.drive_member_folder_id,
+      submitted_at: snapshot.submitted_at,
+      updated_at: snapshot.updated_at,
+      status: snapshot.status,
+      submission_note: snapshot.submission_note,
+      reviewer_note: snapshot.reviewer_note,
+      approved_at: snapshot.approved_at,
+      approved_by: snapshot.approved_by,
+      archive_reason: 'resubmitted',
+    });
+  if (archiveError) {
+    throw new Error(archiveError.message);
+  }
+}
+
 async function persistSubmissionFromStorage(params: {
   serviceClient: ReturnType<typeof createSupabaseServiceClient>;
   assignmentId: string;
@@ -133,10 +195,11 @@ async function persistSubmissionFromStorage(params: {
   if (existingSubmissionError) {
     throw new Error(existingSubmissionError.message);
   }
+  const existingRef = (existingSubmission ?? null) as ExistingSubmissionRef | null;
 
   const nowIso = new Date().toISOString();
   const payload = {
-    drive_file_id: makeStorageDriveFileId(existingSubmission?.drive_file_id ?? null),
+    drive_file_id: makeStorageDriveFileId(existingRef?.drive_file_id ?? null),
     drive_web_view_link: null,
     drive_download_link: `${STORAGE_LINK_PREFIX}${storageBucket}/${storagePath}`,
     file_name: fileName,
@@ -152,11 +215,11 @@ async function persistSubmissionFromStorage(params: {
     approved_by: null,
   };
 
-  if (existingSubmission?.id) {
+  if (existingRef?.id) {
     const { data: updatedSubmission, error: updateError } = await serviceClient
       .from('assignment_submissions')
       .update(payload)
-      .eq('id', existingSubmission.id)
+      .eq('id', existingRef.id)
       .select(SUBMISSION_SELECT_COLUMNS)
       .single();
     if (updateError || !updatedSubmission) {
@@ -263,6 +326,17 @@ export async function POST(request: Request) {
       return new NextResponse('Bu ödev size atanmamış.', { status: 403 });
     }
 
+    const { data: existingSubmissionSnapshotRow, error: existingSnapshotError } = await serviceClient
+      .from('assignment_submissions')
+      .select(SUBMISSION_SNAPSHOT_COLUMNS)
+      .eq('assignment_id', assignmentId)
+      .eq('member_id', member.id)
+      .maybeSingle();
+    if (existingSnapshotError) {
+      return new NextResponse(existingSnapshotError.message, { status: 400 });
+    }
+    const existingSubmissionSnapshot = (existingSubmissionSnapshotRow ?? null) as SubmissionSnapshot | null;
+
     await ensureStorageBucketExists();
 
     const safeName = sanitizeFileName(file.name);
@@ -308,6 +382,8 @@ export async function POST(request: Request) {
       });
       shouldCleanupStoragePath = false;
     }
+
+    await archiveSubmissionSnapshot(serviceClient, existingSubmissionSnapshot);
 
     return NextResponse.json({ submission });
   } catch (error) {

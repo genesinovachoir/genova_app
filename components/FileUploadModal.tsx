@@ -2,8 +2,9 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Upload, X, Music2, FileText, Mic, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
+import { Upload, X, Music2, FileText, Mic, CheckCircle2, AlertCircle } from 'lucide-react';
 import { ALLOWED_SHEET_TYPES, ALLOWED_MIDI_TYPES, ALLOWED_AUDIO_TYPES, ALLOWED_SUBMISSION_TYPES, formatFileSize } from '@/lib/drive';
+import { LottieIcon } from '@/components/LottieIcon';
 
 type UploadMode = 'sheet' | 'midi' | 'audio' | 'submission';
 
@@ -15,6 +16,8 @@ interface FileUploadModalProps {
   description?: string;
   /** Partisyon label seçimi için (midi modunda) */
   showPartitionLabel?: boolean;
+  /** Yükleme notu inputunu gizlemek için (dışarıdan yönetmek isteniyorsa) */
+  hideNoteInput?: boolean;
   onUpload: (file: File, partitionLabel?: string, note?: string) => Promise<void>;
 }
 
@@ -70,6 +73,7 @@ export function FileUploadModal({
   title,
   description,
   showPartitionLabel = false,
+  hideNoteInput = false,
   onUpload,
 }: FileUploadModalProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -223,7 +227,7 @@ export function FileUploadModal({
               )}
 
               {/* Submission Note (submission modu için) */}
-              {mode === 'submission' && (
+              {mode === 'submission' && !hideNoteInput && (
                 <div>
                   <label className="block text-[0.65rem] uppercase tracking-[0.22em] text-[var(--color-text-medium)] mb-2">
                     Açıklama (İsteğe Bağlı)
@@ -266,11 +270,6 @@ export function FileUploadModal({
                     <motion.div key="success" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center gap-3">
                       <CheckCircle2 size={36} className="text-emerald-400" />
                       <p className="font-medium text-emerald-400">Yüklendi!</p>
-                    </motion.div>
-                  ) : uploading ? (
-                    <motion.div key="uploading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center gap-3">
-                      <Loader2 size={32} className="animate-spin text-[var(--color-accent)]" />
-                      <p className="text-sm text-[var(--color-text-medium)]">Google Drive üzerine yükleniyor...</p>
                     </motion.div>
                   ) : selectedFile ? (
                     <motion.div key="selected" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center gap-3">
@@ -320,10 +319,46 @@ export function FileUploadModal({
                 disabled={!selectedFile || uploading || success}
                 className="flex w-full items-center justify-center gap-2 rounded-[var(--radius-panel)] bg-[var(--color-accent)] py-4 font-sans text-[0.8rem] font-bold uppercase tracking-[0.18em] text-[var(--color-background)] transition-all active:scale-[0.98] disabled:opacity-50"
               >
-                {uploading ? <><Loader2 size={16} className="animate-spin" /> Yükleniyor...</> : 'Yükle'}
+                {uploading ? 'Yükleniyor...' : 'Yükle'}
               </button>
             </div>
           </motion.div>
+
+          {/* Full Screen Loading Overlay */}
+          <AnimatePresence>
+            {uploading && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/80 [.light_&]:bg-white/80 backdrop-blur-md"
+              >
+                <div className="flex flex-col items-center gap-1">
+                  <div className="hidden [.light_&]:flex -mb-4">
+                    <LottieIcon 
+                      path="/lottie/paperplane-light.json" 
+                      fallback={Upload}
+                      size={200} 
+                      loop 
+                      autoPlay 
+                    />
+                  </div>
+                  <div className="flex [.light_&]:hidden -mb-4">
+                    <LottieIcon 
+                      path="/lottie/paperplane-dark.json" 
+                      fallback={Upload}
+                      size={200} 
+                      loop 
+                      autoPlay 
+                    />
+                  </div>
+                  <p className="font-serif text-xl font-medium tracking-tight text-white [.light_&]:text-black">
+                    Yükleniyor...
+                  </p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </>
       )}
     </AnimatePresence>

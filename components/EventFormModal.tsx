@@ -309,7 +309,7 @@ export function EventFormModal({ open, onClose, onSaved, rehearsal, defaultDate 
                 <div>
                   <label className="mb-2 block text-[0.65rem] font-bold uppercase tracking-[0.2em] text-[var(--color-text-medium)]">Açıklama</label>
                   <div className="reset-tiptap-styles">
-                    <RichTextEditor content={notes} onChange={setNotes} />
+                    <RichTextEditor content={notes} onChange={setNotes} placeholder="" />
                   </div>
                 </div>
 
@@ -356,7 +356,7 @@ export function EventFormModal({ open, onClose, onSaved, rehearsal, defaultDate 
                       value={search}
                       onChange={e => setSearch(e.target.value)}
                       placeholder="Ara..."
-                      className="editorial-input !pl-9"
+                      className="editorial-input themed-search-input !pl-9"
                     />
                   </div>
 
@@ -394,7 +394,7 @@ export function EventFormModal({ open, onClose, onSaved, rehearsal, defaultDate 
             </div>
 
             {/* Sticky Footer */}
-            <div className="shrink-0 px-5 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-[var(--color-border)]">
+            <div className="shrink-0 px-5 pt-1.5 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-[var(--color-border)]">
               {formError && (
                 <p className="mb-3 rounded-[var(--radius-panel)] border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
                   {formError}
@@ -406,7 +406,7 @@ export function EventFormModal({ open, onClose, onSaved, rehearsal, defaultDate 
                     type="button"
                     onClick={handleDelete}
                     disabled={submitting || deleting}
-                    className="flex items-center justify-center gap-2 rounded-[var(--radius-panel)] border border-rose-400/45 bg-rose-500/10 py-4 font-sans text-[0.72rem] font-bold uppercase tracking-[0.15em] text-rose-300 transition-all active:scale-[0.98] disabled:opacity-50"
+                    className="flex items-center justify-center gap-2 rounded-[var(--radius-panel)] border border-rose-400/45 bg-rose-500/10 py-3 font-sans text-[0.72rem] font-bold uppercase tracking-[0.15em] text-rose-400 [.light_&]:text-[#450a0a] transition-all active:scale-[0.98] disabled:opacity-50"
                   >
                     {deleting
                       ? <><Loader2 size={15} className="animate-spin" /> Siliniyor...</>
@@ -418,7 +418,7 @@ export function EventFormModal({ open, onClose, onSaved, rehearsal, defaultDate 
                   type="submit"
                   form="event-form"
                   disabled={submitting || deleting || !date}
-                  className="flex w-full items-center justify-center gap-2 rounded-[var(--radius-panel)] bg-[var(--color-accent)] py-4 font-sans text-[0.8rem] font-bold uppercase tracking-[0.18em] text-[var(--color-background)] transition-all active:scale-[0.98] disabled:opacity-50"
+                  className="flex w-full items-center justify-center gap-2 rounded-[var(--radius-panel)] bg-[var(--color-accent)] py-3 font-sans text-[0.8rem] font-bold uppercase tracking-[0.18em] text-[var(--color-background)] transition-all active:scale-[0.98] disabled:opacity-50"
                 >
                   {submitting
                     ? <><Loader2 size={16} className="animate-spin" /> Kaydediliyor...</>
@@ -461,7 +461,7 @@ export function EventFormModal({ open, onClose, onSaved, rehearsal, defaultDate 
                       type="button"
                       onClick={() => void handleDeleteConfirmed()}
                       disabled={deleting}
-                      className="inline-flex items-center justify-center gap-2 rounded-[8px] border border-rose-500/40 bg-rose-500/15 px-3 py-2 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-rose-300 disabled:opacity-50"
+                      className="inline-flex items-center justify-center gap-2 rounded-[8px] border border-rose-500/40 bg-rose-500/15 px-3 py-2 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-rose-400 [.light_&]:text-[#450a0a] disabled:opacity-50"
                     >
                       {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                       Sil

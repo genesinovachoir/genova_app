@@ -26,9 +26,9 @@ interface CreateAssignmentModalProps {
   creatorMemberId: string;
   isChef: boolean;
   creatorVoiceGroup: string | null;
+  editingAssignmentId?: string | null;
 }
 
-type AssignmentMode = 'all' | 'group' | 'person' | 'own_group';
 type MemberWithSelection = ChoirMember & { selected: boolean };
 type RoleName = 'Şef' | 'Partisyon Şefi' | 'Korist' | string;
 
@@ -48,15 +48,6 @@ function hasBlockedAssignmentRole(row: ChoirMemberRoleRow): boolean {
   return roleEntries.some((entry) => Boolean(entry?.name && BLOCKED_ASSIGNMENT_ROLES.has(entry.name)));
 }
 
-function getVoiceGroupSortKey(voiceGroup: string | null | undefined) {
-  const normalized = voiceGroup?.trim() ?? '';
-  const index = VOICE_ORDER.indexOf(normalized);
-  if (index >= 0) {
-    return `${index}`;
-  }
-  return `z-${normalized.toLowerCase()}`;
-}
-
 export function CreateAssignmentModal({
   isOpen,
   onClose,
@@ -64,6 +55,7 @@ export function CreateAssignmentModal({
   creatorMemberId,
   isChef,
   creatorVoiceGroup,
+  editingAssignmentId = null,
 }: CreateAssignmentModalProps) {
   const [form, setForm] = useState({ title: '', description: '', deadline: '' });
   const [members, setMembers] = useState<MemberWithSelection[]>([]);
@@ -72,9 +64,7 @@ export function CreateAssignmentModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-
-  const [assignmentMode, setAssignmentMode] = useState<AssignmentMode>(isChef ? 'all' : 'own_group');
-  const [selectedVoiceGroup, setSelectedVoiceGroup] = useState('');
+  const isEditMode = Boolean(editingAssignmentId);
 
   useEffect(() => {
     if (isOpen) {
@@ -135,17 +125,37 @@ export function CreateAssignmentModal({
       .map((member) => ({ ...member, selected: false }));
     setMembers(nextMembers);
 
-    if (isChef) {
-      const groups = [...new Set(nextMembers.map((member) => member.voice_group).filter(Boolean) as string[])].sort((a, b) => {
-        const keyA = getVoiceGroupSortKey(a);
-        const keyB = getVoiceGroupSortKey(b);
-        return keyA.localeCompare(keyB, 'tr');
-      });
-      setSelectedVoiceGroup(groups[0] ?? '');
-    }
-
     setLoadingMembers(false);
   }, [creatorVoiceGroup, isChef]);
+
+  const loadAssignmentForEdit = useCallback(async (assignmentId: string) => {
+    const [{ data: assignment, error: assignmentError }, { data: targetRows, error: targetError }] = await Promise.all([
+      supabase
+        .from('assignments')
+        .select('id, title, description, deadline')
+        .eq('id', assignmentId)
+        .single(),
+      supabase
+        .from('assignment_targets')
+        .select('member_id')
+        .eq('assignment_id', assignmentId),
+    ]);
+
+    if (assignmentError) {
+      throw new Error(assignmentError.message);
+    }
+    if (targetError) {
+      throw new Error(targetError.message);
+    }
+
+    const selectedIds = new Set((targetRows ?? []).map((row) => row.member_id));
+    setForm({
+      title: assignment?.title ?? '',
+      description: assignment?.description ?? '',
+      deadline: assignment?.deadline ? new Date(assignment.deadline).toISOString().slice(0, 16) : '',
+    });
+    setMembers((prev) => prev.map((member) => ({ ...member, selected: selectedIds.has(member.id) })));
+  }, []);
 
   useEffect(() => {
     if (!isOpen) {
@@ -156,22 +166,24 @@ export function CreateAssignmentModal({
     setError(null);
     setSuccess(false);
     setMemberSearch('');
-    setAssignmentMode(isChef ? 'all' : 'own_group');
     void loadMembers();
-  }, [isChef, isOpen, loadMembers]);
+  }, [isOpen, loadMembers]);
+
+  useEffect(() => {
+    if (!isOpen || !editingAssignmentId || members.length === 0) {
+      return;
+    }
+
+    void loadAssignmentForEdit(editingAssignmentId).catch((loadError: unknown) => {
+      setError(loadError instanceof Error ? loadError.message : 'Ödev bilgileri yüklenemedi.');
+    });
+  }, [editingAssignmentId, isOpen, loadAssignmentForEdit, members.length]);
 
   const handleClose = () => {
     if (!loading) {
       onClose();
     }
   };
-
-  const allVoiceGroups = useMemo(() => {
-    const groups = [...new Set(members.map((member) => member.voice_group).filter(Boolean) as string[])];
-    return groups.sort((a, b) => getVoiceGroupSortKey(a).localeCompare(getVoiceGroupSortKey(b), 'tr'));
-  }, [members]);
-
-  const shouldShowMemberSelector = assignmentMode === 'person';
 
   const filteredMembers = useMemo(
     () =>
@@ -206,19 +218,6 @@ export function CreateAssignmentModal({
 
   const selectedCount = members.filter((member) => member.selected).length;
 
-  const estimatedTargetCount = useMemo(() => {
-    if (assignmentMode === 'all') {
-      return members.length;
-    }
-    if (assignmentMode === 'group') {
-      return members.filter((member) => member.voice_group === selectedVoiceGroup).length;
-    }
-    if (assignmentMode === 'own_group') {
-      return members.length;
-    }
-    return selectedCount;
-  }, [assignmentMode, members, selectedCount, selectedVoiceGroup]);
-
   const toggleMember = (id: string) => {
     setMembers((previous) => previous.map((member) => (member.id === id ? { ...member, selected: !member.selected } : member)));
   };
@@ -232,35 +231,7 @@ export function CreateAssignmentModal({
   };
 
   const getTargetMemberIds = () => {
-    if (isChef) {
-      if (assignmentMode === 'all') {
-        return members.map((member) => member.id);
-      }
-      if (assignmentMode === 'group') {
-        return members.filter((member) => member.voice_group === selectedVoiceGroup).map((member) => member.id);
-      }
-      return members.filter((member) => member.selected).map((member) => member.id);
-    }
-
-    if (!creatorVoiceGroup) {
-      throw new Error('Partisyon şefi için ses grubu bilgisi eksik.');
-    }
-
-    if (assignmentMode === 'own_group') {
-      return members.map((member) => member.id);
-    }
-
     return members.filter((member) => member.selected).map((member) => member.id);
-  };
-
-  const getTargetVoiceGroup = () => {
-    if (isChef && assignmentMode === 'group') {
-      return selectedVoiceGroup || null;
-    }
-    if (!isChef && assignmentMode === 'own_group') {
-      return creatorVoiceGroup;
-    }
-    return null;
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -268,11 +239,6 @@ export function CreateAssignmentModal({
 
     if (!form.title.trim()) {
       setError('Ödev başlığı zorunlu.');
-      return;
-    }
-
-    if (isChef && assignmentMode === 'group' && !selectedVoiceGroup) {
-      setError('Lütfen bir ses grubu seçin.');
       return;
     }
 
@@ -300,35 +266,67 @@ export function CreateAssignmentModal({
         throw new Error('Ödev yalnızca koristlere atanabilir. Şef/partisyon şefi hedeflenemez.');
       }
 
-      const { data: assignment, error: insertAssignmentError } = await supabase
-        .from('assignments')
-        .insert({
-          title: form.title.trim(),
-          description: form.description.trim() || null,
-          deadline: form.deadline ? new Date(form.deadline).toISOString() : null,
-          target_voice_group: getTargetVoiceGroup(),
-          created_by: creatorMemberId,
-          is_active: true,
-        })
-        .select('id, title')
-        .single();
+      if (isEditMode && editingAssignmentId) {
+        const { error: updateAssignmentError } = await supabase
+          .from('assignments')
+          .update({
+            title: form.title.trim(),
+            description: form.description.trim() || null,
+            deadline: form.deadline ? new Date(form.deadline).toISOString() : null,
+          })
+          .eq('id', editingAssignmentId);
+        if (updateAssignmentError) {
+          throw new Error(updateAssignmentError.message);
+        }
 
-      if (insertAssignmentError || !assignment) {
-        throw new Error(insertAssignmentError?.message || 'Ödev oluşturulamadı.');
+        const { error: deleteTargetsError } = await supabase
+          .from('assignment_targets')
+          .delete()
+          .eq('assignment_id', editingAssignmentId);
+        if (deleteTargetsError) {
+          throw new Error(deleteTargetsError.message);
+        }
+
+        const { error: targetInsertError } = await supabase.from('assignment_targets').insert(
+          targetMemberIds.map((memberId) => ({
+            assignment_id: editingAssignmentId,
+            member_id: memberId,
+          })),
+        );
+        if (targetInsertError) {
+          throw new Error(targetInsertError.message);
+        }
+      } else {
+        const { data: assignment, error: insertAssignmentError } = await supabase
+          .from('assignments')
+          .insert({
+            title: form.title.trim(),
+            description: form.description.trim() || null,
+            deadline: form.deadline ? new Date(form.deadline).toISOString() : null,
+            target_voice_group: null,
+            created_by: creatorMemberId,
+            is_active: true,
+          })
+          .select('id, title')
+          .single();
+
+        if (insertAssignmentError || !assignment) {
+          throw new Error(insertAssignmentError?.message || 'Ödev oluşturulamadı.');
+        }
+        createdAssignmentId = assignment.id;
+
+        const { error: targetInsertError } = await supabase.from('assignment_targets').insert(
+          targetMemberIds.map((memberId) => ({
+            assignment_id: assignment.id,
+            member_id: memberId,
+          })),
+        );
+        if (targetInsertError) {
+          throw new Error(targetInsertError.message);
+        }
+
+        await initAssignmentFolder(assignment.id, assignment.title);
       }
-      createdAssignmentId = assignment.id;
-
-      const { error: targetInsertError } = await supabase.from('assignment_targets').insert(
-        targetMemberIds.map((memberId) => ({
-          assignment_id: assignment.id,
-          member_id: memberId,
-        })),
-      );
-      if (targetInsertError) {
-        throw new Error(targetInsertError.message);
-      }
-
-      await initAssignmentFolder(assignment.id, assignment.title);
 
       setSuccess(true);
       setTimeout(() => {
@@ -344,8 +342,6 @@ export function CreateAssignmentModal({
       setLoading(false);
     }
   };
-
-  const voiceGroupLabel = creatorVoiceGroup ?? 'Partisyon';
 
   return (
     <AnimatePresence>
@@ -369,7 +365,7 @@ export function CreateAssignmentModal({
             <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 pb-4 pt-[max(env(safe-area-inset-top),1.25rem)] shrink-0">
               <div className="flex items-center gap-2">
                 <ClipboardList size={16} className="text-[var(--color-accent)]" />
-                <h2 className="font-serif text-[1.1rem] font-medium tracking-[-0.02em]">Ödev Oluştur</h2>
+                <h2 className="font-serif text-[1.1rem] font-medium tracking-[-0.02em]">{isEditMode ? 'Ödevi Düzenle' : 'Ödev Oluştur'}</h2>
               </div>
               <button
                 onClick={handleClose}
@@ -384,8 +380,10 @@ export function CreateAssignmentModal({
               {success ? (
                 <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center gap-3 py-20">
                   <CheckCircle2 size={40} className="text-emerald-400" />
-                  <p className="font-medium text-emerald-400">Ödev oluşturuldu.</p>
-                  <p className="text-sm text-[var(--color-text-medium)]">Drive klasörü hazırlandı.</p>
+                  <p className="font-medium text-emerald-400">{isEditMode ? 'Ödev güncellendi.' : 'Ödev oluşturuldu.'}</p>
+                  <p className="text-sm text-[var(--color-text-medium)]">
+                    {isEditMode ? 'Değişiklikler kaydedildi.' : 'Drive klasörü hazırlandı.'}
+                  </p>
                 </motion.div>
               ) : (
                 <form onSubmit={handleSubmit} className="space-y-5" id="assignment-form">
@@ -421,103 +419,11 @@ export function CreateAssignmentModal({
                     />
                   </div>
 
-                  <div className="rounded-[6px] border border-[var(--color-border)] bg-white/5 p-4">
-                    <div className="mb-3 flex items-center gap-2">
-                      <Users size={13} className="text-[var(--color-accent)]" />
-                      <p className="text-[0.62rem] font-bold uppercase tracking-[0.18em] text-[var(--color-text-medium)]">Atama Modu</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      {isChef ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => setAssignmentMode('all')}
-                            className={`rounded border px-3 py-2 text-[0.66rem] font-bold uppercase tracking-[0.14em] transition-colors ${
-                              assignmentMode === 'all'
-                                ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                                : 'border-[var(--color-border)] text-[var(--color-text-medium)] hover:bg-white/5'
-                            }`}
-                          >
-                            Tüm Koro
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setAssignmentMode('group')}
-                            className={`rounded border px-3 py-2 text-[0.66rem] font-bold uppercase tracking-[0.14em] transition-colors ${
-                              assignmentMode === 'group'
-                                ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                                : 'border-[var(--color-border)] text-[var(--color-text-medium)] hover:bg-white/5'
-                            }`}
-                          >
-                            Ses Grubu
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setAssignmentMode('person')}
-                            className={`col-span-2 rounded border px-3 py-2 text-[0.66rem] font-bold uppercase tracking-[0.14em] transition-colors ${
-                              assignmentMode === 'person'
-                                ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                                : 'border-[var(--color-border)] text-[var(--color-text-medium)] hover:bg-white/5'
-                            }`}
-                          >
-                            Kişi Seç
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => setAssignmentMode('own_group')}
-                            className={`rounded border px-3 py-2 text-[0.66rem] font-bold uppercase tracking-[0.14em] transition-colors ${
-                              assignmentMode === 'own_group'
-                                ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                                : 'border-[var(--color-border)] text-[var(--color-text-medium)] hover:bg-white/5'
-                            }`}
-                          >
-                            {voiceGroupLabel}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setAssignmentMode('person')}
-                            className={`rounded border px-3 py-2 text-[0.66rem] font-bold uppercase tracking-[0.14em] transition-colors ${
-                              assignmentMode === 'person'
-                                ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                                : 'border-[var(--color-border)] text-[var(--color-text-medium)] hover:bg-white/5'
-                            }`}
-                          >
-                            Kişi Seç
-                          </button>
-                        </>
-                      )}
-                    </div>
-
-                    {assignmentMode === 'group' ? (
-                      <div className="mt-3">
-                        <label className="mb-1 block text-[0.6rem] uppercase tracking-[0.15em] text-[var(--color-text-medium)]">Ses Grubu</label>
-                        <select
-                          value={selectedVoiceGroup}
-                          onChange={(event) => setSelectedVoiceGroup(event.target.value)}
-                          className="editorial-input"
-                          disabled={loading || allVoiceGroups.length === 0}
-                        >
-                          {allVoiceGroups.length === 0 ? <option value="">Ses grubu bulunamadı</option> : null}
-                          {allVoiceGroups.map((voiceGroup) => (
-                            <option key={voiceGroup} value={voiceGroup}>
-                              {voiceGroup}
-                            </option>
-                          ))}
-                        </select>
+                  <div>
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="text-[0.62rem] uppercase tracking-[0.18em] text-[var(--color-text-medium)]">
+                        Kişi Seçimi ({selectedCount})
                       </div>
-                    ) : null}
-
-                    <p className="mt-3 text-xs text-[var(--color-text-medium)]">Hedef: {estimatedTargetCount} korist</p>
-                  </div>
-
-                  {shouldShowMemberSelector ? (
-                    <div>
-                      <div className="mb-3 flex items-center justify-between gap-3">
-                        <div className="text-[0.62rem] uppercase tracking-[0.18em] text-[var(--color-text-medium)]">Kişi Seçimi</div>
                         <button
                           type="button"
                           onClick={toggleAllVisible}
@@ -525,57 +431,56 @@ export function CreateAssignmentModal({
                         >
                           {filteredMembers.length > 0 && filteredMembers.every((member) => member.selected) ? 'Kaldır' : 'Tümünü Seç'}
                         </button>
-                      </div>
-
-                      <div className="relative mb-3">
-                        <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-medium)]" />
-                        <input
-                          type="text"
-                          value={memberSearch}
-                          onChange={(event) => setMemberSearch(event.target.value)}
-                          placeholder="İsim veya ses grubu ara..."
-                          className="editorial-input !pl-9"
-                          disabled={loading}
-                        />
-                      </div>
-
-                      {loadingMembers ? (
-                        <div className="flex justify-center py-6">
-                          <Loader2 className="animate-spin text-[var(--color-accent)]" size={20} />
-                        </div>
-                      ) : (
-                        <div className="max-h-[40vh] overflow-y-auto rounded-[var(--radius-panel)] border border-[var(--color-border)] divide-y divide-[var(--color-border)]">
-                          {Object.entries(groupedMembers).map(([voice, voiceMembers]) => (
-                            <div key={voice}>
-                              <div className="sticky top-0 bg-[var(--color-surface-solid)]/95 px-4 py-2 backdrop-blur-sm">
-                                <span className="text-[0.6rem] font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">{voice}</span>
-                              </div>
-                              {voiceMembers.map((member) => (
-                                <button
-                                  key={member.id}
-                                  type="button"
-                                  onClick={() => toggleMember(member.id)}
-                                  className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/5"
-                                >
-                                  {member.selected ? (
-                                    <CheckSquare size={15} className="shrink-0 text-[var(--color-accent)]" />
-                                  ) : (
-                                    <Square size={15} className="shrink-0 text-[var(--color-text-medium)]" />
-                                  )}
-                                  <span className="flex-1 text-sm">
-                                    {member.first_name} {member.last_name}
-                                  </span>
-                                  <span className="text-[0.6rem] text-[var(--color-text-medium)]">{member.sub_voice_group ?? member.voice_group}</span>
-                                </button>
-                              ))}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      <p className="mt-2 text-xs text-[var(--color-text-medium)]">Seçili kişi sayısı: {selectedCount}</p>
                     </div>
-                  ) : null}
+
+                    <div className="relative mb-3">
+                      <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-medium)]" />
+                      <input
+                        type="text"
+                        value={memberSearch}
+                        onChange={(event) => setMemberSearch(event.target.value)}
+                        placeholder="İsim veya ses grubu ara..."
+                        className="editorial-input themed-search-input !pl-9"
+                        disabled={loading}
+                      />
+                    </div>
+
+                    {loadingMembers ? (
+                      <div className="flex justify-center py-6">
+                        <Loader2 className="animate-spin text-[var(--color-accent)]" size={20} />
+                      </div>
+                    ) : (
+                      <div className="max-h-[40vh] overflow-y-auto rounded-[var(--radius-panel)] border border-[var(--color-border)] divide-y divide-[var(--color-border)]">
+                        {Object.entries(groupedMembers).map(([voice, voiceMembers]) => (
+                          <div key={voice}>
+                            <div className="sticky top-0 bg-[var(--color-surface-solid)]/95 px-4 py-2 backdrop-blur-sm">
+                              <span className="text-[0.6rem] font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">{voice}</span>
+                            </div>
+                            {voiceMembers.map((member) => (
+                              <button
+                                key={member.id}
+                                type="button"
+                                onClick={() => toggleMember(member.id)}
+                                className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/5"
+                              >
+                                {member.selected ? (
+                                  <CheckSquare size={15} className="shrink-0 text-[var(--color-accent)]" />
+                                ) : (
+                                  <Square size={15} className="shrink-0 text-[var(--color-text-medium)]" />
+                                )}
+                                <span className="flex-1 text-sm">
+                                  {member.first_name} {member.last_name}
+                                </span>
+                                <span className="text-[0.6rem] text-[var(--color-text-medium)]">{member.sub_voice_group ?? member.voice_group}</span>
+                              </button>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <p className="mt-2 text-xs text-[var(--color-text-medium)]">Seçili kişi sayısı: {selectedCount}</p>
+                  </div>
 
                   <AnimatePresence>
                     {error ? (
@@ -604,10 +509,10 @@ export function CreateAssignmentModal({
                 {loading ? (
                   <>
                     <Loader2 size={16} className="animate-spin" />
-                    Oluşturuluyor...
+                    {isEditMode ? 'Güncelleniyor...' : 'Oluşturuluyor...'}
                   </>
                 ) : (
-                  'Ödevi Oluştur'
+                  isEditMode ? 'Ödevi Güncelle' : 'Ödevi Oluştur'
                 )}
               </button>
             </div>

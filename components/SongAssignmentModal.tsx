@@ -232,7 +232,7 @@ export function SongAssignmentModal({ isOpen, onClose, songId, songTitle, partNa
                       placeholder="İsim veya ses grubu ara..."
                       value={search}
                       onChange={e => setSearch(e.target.value)}
-                      className="w-full rounded-[4px] border border-[var(--color-border)] bg-white/4 py-2 pl-9 pr-3 text-[0.68rem] font-medium text-white outline-none focus:border-[var(--color-accent)] transition-colors"
+                      className="themed-search-input w-full rounded-[4px] py-2 pl-9 pr-3 text-[0.68rem] font-medium outline-none focus:border-[var(--color-accent)] transition-colors"
                     />
                   </div>
                   <button

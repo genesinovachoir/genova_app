@@ -5,15 +5,18 @@ import { LottieIcon } from './LottieIcon';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion } from 'motion/react';
+import { useTheme } from 'next-themes';
 
 export function BottomNav() {
   const pathname = usePathname();
+  const { resolvedTheme } = useTheme();
+  const isLightTheme = resolvedTheme === 'light';
 
   const navItems = [
-    { name: 'Anasayfa', path: '/', icon: Home, lottie: '/lottie/Home Icon.json' },
-    { name: 'Repertuvar', path: '/repertuvar', icon: Music, lottie: '/lottie/player music.json' },
-    { name: 'Ödevler', path: '/odevler', icon: ClipboardList, lottie: '/lottie/Tasks.json' },
-    { name: 'Profil', path: '/profil', icon: User, lottie: '/lottie/Profile Icon.json' },
+    { name: 'Anasayfa', path: '/', icon: Home, lottie: isLightTheme ? '/lottie/Home Icon light.json' : '/lottie/Home Icon.json' },
+    { name: 'Repertuvar', path: '/repertuvar', icon: Music, lottie: isLightTheme ? '/lottie/player music.json' : '/lottie/player music dark.json' },
+    { name: 'Ödevler', path: '/odevler', icon: ClipboardList, lottie: isLightTheme ? '/lottie/Tasks light.json' : '/lottie/Tasks.json' },
+    { name: 'Profil', path: '/profil', icon: User, lottie: isLightTheme ? '/lottie/Profile Icon light.json' : '/lottie/Profile Icon.json' },
   ];
 
   return (
@@ -44,7 +47,7 @@ export function BottomNav() {
                 isActive={isActive}
                 className={`relative z-10 transition-colors duration-300 ${
                   item.name === 'Anasayfa' ? 'scale-[1.25]' : item.name === 'Repertuvar' ? 'scale-[1.45]' : 'scale-100'
-                } ${isActive ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-medium)]'}`}
+                } ${isActive ? 'text-[var(--color-accent)]' : 'text-[var(--color-nav-icon)]'}`}
               />
               <span
                 className={`relative z-10 font-sans text-[0.6rem] font-bold uppercase tracking-[0.24em] ${

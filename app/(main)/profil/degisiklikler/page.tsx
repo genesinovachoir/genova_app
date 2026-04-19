@@ -113,12 +113,12 @@ function getStatusLabel(status: ChangeRequest['status']) {
 
 function statusPillClass(status: ChangeRequest['status']) {
   if (status === 'approved') {
-    return 'bg-green-500/10 text-green-400 border-green-500/25';
+    return 'bg-[var(--status-approved-bg)] text-[var(--status-approved-text)] border-[var(--status-approved-border)]';
   }
   if (status === 'rejected') {
-    return 'bg-red-500/10 text-red-400 border-red-500/25';
+    return 'bg-[var(--status-rejected-bg)] text-[var(--status-rejected-text)] border-[var(--status-rejected-border)]';
   }
-  return 'bg-[#C0B283]/10 text-[#C0B283] border-[#C0B283]/25';
+  return 'bg-[var(--status-pending-bg)] text-[var(--status-pending-text)] border-[var(--status-pending-border)]';
 }
 
 async function reviewRequest(params: { requestId: string; action: 'approve' | 'reject'; rejectReason?: string }) {
@@ -299,11 +299,11 @@ export default function ProfilDegisiklikler() {
       <div className="flex items-center gap-3 px-1 pt-2">
         <Link
           href="/profil"
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-white/5 border border-white/10 text-[var(--color-text-medium)] hover:text-white transition-colors"
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-soft-bg)] text-[var(--color-text-medium)] hover:text-[var(--color-text-high)] transition-colors"
         >
           <ArrowLeft size={16} />
         </Link>
-        <span className="font-serif text-xl tracking-tight font-medium text-white/90">
+        <span className="font-serif text-xl tracking-tight font-medium text-[var(--color-text-high)]">
           {isChefView ? 'Profil Değişiklik Talepleri' : 'Profil Değişiklik Taleplerim'}
         </span>
       </div>
@@ -387,12 +387,12 @@ function ChoristRequestCard({ req, expanded, onToggle }: { req: ChangeRequest; e
 
   return (
     <motion.div layout className="glass-panel overflow-hidden">
-      <button onClick={onToggle} className="w-full flex items-center gap-3 p-4 text-left hover:bg-white/[0.02] transition-colors">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#C0B283]/10 text-[#C0B283] shrink-0">
+      <button onClick={onToggle} className="w-full flex items-center gap-3 p-4 text-left hover:bg-[var(--color-soft-bg)] transition-colors">
+        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--status-pending-bg)] text-[var(--status-pending-text)] shrink-0">
           <Clock size={16} />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[0.88rem] font-medium text-white/90 truncate">{changes.length} değişiklik</p>
+          <p className="text-[0.88rem] font-medium text-[var(--color-text-high)] truncate">{changes.length} değişiklik</p>
           <p className="text-[0.68rem] text-[var(--color-text-medium)]">Talep: {formatFullDate(req.created_at)}</p>
         </div>
         <span className={`rounded-full border px-2.5 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.12em] ${statusPillClass(req.status)}`}>
@@ -411,7 +411,7 @@ function ChoristRequestCard({ req, expanded, onToggle }: { req: ChangeRequest; e
             className="overflow-hidden"
           >
             <div className="px-4 pb-4 space-y-4">
-              <div className="h-px w-full bg-white/[0.06]" />
+              <div className="h-px w-full bg-[var(--color-border)]" />
 
               <InfoRow label="Durum" value={getStatusLabel(req.status)} />
               <InfoRow label="Talep Zamanı" value={formatFullDate(req.created_at)} />
@@ -421,20 +421,20 @@ function ChoristRequestCard({ req, expanded, onToggle }: { req: ChangeRequest; e
               {req.status === 'rejected' && req.reject_reason && <InfoRow label="Red Sebebi" value={req.reject_reason} />}
 
               {req.note && (
-                <div className="rounded-lg border border-white/10 p-3">
+                <div className="rounded-lg border border-[var(--color-border)] p-3">
                   <p className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)] mb-1">Korist Notu</p>
-                  <p className="text-[0.82rem] text-white/75 italic">{req.note}</p>
+                  <p className="text-[0.82rem] text-[var(--color-text-medium)] italic">{req.note}</p>
                 </div>
               )}
 
               <div className="space-y-2">
                 <p className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)]">Değişiklik Detayları</p>
                 {changes.map(([key, value]) => (
-                  <div key={key} className="rounded-lg bg-white/[0.03] p-3">
+                  <div key={key} className="rounded-lg bg-[var(--color-soft-bg)] p-3">
                     <span className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)] block">
                       {FIELD_LABELS[key] || key}
                     </span>
-                    <span className="text-[0.85rem] text-white/85 break-all">{displayValue(key, value)}</span>
+                    <span className="text-[0.85rem] text-[var(--color-text-high)] break-all">{displayValue(key, value)}</span>
                   </div>
                 ))}
               </div>
@@ -470,12 +470,12 @@ function ChefPendingRequestCard({
 
   return (
     <motion.div layout className="glass-panel overflow-hidden">
-      <button onClick={onToggle} className="w-full flex items-center gap-3 p-4 text-left hover:bg-white/[0.02] transition-colors">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#C0B283]/10 text-[#C0B283] shrink-0">
+      <button onClick={onToggle} className="w-full flex items-center gap-3 p-4 text-left hover:bg-[var(--color-soft-bg)] transition-colors">
+        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--status-pending-bg)] text-[var(--status-pending-text)] shrink-0">
           <Clock size={16} />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[0.88rem] font-medium text-white/90 truncate">{requesterName}</p>
+          <p className="text-[0.88rem] font-medium text-[var(--color-text-high)] truncate">{requesterName}</p>
           <p className="text-[0.68rem] text-[var(--color-text-medium)]">
             {changes.length} değişiklik · {formatFullDate(req.created_at)}
           </p>
@@ -493,25 +493,25 @@ function ChefPendingRequestCard({
             className="overflow-hidden"
           >
             <div className="px-4 pb-4 space-y-4">
-              <div className="h-px w-full bg-white/[0.06]" />
+              <div className="h-px w-full bg-[var(--color-border)]" />
 
               <div className="space-y-2">
                 {changes.map(([key, value]) => (
-                  <div key={key} className="flex items-start gap-2 rounded-lg bg-white/[0.03] p-3">
+                  <div key={key} className="flex items-start gap-2 rounded-lg bg-[var(--color-soft-bg)] p-3">
                     <div className="flex-1 min-w-0">
                       <span className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)] block">
                         {FIELD_LABELS[key] || key}
                       </span>
-                      <span className="text-[0.85rem] text-white/85 break-all">{displayValue(key, value)}</span>
+                      <span className="text-[0.85rem] text-[var(--color-text-high)] break-all">{displayValue(key, value)}</span>
                     </div>
                   </div>
                 ))}
               </div>
 
               {req.note && (
-                <div className="rounded-lg border border-white/10 p-3">
+                <div className="rounded-lg border border-[var(--color-border)] p-3">
                   <p className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)] mb-1">Korist Notu</p>
-                  <p className="text-[0.82rem] text-white/70 italic">{req.note}</p>
+                  <p className="text-[0.82rem] text-[var(--color-text-medium)] italic">{req.note}</p>
                 </div>
               )}
 
@@ -559,7 +559,7 @@ function ChefDoneCard({ req, expanded, onToggle }: { req: ChangeRequest; expande
 
   return (
     <motion.div layout className="glass-panel overflow-hidden opacity-75">
-      <button onClick={onToggle} className="w-full flex items-center gap-3 p-4 text-left hover:bg-white/[0.02] transition-colors">
+      <button onClick={onToggle} className="w-full flex items-center gap-3 p-4 text-left hover:bg-[var(--color-soft-bg)] transition-colors">
         <div
           className={`flex h-8 w-8 items-center justify-center rounded-full shrink-0 ${
             isApproved ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
@@ -568,7 +568,7 @@ function ChefDoneCard({ req, expanded, onToggle }: { req: ChangeRequest; expande
           {isApproved ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[0.82rem] font-medium text-white/80 truncate">{requesterName}</p>
+          <p className="text-[0.82rem] font-medium text-[var(--color-text-high)] truncate">{requesterName}</p>
           <p className="text-[0.65rem] text-[var(--color-text-medium)]">
             {changes} değişiklik · {isApproved ? 'Onaylandı' : 'Reddedildi'}
           </p>
@@ -587,7 +587,7 @@ function ChefDoneCard({ req, expanded, onToggle }: { req: ChangeRequest; expande
             className="overflow-hidden"
           >
             <div className="px-4 pb-4 space-y-4">
-              <div className="h-px w-full bg-white/[0.06]" />
+              <div className="h-px w-full bg-[var(--color-border)]" />
 
               <InfoRow label="Durum" value={getStatusLabel(req.status)} />
               <InfoRow label="Talep Zamanı" value={formatFullDate(req.created_at)} />
@@ -597,20 +597,20 @@ function ChefDoneCard({ req, expanded, onToggle }: { req: ChangeRequest; expande
               {req.status === 'rejected' && req.reject_reason && <InfoRow label="Red Sebebi" value={req.reject_reason} />}
 
               {req.note && (
-                <div className="rounded-lg border border-white/10 p-3">
+                <div className="rounded-lg border border-[var(--color-border)] p-3">
                   <p className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)] mb-1">Korist Notu</p>
-                  <p className="text-[0.82rem] text-white/75 italic">{req.note}</p>
+                  <p className="text-[0.82rem] text-[var(--color-text-medium)] italic">{req.note}</p>
                 </div>
               )}
 
               <div className="space-y-2">
                 <p className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)]">Değişiklik Detayları</p>
                 {changeEntries.map(([key, value]) => (
-                  <div key={key} className="rounded-lg bg-white/[0.03] p-3">
+                  <div key={key} className="rounded-lg bg-[var(--color-soft-bg)] p-3">
                     <span className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)] block">
                       {FIELD_LABELS[key] || key}
                     </span>
-                    <span className="text-[0.85rem] text-white/85 break-all">{displayValue(key, value)}</span>
+                    <span className="text-[0.85rem] text-[var(--color-text-high)] break-all">{displayValue(key, value)}</span>
                   </div>
                 ))}
               </div>
@@ -624,9 +624,9 @@ function ChefDoneCard({ req, expanded, onToggle }: { req: ChangeRequest; expande
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-white/10 p-3">
+    <div className="rounded-lg border border-[var(--color-border)] p-3">
       <p className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)] mb-1">{label}</p>
-      <p className="text-[0.82rem] text-white/85 break-all">{value || '—'}</p>
+      <p className="text-[0.82rem] text-[var(--color-text-high)] break-all">{value || '—'}</p>
     </div>
   );
 }

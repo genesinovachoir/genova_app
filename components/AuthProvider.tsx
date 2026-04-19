@@ -26,6 +26,24 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function normalizeRoleName(value: string) {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ş/gi, 's')
+    .replace(/ı/gi, 'i')
+    .toLocaleLowerCase('tr-TR')
+    .trim();
+}
+
+function toCanonicalRole(value: string): UserRole | null {
+  const normalized = normalizeRoleName(value);
+  if (normalized === 'sef') return 'Şef';
+  if (normalized === 'partisyon sefi') return 'Partisyon Şefi';
+  if (normalized === 'korist') return 'Korist';
+  return null;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -60,10 +78,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .select('roles(name)')
         .eq('member_id', memberData.id);
 
-      const userRoles = (rolesData || [])
-        .map((r: any) => r.roles?.name)
-        .filter(Boolean) as UserRole[];
-      setRoles(userRoles);
+      const canonicalRoles = new Set<UserRole>();
+      for (const row of rolesData || []) {
+        const roleValue = (row as any)?.roles;
+        const roleNames = Array.isArray(roleValue)
+          ? roleValue.map((entry: any) => entry?.name).filter(Boolean)
+          : roleValue?.name
+            ? [roleValue.name]
+            : [];
+
+        for (const roleName of roleNames) {
+          const canonical = toCanonicalRole(String(roleName));
+          if (canonical) {
+            canonicalRoles.add(canonical);
+          }
+        }
+      }
+
+      setRoles(Array.from(canonicalRoles));
       return;
     }
 

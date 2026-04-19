@@ -74,8 +74,8 @@ export function ReviewNoteDialog({
                     <h3 className="font-serif text-lg tracking-tight">
                       {isApprove ? 'Teslimi Onayla' : 'Teslimi Reddet'}
                     </h3>
-                    <p className="mt-1 text-sm text-[var(--color-text-medium)] truncate">
-                      {submissionName}
+                    <p className="mt-1 text-sm text-[var(--color-text-medium)] truncate max-w-[180px] sm:max-w-[220px]">
+                      {submissionName.length > 35 ? submissionName.slice(0, 32) + '...' : submissionName}
                     </p>
                   </div>
                 </div>
