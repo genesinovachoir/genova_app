@@ -17,6 +17,7 @@ import {
   Star,
   Info,
   Heart,
+  Plus,
 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -26,6 +27,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/ToastProvider';
 import { supabase, type Announcement, type Attendance, type Rehearsal } from '@/lib/supabase';
 import { sanitizeRichText } from '@/lib/richText';
+import { CreateAnnouncementModal } from '@/components/CreateAnnouncementModal';
 
 const ICON_MAP: Record<string, ElementType> = {
   megaphone: Megaphone,
@@ -70,7 +72,7 @@ async function fetchAnnouncements() {
     .from('announcements')
     .select('*, choir_members(first_name, last_name)')
     .order('created_at', { ascending: false })
-    .limit(5);
+    .limit(4);
 
   if (error) {
     throw error;
@@ -197,6 +199,7 @@ export default function Dashboard() {
   const containerRef = useRef<HTMLDivElement>(null);
   const thumbRef = useRef<HTMLDivElement>(null);
   const [maxDrag, setMaxDrag] = useState(200);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   const fillWidth = useTransform(dragX, (x) => {
     const thumbW = thumbRef.current?.offsetWidth || 56;
@@ -427,6 +430,14 @@ export default function Dashboard() {
           <div className="flex items-center justify-between gap-3">
             <span className="page-kicker">Duyurular</span>
             <div className="flex items-center gap-3">
+              {(isAdmin() || isSectionLeader()) && (
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-all hover:bg-[var(--color-accent)] hover:text-[var(--color-background)] active:scale-95"
+                >
+                  <Plus size={14} />
+                </button>
+              )}
               <Link href="/announcements" className="text-xs uppercase tracking-widest text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-high)]">
                 Tümü
               </Link>
@@ -447,11 +458,30 @@ export default function Dashboard() {
             ) : (
               announcements.map((announcement) => {
                 const Icon = ICON_MAP[announcement.icon] ?? Megaphone;
+                const targetGroup = announcement.target_voice_groups?.[0];
+                
+                let borderStyles = 'border-[var(--color-border)] bg-white/4';
+                let iconStyles = 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]';
+
+                if (targetGroup === 'Soprano') {
+                  borderStyles = 'bg-[rgba(251,113,133,0.08)] border-[rgba(251,113,133,0.35)]';
+                  iconStyles = 'bg-[rgba(251,113,133,0.15)] border-[rgba(251,113,133,0.35)] text-[#fb7185]';
+                } else if (targetGroup === 'Alto') {
+                  borderStyles = 'bg-[rgba(251,191,36,0.08)] border-[rgba(251,191,36,0.35)]';
+                  iconStyles = 'bg-[rgba(251,191,36,0.15)] border-[rgba(251,191,36,0.35)] text-[#fbbf24]';
+                } else if (targetGroup === 'Tenor') {
+                  borderStyles = 'bg-[rgba(56,189,248,0.08)] border-[rgba(56,189,248,0.35)]';
+                  iconStyles = 'bg-[rgba(56,189,248,0.15)] border-[rgba(56,189,248,0.35)] text-[#38bdf8]';
+                } else if (targetGroup === 'Bass') {
+                  borderStyles = 'bg-[rgba(167,139,250,0.08)] border-[rgba(167,139,250,0.35)]';
+                  iconStyles = 'bg-[rgba(167,139,250,0.15)] border-[rgba(167,139,250,0.35)] text-[#a78bfa]';
+                }
+
                 return (
                   <Link href={`/announcements/${announcement.id}`} key={announcement.id} className="block">
-                    <div className="rounded-[4px] border border-[var(--color-border)] bg-white/4 p-3 transition-colors active:scale-[0.98] hover:bg-white/5">
+                    <div className={`rounded-[4px] border ${borderStyles} p-3 transition-colors active:scale-[0.98] hover:bg-white/5`}>
                       <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[4px] border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
+                        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[4px] border ${iconStyles}`}>
                           <Icon size={16} />
                         </div>
                         <div className="min-w-0 flex flex-1 flex-col">
@@ -692,6 +722,16 @@ export default function Dashboard() {
       </div>
 
       <KoristPerformanceSection />
+
+      <CreateAnnouncementModal
+        open={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onCreated={async () => {
+          setShowCreateModal(false);
+          await queryClient.invalidateQueries({ queryKey: DASHBOARD_ANNOUNCEMENTS_KEY });
+          toast.success('Duyuru paylaşıldı.');
+        }}
+      />
     </main>
   );
 }

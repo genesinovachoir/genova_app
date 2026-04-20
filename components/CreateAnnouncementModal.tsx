@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useMiniAudioPlayerStore } from '@/store/useMiniAudioPlayerStore';
 import {
@@ -13,9 +13,14 @@ import {
   Info,
   Heart,
   Loader2,
+  Search,
+  Users,
+  CheckSquare,
+  Square,
+  AlertCircle,
 } from 'lucide-react';
 
-import { supabase, type Announcement } from '@/lib/supabase';
+import { supabase, type Announcement, type ChoirMember } from '@/lib/supabase';
 import { sanitizeRichText } from '@/lib/richText';
 import { useAuth } from './AuthProvider';
 import { RichTextEditor } from './RichTextEditor';
@@ -31,6 +36,8 @@ const ICONS = [
   { key: 'heart', Icon: Heart },
 ] as const;
 
+const VOICE_ORDER = ['Soprano', 'Alto', 'Tenor', 'Bass'];
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -43,6 +50,8 @@ interface AnnouncementDraft {
   title: string;
   description: string;
 }
+
+type MemberWithSelection = ChoirMember & { selected: boolean };
 
 function buildDraft(editAnnouncement?: Announcement | null): AnnouncementDraft {
   return {
@@ -81,20 +90,101 @@ function AnnouncementModalBody({
   onClose: () => void;
   onCreated: () => void;
 }) {
-  const { member } = useAuth();
+  const { member, isAdmin, isSectionLeader } = useAuth();
   const toast = useToast();
   const [icon, setIcon] = useState(initialDraft.icon);
   const [title, setTitle] = useState(initialDraft.title);
   const [description, setDescription] = useState(initialDraft.description);
   const [submitting, setSubmitting] = useState(false);
+  
+  // Member selection states
+  const [members, setMembers] = useState<MemberWithSelection[]>([]);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     document.body.classList.add('hide-nav');
     return () => document.body.classList.remove('hide-nav');
   }, []);
 
+  const loadMembers = useCallback(async () => {
+    if (!member) return;
+    setLoadingMembers(true);
+    
+    let query = supabase
+      .from('choir_members')
+      .select('id, first_name, last_name, voice_group, sub_voice_group, auth_user_id, email, phone, is_active')
+      .eq('is_active', true)
+      .order('voice_group')
+      .order('first_name');
+
+    // Partisyon şefi ise sadece kendi grubunu görsün (Şef değilse)
+    if (!isAdmin() && isSectionLeader() && member.voice_group) {
+      query = query.eq('voice_group', member.voice_group);
+    }
+
+    const { data, error: membersError } = await query;
+    if (membersError) {
+      setError(membersError.message);
+      setLoadingMembers(false);
+      return;
+    }
+
+    const selectedIds = new Set(editAnnouncement?.target_users || []);
+    const nextMembers = (data ?? [])
+      .filter((m) => m.id !== member.id) // Kendini listeden çıkar
+      .map((m) => ({
+        ...m,
+        selected: selectedIds.has(m.id),
+      }));
+
+    setMembers(nextMembers as MemberWithSelection[]);
+    setLoadingMembers(false);
+  }, [member, isAdmin, isSectionLeader, editAnnouncement]);
+
+  useEffect(() => {
+    loadMembers();
+  }, [loadMembers]);
+
+  const filteredMembers = useMemo(() => {
+    const q = memberSearch.toLowerCase().trim();
+    return members.filter((m) => 
+      !q ||
+      `${m.first_name} ${m.last_name}`.toLowerCase().includes(q) ||
+      m.voice_group?.toLowerCase().includes(q)
+    );
+  }, [members, memberSearch]);
+
+  const groupedMembers = useMemo(() => {
+    const groups: Record<string, MemberWithSelection[]> = {};
+    for (const voice of VOICE_ORDER) {
+      const voiceMembers = filteredMembers.filter((m) => m.voice_group === voice);
+      if (voiceMembers.length > 0) {
+        groups[voice] = voiceMembers;
+      }
+    }
+    const otherMembers = filteredMembers.filter((m) => !m.voice_group || !VOICE_ORDER.includes(m.voice_group));
+    if (otherMembers.length > 0) {
+      groups['Diğer'] = otherMembers;
+    }
+    return groups;
+  }, [filteredMembers]);
+
+  const selectedCount = members.filter((m) => m.selected).length;
+
+  const toggleMember = (id: string) => {
+    setMembers((prev) => prev.map((m) => m.id === id ? { ...m, selected: !m.selected } : m));
+  };
+
+  const toggleAllVisible = () => {
+    const allVisibleSelected = filteredMembers.length > 0 && filteredMembers.every((m) => m.selected);
+    const visibleIds = new Set(filteredMembers.map((m) => m.id));
+    setMembers((prev) => prev.map((m) => visibleIds.has(m.id) ? { ...m, selected: !allVisibleSelected } : m));
+  };
+
   const sanitizedDescription = useMemo(() => sanitizeRichText(description), [description]);
-  const canSubmit = title.trim().length > 0 && sanitizedDescription !== '<p></p>';
+  const canSubmit = title.trim().length > 0 && sanitizedDescription !== '<p></p>' && selectedCount > 0;
 
   const handleClose = () => {
     if (!submitting) {
@@ -109,14 +199,33 @@ function AnnouncementModalBody({
     }
 
     setSubmitting(true);
+    setError(null);
 
+    const selectedMembers = members.filter((m) => m.selected);
+    const target_users = [...selectedMembers.map((m) => m.id), member.id]; // Kendini her zaman ekle
+    
+    // Ses grubu tespiti
+    const target_voice_groups: string[] = [];
+    for (const voice of VOICE_ORDER) {
+      const groupInList = members.filter(m => m.voice_group === voice);
+      // Eğer listedeki (kurucu hariç) ilgili grubun tamamı seçildiyse, grubu hedefle
+      if (groupInList.length > 0 && groupInList.every(m => m.selected)) {
+        target_voice_groups.push(voice);
+      }
+    }
+
+    // Kullanıcının talebi: Artik "boş = herkes" mantığı yok. 
+    // "Bir duyuruyu görmesi için atanmış olması gerekir." 
+    // Bu yüzden seçilenleri aynen kaydediyoruz.
     const payload = {
       title: title.trim(),
       description: sanitizedDescription,
       icon,
+      target_users,
+      target_voice_groups,
     };
 
-    const { error } = editAnnouncement
+    const { error: submitError } = editAnnouncement
       ? await supabase.from('announcements').update(payload).eq('id', editAnnouncement.id)
       : await supabase.from('announcements').insert({
           ...payload,
@@ -125,8 +234,9 @@ function AnnouncementModalBody({
 
     setSubmitting(false);
 
-    if (error) {
-      toast.error(error.message, 'Duyuru kaydedilemedi');
+    if (submitError) {
+      setError(submitError.message);
+      toast.error(submitError.message, 'Duyuru kaydedilemedi');
       return;
     }
 
@@ -223,6 +333,83 @@ function AnnouncementModalBody({
                 <RichTextEditor content={description} onChange={setDescription} />
               </div>
             </div>
+
+            <div>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Users size={14} className="text-[var(--color-accent)]" />
+                  <p className="text-[0.65rem] font-bold uppercase tracking-[0.2em] text-[var(--color-text-medium)]">Hedef Kitle ({selectedCount})</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleAllVisible}
+                  disabled={filteredMembers.length === 0}
+                  className="text-[0.6rem] font-bold uppercase tracking-[0.15em] text-[var(--color-accent)]"
+                >
+                  {filteredMembers.length > 0 && filteredMembers.every((m) => m.selected) ? 'Kaldır' : 'Tümünü Seç'}
+                </button>
+              </div>
+
+              <div className="relative mb-3">
+                <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-medium)]" />
+                <input
+                  type="text"
+                  value={memberSearch}
+                  onChange={(e) => setMemberSearch(e.target.value)}
+                  placeholder="İsim veya ses grubu ara..."
+                  className="editorial-input themed-search-input !pl-9"
+                  disabled={loadingMembers}
+                />
+              </div>
+
+              <div className="max-h-[30vh] overflow-y-auto rounded-[var(--radius-panel)] border border-[var(--color-border)] divide-y divide-[var(--color-border)]">
+                {loadingMembers ? (
+                  <div className="flex justify-center py-6">
+                    <Loader2 className="animate-spin text-[var(--color-accent)]" size={20} />
+                  </div>
+                ) : filteredMembers.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-[var(--color-text-medium)]">Üye bulunamadı</p>
+                ) : (
+                  Object.entries(groupedMembers).map(([voice, voiceMembers]) => (
+                    <div key={voice}>
+                      <div className="sticky top-0 bg-[var(--color-surface-solid)]/95 px-4 py-2 backdrop-blur-sm z-10">
+                        <span className="text-[0.6rem] font-bold uppercase tracking-[0.2em] text-[var(--color-accent)]">{voice}</span>
+                      </div>
+                      {voiceMembers.map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => toggleMember(m.id)}
+                          className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/5"
+                        >
+                          {m.selected ? (
+                            <CheckSquare size={15} className="shrink-0 text-[var(--color-accent)]" />
+                          ) : (
+                            <Square size={15} className="shrink-0 text-[var(--color-text-medium)]" />
+                          )}
+                          <span className="flex-1 text-sm">{m.first_name} {m.last_name}</span>
+                          <span className="text-[0.6rem] text-[var(--color-text-medium)]">{m.sub_voice_group ?? m.voice_group}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <AnimatePresence>
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="flex items-center gap-2 rounded-[4px] border border-red-500/30 bg-red-500/10 px-4 py-3"
+                >
+                  <AlertCircle size={14} className="text-red-400" />
+                  <p className="text-xs text-red-400">{error}</p>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </form>
         </div>
 

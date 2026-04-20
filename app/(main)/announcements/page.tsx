@@ -99,12 +99,31 @@ export default function AnnouncementsPage() {
           <div className="space-y-2">
             {announcements.map((ann) => {
               const Icon = ICON_MAP[ann.icon] ?? Megaphone;
+              const targetGroup = ann.target_voice_groups?.[0];
+
+              let borderStyles = 'border-[var(--color-border)] bg-white/4';
+              let iconStyles = 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]';
+
+              if (targetGroup === 'Soprano') {
+                borderStyles = 'bg-[rgba(251,113,133,0.08)] border-[rgba(251,113,133,0.35)]';
+                iconStyles = 'bg-[rgba(251,113,133,0.15)] border-[rgba(251,113,133,0.35)] text-[#fb7185]';
+              } else if (targetGroup === 'Alto') {
+                borderStyles = 'bg-[rgba(251,191,36,0.08)] border-[rgba(251,191,36,0.35)]';
+                iconStyles = 'bg-[rgba(251,191,36,0.15)] border-[rgba(251,191,36,0.35)] text-[#fbbf24]';
+              } else if (targetGroup === 'Tenor') {
+                borderStyles = 'bg-[rgba(56,189,248,0.08)] border-[rgba(56,189,248,0.35)]';
+                iconStyles = 'bg-[rgba(56,189,248,0.15)] border-[rgba(56,189,248,0.35)] text-[#38bdf8]';
+              } else if (targetGroup === 'Bass') {
+                borderStyles = 'bg-[rgba(167,139,250,0.08)] border-[rgba(167,139,250,0.35)]';
+                iconStyles = 'bg-[rgba(167,139,250,0.15)] border-[rgba(167,139,250,0.35)] text-[#a78bfa]';
+              }
+
               return (
                 <div key={ann.id} className="flex items-center gap-2">
                   <Link href={`/announcements/${ann.id}`} className="block min-w-0 flex-1">
-                    <div className="rounded-[4px] border border-[var(--color-border)] bg-white/4 p-3 transition-colors hover:bg-white/5 active:scale-[0.98]">
+                    <div className={`rounded-[4px] border ${borderStyles} p-3 transition-colors hover:bg-white/5 active:scale-[0.98]`}>
                       <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[4px] border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
+                        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[4px] border ${iconStyles}`}>
                           <Icon size={16} />
                         </div>
                         <div className="flex min-w-0 flex-1 flex-col">

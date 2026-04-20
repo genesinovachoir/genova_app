@@ -60,6 +60,8 @@ export interface Announcement {
   link_url: string | null;
   link_label: string | null;
   image_url: string | null;
+  target_users?: string[];
+  target_voice_groups?: string[];
   created_by: string;
   created_at: string;
   choir_members?: { 
