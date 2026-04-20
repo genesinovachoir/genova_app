@@ -8,7 +8,7 @@ import type { AssignmentSubmission } from '@/lib/supabase';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const MAX_SUBMISSION_SIZE_BYTES = 100 * 1024 * 1024;
+const MAX_SUBMISSION_SIZE_BYTES = 30 * 1024 * 1024;
 const STORAGE_BUCKET = 'assignment-submissions';
 const STORAGE_LINK_PREFIX = 'storage://';
 const ALLOWED_EXTENSIONS = new Set(['pdf', 'mid', 'midi', 'mp3', 'mp4', 'm4a', 'wav', 'ogg']);
@@ -268,7 +268,7 @@ export async function POST(request: Request) {
     }
 
     if (file.size > MAX_SUBMISSION_SIZE_BYTES) {
-      return new NextResponse('Dosya boyutu 100MB sınırını aşıyor.', { status: 400 });
+      return new NextResponse('Dosya boyutu 20MB sınırını aşıyor.', { status: 400 });
     }
 
     const extension = getSafeFileExtension(file.name);

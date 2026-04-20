@@ -68,12 +68,31 @@ export default function Repertuvar() {
   const [assignedSongIds, setAssignedSongIds] = useState<Set<string>>(new Set());
   const [pendingDeleteTag, setPendingDeleteTag] = useState<RepertoireTag | null>(null);
   const [deletingTagId, setDeletingTagId] = useState<string | null>(null);
+  const [isTagEditMode, setIsTagEditMode] = useState(false);
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [editingTagName, setEditingTagName] = useState('');
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ignoreNextClickRef = useRef<string | null>(null);
 
+  const visibleTags = useMemo(() => {
+    // Şefler ve Bölüm Şefleri tüm etiketleri her zaman görebilir.
+    if (isChef || isLeader) return tags;
+
+    // Koristler için sadece onlara tanımlanmış ve görünür olan şarkıların etiketlerini bul.
+    const assignedTagsIds = new Set<string>();
+    songs.forEach((song) => {
+      // Şarkı görünür mü ve kullanıcıya atanmış mı?
+      if (song.is_visible && assignedSongIds.has(song.id)) {
+        song.tags?.forEach((t) => assignedTagsIds.add(t.id));
+      }
+    });
+
+    return tags.filter((tag) => assignedTagsIds.has(tag.id));
+  }, [isChef, isLeader, tags, songs, assignedSongIds]);
+
   const tagOptions = useMemo(
-    () => ['Tümü', ...tags.map((tag) => tag.name), ...(isChef ? ['Gizli'] : [])],
-    [isChef, tags],
+    () => ['Tümü', ...visibleTags.map((tag) => tag.name), ...(isChef ? ['Gizli'] : [])],
+    [isChef, visibleTags],
   );
 
   const fetchTags = useCallback(async () => {
@@ -220,6 +239,29 @@ export default function Repertuvar() {
     }
   };
 
+  const handleRenameTag = async (tagId: string) => {
+    const newName = editingTagName.trim();
+    if (!newName) {
+      setEditingTagId(null);
+      return;
+    }
+
+    setError(null);
+    try {
+      const { error: updateErr } = await supabase
+        .from('repertoire_tags')
+        .update({ name: newName })
+        .eq('id', tagId);
+
+      if (updateErr) throw updateErr;
+
+      await fetchTags();
+      setEditingTagId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Etiket güncellenemedi');
+    }
+  };
+
   const toggleVisibility = async (song: RepertoireSong) => {
     if (!isChef) return;
     await supabase.from('repertoire').update({ is_visible: !song.is_visible }).eq('id', song.id);
@@ -332,36 +374,96 @@ export default function Repertuvar() {
         </div>
 
         {/* Etiket Çubuğu */}
-        <div className="mt-4 flex gap-2 overflow-x-auto no-scrollbar pb-0.5">
+        <div className="mt-4 flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5">
+          {/* Edit Mode Toggle Button */}
+          {isChef && (
+            <button
+              onClick={() => setIsTagEditMode(!isTagEditMode)}
+              className={`shrink-0 flex h-7 w-7 items-center justify-center rounded-full border transition-all ${
+                isTagEditMode 
+                  ? 'border-[var(--color-accent)] bg-[rgba(192,178,131,0.2)] text-[var(--color-accent)]' 
+                  : 'border-[var(--color-border)] bg-white/3 text-[var(--color-text-medium)] hover:text-[var(--color-text-high)]'
+              }`}
+              title="Etiketleri Düzenle"
+            >
+              <Pencil size={12} />
+            </button>
+          )}
+
           {tagOptions.map((tag) => {
             const tagEntity = tags.find((item) => item.name === tag) ?? null;
             const allowLongPressDelete = Boolean(isChef && tagEntity);
+            const isSpecial = tag === 'Tümü' || tag === 'Gizli';
+            const isEditingThis = tagEntity && editingTagId === tagEntity.id;
 
             return (
-              <button
-                key={tag}
-                onClick={() => handleTagButtonClick(tag)}
-                onPointerDown={() => {
-                  if (tagEntity && allowLongPressDelete) {
-                    beginTagLongPress(tagEntity);
-                  }
-                }}
-                onPointerUp={clearTagLongPress}
-                onPointerLeave={clearTagLongPress}
-                onPointerCancel={clearTagLongPress}
-                onContextMenu={(event) => {
-                  if (allowLongPressDelete) {
-                    event.preventDefault();
-                  }
-                }}
-                className={`shrink-0 rounded-full px-3 py-1 text-[0.65rem] font-medium transition-all ${
-                  activeTag === tag
-                    ? 'border border-[var(--color-border-strong)] bg-[rgba(192,178,131,0.15)] text-[var(--color-accent)]'
-                    : 'border border-[var(--color-border)] bg-white/3 text-[var(--color-text-medium)] hover:border-white/20 hover:text-[var(--color-text-high)]'
-                }`}
-              >
-                {tag === 'Tümü' ? `${tag} (${totalAccessibleSongs})` : tag}
-              </button>
+              <div key={tag} className="relative shrink-0 group">
+                {isEditingThis ? (
+                  <div className="flex items-center gap-1 rounded-full border border-[var(--color-accent)] bg-[rgba(192,178,131,0.1)] px-2 py-0.5">
+                    <input
+                      autoFocus
+                      type="text"
+                      value={editingTagName}
+                      onChange={(e) => setEditingTagName(e.target.value)}
+                      onBlur={() => handleRenameTag(tagEntity.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleRenameTag(tagEntity.id);
+                        if (e.key === 'Escape') setEditingTagId(null);
+                      }}
+                      className="w-20 bg-transparent text-[0.65rem] font-medium text-[var(--color-accent)] outline-none"
+                    />
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => !isTagEditMode && handleTagButtonClick(tag)}
+                    onPointerDown={() => {
+                      if (!isTagEditMode && tagEntity && allowLongPressDelete) {
+                        beginTagLongPress(tagEntity);
+                      }
+                    }}
+                    onPointerUp={clearTagLongPress}
+                    onPointerLeave={clearTagLongPress}
+                    onPointerCancel={clearTagLongPress}
+                    onContextMenu={(event) => {
+                      if (allowLongPressDelete) {
+                        event.preventDefault();
+                      }
+                    }}
+                    className={`shrink-0 rounded-full px-3 py-1 text-[0.65rem] font-medium transition-all ${
+                      activeTag === tag
+                        ? 'border border-[var(--color-border-strong)] bg-[rgba(192,178,131,0.15)] text-[var(--color-accent)]'
+                        : 'border border-[var(--color-border)] bg-white/3 text-[var(--color-text-medium)] hover:border-white/20 hover:text-[var(--color-text-high)]'
+                    } ${isTagEditMode && !isSpecial ? 'cursor-default' : ''}`}
+                  >
+                    {tag === 'Tümü' ? `${tag} (${totalAccessibleSongs})` : tag}
+                  </button>
+                )}
+
+                {/* Edit Mode Overlays */}
+                {isTagEditMode && !isSpecial && tagEntity && !isEditingThis && (
+                  <div className="absolute inset-0 flex items-center justify-center gap-1 rounded-full bg-black/30 backdrop-blur-[1px]">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingTagId(tagEntity.id);
+                        setEditingTagName(tagEntity.name);
+                      }}
+                      className="p-1 text-blue-400 hover:text-blue-300 transition-colors"
+                    >
+                      <Pencil size={12} />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPendingDeleteTag(tagEntity);
+                      }}
+                      className="p-1 text-red-400 hover:text-red-300 transition-colors"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
@@ -384,7 +486,13 @@ export default function Repertuvar() {
           <AnimatePresence>
             {filtered.map((song, index) => {
               const accent = ACCENT_GRADIENTS[index % ACCENT_GRADIENTS.length];
-              const coverFile = song.files?.find((f) => isCoverFile(f.file_type, f.partition_label));
+              const coverFiles = song.files?.filter((f) => isCoverFile(f.file_type, f.partition_label)) ?? [];
+              const coverFile = coverFiles.sort((a, b) => {
+                const aIsPdf = isPdfRepertoireFile(a);
+                const bIsPdf = isPdfRepertoireFile(b);
+                if (aIsPdf !== bIsPdf) return aIsPdf ? 1 : -1;
+                return (Date.parse(b.created_at || '') || 0) - (Date.parse(a.created_at || '') || 0);
+              })[0];
               const coverIsPdf = isPdfRepertoireFile(coverFile);
 
               return (
@@ -490,35 +598,47 @@ export default function Repertuvar() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[80] bg-black/60"
               onClick={() => !deletingTagId && setPendingDeleteTag(null)}
+              className="fixed inset-0 z-[80] bg-black/40 backdrop-blur-sm"
             />
             <motion.div
-              initial={{ opacity: 0, y: 16 }}
+              initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 16 }}
-              className="fixed inset-x-5 bottom-6 z-[81] mx-auto max-w-md rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface-solid)] p-4"
+              exit={{ opacity: 0, y: 20 }}
+              className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+140px)] z-[81] mx-auto max-w-[300px] rounded-[24px] border border-[var(--color-border-strong)] bg-[var(--color-surface-solid)] p-5 shadow-[0_20px_50px_rgba(0,0,0,0.6)]"
             >
-              <p className="text-sm text-[var(--color-text-high)]">
-                &quot;{pendingDeleteTag.name}&quot; etiketini silmek istiyor musunuz?
+              <div className="mb-3 flex items-center justify-center">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-500/10 text-red-500">
+                  <Trash2 size={20} />
+                </div>
+              </div>
+              
+              <h3 className="mb-1 text-center font-serif text-lg font-medium tracking-tight text-[var(--color-text-high)]">
+                Etiketi Sil?
+              </h3>
+              
+              <p className="mb-6 text-center text-[0.75rem] leading-relaxed text-[var(--color-text-medium)]">
+                <span className="font-bold text-[var(--color-text-high)]">"{pendingDeleteTag.name}"</span> etiketi silinecek. Bu işlem geri alınamaz ve şarkıları etkilemez.
               </p>
-              <div className="mt-4 grid grid-cols-2 gap-2">
+              
+              <div className="flex flex-col gap-2">
                 <button
-                  type="button"
-                  onClick={() => setPendingDeleteTag(null)}
                   disabled={Boolean(deletingTagId)}
-                  className="rounded-[8px] border border-[var(--color-border)] bg-white/5 px-3 py-2 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-medium)] disabled:opacity-50"
+                  onClick={handleDeleteTag}
+                  className="flex w-full items-center justify-center rounded-full bg-red-500 py-3 text-[0.7rem] font-bold uppercase tracking-[0.15em] text-white transition-all hover:bg-red-600 active:scale-[0.98] disabled:opacity-50"
                 >
-                  Vazgeç
+                  {deletingTagId ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    'Silmeyi Onayla'
+                  )}
                 </button>
                 <button
-                  type="button"
-                  onClick={() => void handleDeleteTag()}
+                  onClick={() => setPendingDeleteTag(null)}
                   disabled={Boolean(deletingTagId)}
-                  className="inline-flex items-center justify-center gap-2 rounded-[8px] border border-red-500/40 bg-red-500/15 px-3 py-2 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-red-300 disabled:opacity-50"
+                  className="flex w-full items-center justify-center rounded-full border border-[var(--color-border)] bg-white/5 py-3 text-[0.7rem] font-bold uppercase tracking-[0.15em] text-[var(--color-text-medium)] transition-all hover:bg-white/10 active:scale-[0.98]"
                 >
-                  {deletingTagId ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                  Sil
+                  Vazgeç
                 </button>
               </div>
             </motion.div>

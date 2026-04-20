@@ -20,9 +20,9 @@ export function BottomNav() {
   ];
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-50 pb-[env(safe-area-inset-bottom)]">
+    <nav className="fixed inset-x-0 bottom-0 z-50 pb-[calc(env(safe-area-inset-bottom)+12px)]">
       <div className="mx-auto w-full max-w-md px-2 sm:px-4">
-        <div className="floating-nav !border-none flex items-center justify-around px-2 py-2">
+        <div className="floating-nav !border-none !shadow-none flex items-center justify-around px-2 py-2">
         {navItems.map((item) => {
           const isActive = pathname === item.path;
           const Icon = item.icon;

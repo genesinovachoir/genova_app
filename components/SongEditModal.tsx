@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useMiniAudioPlayerStore } from '@/store/useMiniAudioPlayerStore';
 import {
   AlertCircle,
   ArrowLeft,
@@ -18,6 +19,7 @@ import {
   Upload,
   X,
   Users,
+  Pencil,
 } from 'lucide-react';
 import { deleteDriveObject, deleteRepertoireFile, formatFileSize, uploadSongFile } from '@/lib/drive';
 import { useProtectedDriveFileUrl } from '@/hooks/useProtectedDriveFileUrl';
@@ -142,6 +144,7 @@ export function SongEditModal({
   onClose,
   onSaved,
 }: SongEditModalProps) {
+  const isPlayerActive = useMiniAudioPlayerStore((state) => state.isActive);
   const [currentSong, setCurrentSong] = useState<RepertoireSong | null>(song);
   const [availableTags, setAvailableTags] = useState<RepertoireTag[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
@@ -167,6 +170,9 @@ export function SongEditModal({
   const [deleteSongCountdown, setDeleteSongCountdown] = useState(5);
   const [deletingSong, setDeletingSong] = useState(false);
   const [coverPreviewFailed, setCoverPreviewFailed] = useState(false);
+  const [isTagEditMode, setIsTagEditMode] = useState(false);
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [editingTagName, setEditingTagName] = useState('');
 
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -184,7 +190,12 @@ export function SongEditModal({
     [files],
   );
   const coverFiles = useMemo(
-    () => sortFilesByCreatedAtDesc(files.filter(isCoverFile)),
+    () => files.filter(isCoverFile).sort((a, b) => {
+      const aIsPdf = isPdfRepertoireFile(a);
+      const bIsPdf = isPdfRepertoireFile(b);
+      if (aIsPdf !== bIsPdf) return aIsPdf ? 1 : -1;
+      return parseTimestamp(b.created_at) - parseTimestamp(a.created_at);
+    }),
     [files],
   );
   const activeCover = coverFiles[0] ?? null;
@@ -863,6 +874,29 @@ export function SongEditModal({
       setDeletingTagId(null);
     }
   };
+  
+  const handleRenameTag = async (tagId: string) => {
+    const newName = editingTagName.trim();
+    if (!newName) {
+      setEditingTagId(null);
+      return;
+    }
+
+    setError(null);
+    try {
+      const { error: updateErr } = await supabase
+        .from('repertoire_tags')
+        .update({ name: newName })
+        .eq('id', tagId);
+
+      if (updateErr) throw updateErr;
+
+      await loadTags();
+      setEditingTagId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Etiket güncellenemedi');
+    }
+  };
 
   const handleDeleteSong = async () => {
     if (!currentSong || deletingSong || deleteSongCountdown > 0) {
@@ -905,24 +939,45 @@ export function SongEditModal({
   };
 
   return (
-    <AnimatePresence>
-      {isOpen && currentSong && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[70] bg-black/65 backdrop-blur-sm"
-            onClick={handleClose}
-          />
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 30 }}
-            transition={{ type: 'spring', bounce: 0.08, duration: 0.42 }}
-            className="fixed inset-0 z-[70] flex flex-col bg-[var(--color-surface-solid)]"
-          >
-            <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 pb-4 pt-[max(env(safe-area-inset-top),1.25rem)]">
+    <>
+      <AnimatePresence>
+        {isOpen && currentSong && (
+          <React.Fragment key="song-edit-modal-wrapper">
+            <motion.div
+              key="song-edit-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[70] bg-black/65 backdrop-blur-sm"
+              onClick={handleClose}
+              style={{ 
+                bottom: isPlayerActive ? 'calc(7.2rem + env(safe-area-inset-bottom))' : '0',
+                borderRadius: isPlayerActive ? '0 0 24px 24px' : '0',
+                transition: 'bottom 0.4s cubic-bezier(0.23, 1, 0.32, 1), border-radius 0.4s'
+              }}
+            />
+            <motion.div
+              key="song-edit-content"
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ 
+                opacity: 1, 
+                y: 0,
+                bottom: isPlayerActive ? 'calc(7.2rem + env(safe-area-inset-bottom))' : '0'
+              }}
+              exit={{ opacity: 0, y: 30 }}
+              transition={{ 
+                type: 'spring', 
+                bounce: 0.08, 
+                duration: 0.42,
+                bottom: { duration: 0.4, ease: [0.23, 1, 0.32, 1] }
+              }}
+              className="fixed inset-x-0 top-0 z-[70] flex flex-col bg-[var(--color-surface-solid)] overflow-hidden"
+              style={{ 
+                borderRadius: isPlayerActive ? '0 0 24px 24px' : '0',
+                borderBottom: isPlayerActive ? '1px solid var(--color-border)' : 'none'
+              }}
+            >
+              <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 pb-4 pt-[max(env(safe-area-inset-top),1.25rem)]">
               <button
                 type="button"
                 onClick={handleClose}
@@ -1318,7 +1373,20 @@ export function SongEditModal({
                         </button>
                       </div>
 
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setIsTagEditMode(!isTagEditMode)}
+                          className={`shrink-0 flex h-6 w-6 items-center justify-center rounded-full border transition-all ${
+                            isTagEditMode 
+                              ? 'border-[var(--color-accent)] bg-[rgba(192,178,131,0.2)] text-[var(--color-accent)]' 
+                              : 'border-[var(--color-border)] bg-white/3 text-[var(--color-text-medium)] hover:text-[var(--color-text-high)]'
+                          }`}
+                          title="Etiketleri Düzenle"
+                        >
+                          <Pencil size={11} />
+                        </button>
+
                         {availableTags.length === 0 ? (
                           <p className="text-sm text-[var(--color-text-medium)]">Bölümde etiket bulunamadı.</p>
                         ) : (
@@ -1327,26 +1395,73 @@ export function SongEditModal({
                             .map((tag) => {
                               const active = selectedTagIds.has(tag.id);
                               const saving = savingTagId === tag.id;
+                              const isEditingThis = editingTagId === tag.id;
+
                               return (
-                                <button
-                                  key={tag.id}
-                                  type="button"
-                                  onClick={() => handleTagChipClick(tag)}
-                                  onPointerDown={() => beginTagLongPress(tag)}
-                                  onPointerUp={clearTagLongPress}
-                                  onPointerLeave={clearTagLongPress}
-                                  onPointerCancel={clearTagLongPress}
-                                  onContextMenu={(event) => event.preventDefault()}
-                                  disabled={saving}
-                                  className={`inline-flex h-6 items-center gap-1 rounded-full px-2.5 text-[0.6rem] font-semibold transition-colors ${
-                                    active
-                                      ? 'bg-[rgba(192,178,131,0.15)] text-[var(--color-accent)]'
-                                      : 'bg-white/5 text-[var(--color-text-medium)] hover:bg-white/10'
-                                  } disabled:opacity-45`}
-                                >
-                                  {saving ? <Loader2 size={10} className="animate-spin" /> : active ? <Check size={10} /> : <Tag size={10} />}
-                                  {tag.name}
-                                </button>
+                                <div key={tag.id} className="relative shrink-0 group">
+                                  {isEditingThis ? (
+                                    <div className="flex items-center gap-1 rounded-full border border-[var(--color-accent)] bg-[rgba(192,178,131,0.1)] px-2 py-0.5">
+                                      <input
+                                        autoFocus
+                                        type="text"
+                                        value={editingTagName}
+                                        onChange={(e) => setEditingTagName(e.target.value)}
+                                        onBlur={() => handleRenameTag(tag.id)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') handleRenameTag(tag.id);
+                                          if (e.key === 'Escape') setEditingTagId(null);
+                                        }}
+                                        className="w-20 bg-transparent text-[0.6rem] font-semibold text-[var(--color-accent)] outline-none"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => !isTagEditMode && handleTagChipClick(tag)}
+                                      onPointerDown={() => !isTagEditMode && beginTagLongPress(tag)}
+                                      onPointerUp={clearTagLongPress}
+                                      onPointerLeave={clearTagLongPress}
+                                      onPointerCancel={clearTagLongPress}
+                                      onContextMenu={(event) => event.preventDefault()}
+                                      disabled={saving}
+                                      className={`inline-flex h-6 items-center gap-1 rounded-full px-2.5 text-[0.6rem] font-semibold transition-colors ${
+                                        active
+                                          ? 'bg-[rgba(192,178,131,0.15)] text-[var(--color-accent)]'
+                                          : 'bg-white/5 text-[var(--color-text-medium)] hover:bg-white/10'
+                                      } disabled:opacity-45 ${isTagEditMode ? 'cursor-default' : ''}`}
+                                    >
+                                      {saving ? <Loader2 size={10} className="animate-spin" /> : active ? <Check size={10} /> : <Tag size={10} />}
+                                      {tag.name}
+                                    </button>
+                                  )}
+
+                                  {/* Edit Mode Overlays */}
+                                  {isTagEditMode && !isEditingThis && (
+                                    <div className="absolute inset-0 flex items-center justify-center gap-1 rounded-full bg-black/35 backdrop-blur-[1px]">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingTagId(tag.id);
+                                          setEditingTagName(tag.name);
+                                        }}
+                                        className="p-1 text-blue-400 hover:text-blue-300 transition-colors"
+                                      >
+                                        <Pencil size={11} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setPendingDeleteTag(tag);
+                                        }}
+                                        className="p-1 text-red-400 hover:text-red-300 transition-colors"
+                                      >
+                                        <Trash2 size={11} />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
                               );
                             })
                         )}
@@ -1481,7 +1596,7 @@ export function SongEditModal({
                       className="fixed inset-x-5 bottom-6 z-[86] mx-auto max-w-md rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface-solid)] p-4"
                     >
                       <p className="text-sm text-[var(--color-text-high)]">
-                        &quot;{pendingDeleteTag.name}&quot; etiketini silmek istiyor musunuz?
+                        &quot;{pendingDeleteTag.name}&quot; etiketini silmek istiyor musunuz? Bu işlem şarkıları etkilemez.
                       </p>
                       <div className="mt-4 grid grid-cols-2 gap-2">
                         <button
@@ -1507,9 +1622,11 @@ export function SongEditModal({
                 )}
               </AnimatePresence>
             </div>
-          </motion.div>
-        </>
-      )}
+            </motion.div>
+          </React.Fragment>
+        )}
+      </AnimatePresence>
+
       {/* Partition Assignment Nested Modal */}
       {assignPartModal && (
         <SongAssignmentModal
@@ -1524,6 +1641,6 @@ export function SongEditModal({
           }}
         />
       )}
-    </AnimatePresence>
+    </>
   );
 }

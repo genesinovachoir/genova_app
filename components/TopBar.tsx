@@ -74,7 +74,7 @@ export function TopBar() {
   return (
     <header className="fixed inset-x-0 top-0 z-50">
       <div className="mx-auto max-w-lg px-2 pt-[env(safe-area-inset-top)]">
-        <div className="glass-panel !border-none mt-1 flex items-center justify-between gap-2.5 px-4 py-3 sm:px-6">
+        <div className="glass-panel !border-none !shadow-none mt-2 flex items-center justify-between gap-2.5 px-4 py-3 sm:px-6">
           {isBirthdayWeek && celebrationAnimation && (
             <div
               className="pointer-events-none absolute inset-0 overflow-hidden"

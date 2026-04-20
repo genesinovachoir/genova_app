@@ -1717,7 +1717,7 @@ export default function AssignmentDetailPage() {
         mode="submission"
         hideNoteInput={true}
         title={mySubmission ? 'Teslimi Güncelle' : 'Ödev Teslim Et'}
-        description="Ses kaydı, MIDI veya PDF yükleyebilirsiniz (max 100MB)"
+        description="Video (MP4), Ses veya PDF yükleyebilirsiniz (max 20MB)"
         onUpload={async (file, _, __) => {
           await uploadMutation.mutateAsync({ file, note: submissionNote.trim() || undefined });
         }}

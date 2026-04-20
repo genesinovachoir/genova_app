@@ -79,6 +79,9 @@ async function fetchMonthData(memberId: string, currentMonth: Date) {
   const rehearsalIds = rehearsals.map((rehearsal) => rehearsal.id);
 
   let inviteeCountMap = new Map<string, number>();
+  let myInvitedRehearsalIds = new Set<string>();
+  let myAttendance: Attendance[] = [];
+
   if (rehearsalIds.length > 0) {
     const { data: inviteeRows, error: inviteeError } = await supabase
       .from('rehearsal_invitees')
@@ -96,8 +99,6 @@ async function fetchMonthData(memberId: string, currentMonth: Date) {
     }, new Map<string, number>());
   }
 
-  let myInvitedRehearsalIds = new Set<string>();
-  let myAttendance: Attendance[] = [];
   if (rehearsalIds.length > 0) {
     const { data: attendanceRows, error: attendanceError } = await supabase
       .from('attendance')
@@ -400,7 +401,14 @@ export default function DevamsizlikPage() {
             <Loader2 className="animate-spin text-[var(--color-accent)]" size={28} />
           </div>
         ) : hasQueryError ? (
-          <div className="glass-panel p-5 text-sm text-rose-300">Devamsızlık verileri yüklenemedi. Lütfen tekrar deneyin.</div>
+          <div className="glass-panel p-5 text-sm text-rose-300">
+            Devamsızlık verileri yüklenemedi. Lütfen tekrar deneyin.
+            {process.env.NODE_ENV === 'development' && (
+              <div className="mt-2 text-xs opacity-70">
+                {monthDataQuery.error?.message || pendingQuery.error?.message}
+              </div>
+            )}
+          </div>
         ) : (
           <>
             <div className="glass-panel p-4">

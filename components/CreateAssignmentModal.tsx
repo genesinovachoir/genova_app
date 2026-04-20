@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useMiniAudioPlayerStore } from '@/store/useMiniAudioPlayerStore';
 import {
   X,
   ClipboardList,
@@ -343,6 +344,8 @@ export function CreateAssignmentModal({
     }
   };
 
+  const isPlayerActive = useMiniAudioPlayerStore((state) => state.isActive);
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -353,14 +356,32 @@ export function CreateAssignmentModal({
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm"
             onClick={handleClose}
+            style={{ 
+              bottom: isPlayerActive ? 'calc(7.2rem + env(safe-area-inset-bottom))' : '0',
+              borderRadius: isPlayerActive ? '0 0 24px 24px' : '0',
+              transition: 'bottom 0.4s cubic-bezier(0.23, 1, 0.32, 1), border-radius 0.4s'
+            }}
           />
 
           <motion.div
             initial={{ opacity: 0, y: 40 }}
-            animate={{ opacity: 1, y: 0 }}
+            animate={{ 
+              opacity: 1, 
+              y: 0,
+              bottom: isPlayerActive ? 'calc(7.2rem + env(safe-area-inset-bottom))' : '0'
+            }}
             exit={{ opacity: 0, y: 40 }}
-            transition={{ type: 'spring', bounce: 0.12, duration: 0.45 }}
-            className="fixed inset-0 z-[60] flex flex-col bg-[var(--color-surface-solid)]"
+            transition={{ 
+              type: 'spring', 
+              bounce: 0.12, 
+              duration: 0.45,
+              bottom: { duration: 0.4, ease: [0.23, 1, 0.32, 1] }
+            }}
+            className="fixed inset-x-0 top-0 z-[60] flex flex-col bg-[var(--color-surface-solid)] overflow-hidden"
+            style={{ 
+              borderRadius: isPlayerActive ? '0 0 24px 24px' : '0',
+              borderBottom: isPlayerActive ? '1px solid var(--color-border)' : 'none'
+            }}
           >
             <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 pb-4 pt-[max(env(safe-area-inset-top),1.25rem)] shrink-0">
               <div className="flex items-center gap-2">

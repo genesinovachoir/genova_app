@@ -267,4 +267,4 @@ export function getFileTypeIcon(fileType: string, mimeType?: string | null): str
 export const ALLOWED_SHEET_TYPES = ['.pdf'];
 export const ALLOWED_MIDI_TYPES = ['.mid', '.midi'];
 export const ALLOWED_AUDIO_TYPES = ['.mp3'];
-export const ALLOWED_SUBMISSION_TYPES = [...ALLOWED_MIDI_TYPES, ...ALLOWED_AUDIO_TYPES, '.pdf'];
+export const ALLOWED_SUBMISSION_TYPES = [...ALLOWED_MIDI_TYPES, ...ALLOWED_AUDIO_TYPES, '.pdf', '.mp4'];

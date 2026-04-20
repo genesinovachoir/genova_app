@@ -446,7 +446,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
 
   return (
     <>
-      <div className={`fixed inset-x-0 z-[55] px-3 ${shouldDockToBottom ? 'bottom-[calc(0.5rem+env(safe-area-inset-bottom))]' : 'bottom-[calc(6.7rem+env(safe-area-inset-bottom))]'}`}>
+      <div className={`fixed inset-x-0 z-[1001] px-3 ${shouldDockToBottom ? 'bottom-[calc(0.5rem+env(safe-area-inset-bottom))]' : 'bottom-[calc(6.7rem+env(safe-area-inset-bottom))]'}`}>
         <div className={`relative mx-auto w-[calc(100%-0.25rem)] max-w-md rounded-[12px] border border-[var(--color-border-strong)] bg-[var(--color-player-bg)] px-2.5 shadow-[0_10px_30px_rgba(0,0,0,0.45)] ${isOwnSongPage ? 'py-4' : 'py-2.5'}`}>
           <button
             type="button"
@@ -573,7 +573,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
           <>
             {/* backdrop to catch outside clicks */}
             <div
-              className="fixed inset-0 z-[199]"
+              className="fixed inset-0 z-[1100]"
               onClick={() => { setPartitionOpen(false); setDropdownPos(null); }}
             />
             <motion.div
@@ -583,7 +583,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
               exit={{ opacity: 0, y: 10, scale: 0.95 }}
               transition={{ duration: 0.15, ease: [0.23, 1, 0.32, 1] }}
               style={{ bottom: dropdownPos.bottom, left: dropdownPos.left }}
-              className="fixed z-[200] min-w-[180px] max-h-[40vh] overflow-y-auto rounded-[12px] border border-[var(--color-border-strong)] bg-[var(--color-player-solid)] p-1 shadow-[0_20px_60px_rgba(0,0,0,0.7)] backdrop-blur-xl origin-bottom-left"
+              className="fixed z-[1101] min-w-[180px] max-h-[40vh] overflow-y-auto rounded-[12px] border border-[var(--color-border-strong)] bg-[var(--color-player-solid)] p-1 shadow-[0_20px_60px_rgba(0,0,0,0.7)] backdrop-blur-xl origin-bottom-left"
             >
               <div className="px-3 py-2 border-b border-white/5 mb-1">
                 <span className="text-[0.5rem] font-bold uppercase tracking-widest text-[var(--color-text-low)]">Partisyon Seçimi</span>
@@ -627,7 +627,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
         {speedOpen && speedDropdownPos && (
           <>
             <div
-              className="fixed inset-0 z-[199]"
+              className="fixed inset-0 z-[1100]"
               onClick={() => { setSpeedOpen(false); setSpeedDropdownPos(null); }}
             />
             <motion.div
@@ -637,7 +637,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
               exit={{ opacity: 0, y: 10, scale: 0.95 }}
               transition={{ duration: 0.15, ease: [0.23, 1, 0.32, 1] }}
               style={{ bottom: speedDropdownPos.bottom, left: speedDropdownPos.left }}
-              className="fixed z-[200] min-w-[100px] overflow-hidden rounded-[12px] border border-[var(--color-border-strong)] bg-[var(--color-player-solid)] p-1 shadow-[0_20px_60px_rgba(0,0,0,0.7)] backdrop-blur-xl origin-bottom-left"
+              className="fixed z-[1101] min-w-[100px] overflow-hidden rounded-[12px] border border-[var(--color-border-strong)] bg-[var(--color-player-solid)] p-1 shadow-[0_20px_60px_rgba(0,0,0,0.7)] backdrop-blur-xl origin-bottom-left"
             >
               <div className="px-3 py-2 border-b border-white/5 mb-1 text-center">
                 <span className="text-[0.5rem] font-bold uppercase tracking-widest text-[var(--color-text-low)]">Oynatma Hızı</span>

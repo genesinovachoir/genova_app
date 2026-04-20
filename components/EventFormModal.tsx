@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Loader2, Search, CheckSquare, Square, Users, Trash2 } from 'lucide-react';
+import { useMiniAudioPlayerStore } from '@/store/useMiniAudioPlayerStore';
 import { supabase, Rehearsal, ChoirMember } from '@/lib/supabase';
 import { useAuth } from './AuthProvider';
 import { RichTextEditor } from './RichTextEditor';
@@ -234,6 +235,8 @@ export function EventFormModal({ open, onClose, onSaved, rehearsal, defaultDate 
   const allFilteredSelected = filteredList.length > 0 && filteredList.every(m => m.selected);
   const selectedCount = invitees.filter(m => m.selected).length;
 
+  const isPlayerActive = useMiniAudioPlayerStore((state) => state.isActive);
+
   return (
     <AnimatePresence>
       {open && (
@@ -242,13 +245,31 @@ export function EventFormModal({ open, onClose, onSaved, rehearsal, defaultDate 
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm"
             onClick={onClose}
+            style={{ 
+              bottom: isPlayerActive ? 'calc(7.2rem + env(safe-area-inset-bottom))' : '0',
+              borderRadius: isPlayerActive ? '0 0 24px 24px' : '0',
+              transition: 'bottom 0.4s cubic-bezier(0.23, 1, 0.32, 1), border-radius 0.4s'
+            }}
           />
           <motion.div
             initial={{ opacity: 0, y: 60 }}
-            animate={{ opacity: 1, y: 0 }}
+            animate={{ 
+              opacity: 1, 
+              y: 0,
+              bottom: isPlayerActive ? 'calc(7.2rem + env(safe-area-inset-bottom))' : '0'
+            }}
             exit={{ opacity: 0, y: 60 }}
-            transition={{ type: 'spring', bounce: 0.15, duration: 0.5 }}
-            className="fixed inset-x-0 bottom-0 z-[60] max-h-[100dvh] flex flex-col rounded-t-[20px] bg-[var(--color-surface-solid)]"
+            transition={{ 
+              type: 'spring', 
+              bounce: 0.15, 
+              duration: 0.5,
+              bottom: { duration: 0.4, ease: [0.23, 1, 0.32, 1] }
+            }}
+            className="fixed inset-x-0 top-0 z-[60] max-h-[100dvh] flex flex-col bg-[var(--color-surface-solid)] overflow-hidden"
+            style={{ 
+              borderRadius: isPlayerActive ? '0 0 24px 24px' : '0',
+              borderBottom: isPlayerActive ? '1px solid var(--color-border)' : 'none'
+            }}
           >
             {/* Sticky Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)] shrink-0">

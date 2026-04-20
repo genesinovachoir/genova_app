@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Users, Check, Loader2, AlertCircle, CheckCircle2, Search } from 'lucide-react';
+import { useMiniAudioPlayerStore } from '@/store/useMiniAudioPlayerStore';
 import { supabase, ChoirMember } from '@/lib/supabase';
 
 interface SongAssignmentModalProps {
@@ -15,6 +16,7 @@ interface SongAssignmentModalProps {
 }
 
 export function SongAssignmentModal({ isOpen, onClose, songId, songTitle, partName, onSaved }: SongAssignmentModalProps) {
+  const isPlayerActive = useMiniAudioPlayerStore((state) => state.isActive);
   const [members, setMembers] = useState<ChoirMember[]>([]);
   const [assigned, setAssigned] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -126,50 +128,8 @@ export function SongAssignmentModal({ isOpen, onClose, songId, songTitle, partNa
 
       if (assigned.size > 0) {
         const inserts = Array.from(assigned).map(member_id => ({ song_id: songId, member_id, part_name: partName || null }));
-        const { error: insertErr } = await supabase.from('song_assignments').insert(inserts);
+        const { error: insertErr } = await supabase.from('song_assignments').upsert(inserts, { onConflict: 'song_id,member_id' });
         if (insertErr) throw new Error(insertErr.message);
-      }
-
-      // Partisyon ataması yapıldığında şarkı-genel atamayı da (part_name = null) senkron tut.
-      // Böylece eski "Şarkı Ata" akışını kullanan görünürlük kontrolleri de bozulmaz.
-      if (partName) {
-        const { data: allPartRows, error: partRowsError } = await supabase
-          .from('song_assignments')
-          .select('member_id')
-          .eq('song_id', songId)
-          .not('part_name', 'is', null);
-
-        if (partRowsError) {
-          throw new Error(partRowsError.message);
-        }
-
-        const memberIdsWithAnyPart = Array.from(
-          new Set((allPartRows ?? []).map((row: { member_id: string }) => row.member_id)),
-        );
-
-        const { error: deleteSongLevelError } = await supabase
-          .from('song_assignments')
-          .delete()
-          .eq('song_id', songId)
-          .is('part_name', null);
-
-        if (deleteSongLevelError) {
-          throw new Error(deleteSongLevelError.message);
-        }
-
-        if (memberIdsWithAnyPart.length > 0) {
-          const songLevelInserts = memberIdsWithAnyPart.map((member_id) => ({
-            song_id: songId,
-            member_id,
-            part_name: null,
-          }));
-          const { error: insertSongLevelError } = await supabase
-            .from('song_assignments')
-            .insert(songLevelInserts);
-          if (insertSongLevelError) {
-            throw new Error(insertSongLevelError.message);
-          }
-        }
       }
 
       await onSaved?.();
@@ -192,13 +152,32 @@ export function SongAssignmentModal({ isOpen, onClose, songId, songTitle, partNa
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm"
             onClick={() => !saving && onClose()}
+            style={{ 
+              bottom: isPlayerActive ? 'calc(7.2rem + env(safe-area-inset-bottom))' : '0',
+              borderRadius: isPlayerActive ? '0 0 24px 24px' : '0',
+              transition: 'bottom 0.4s cubic-bezier(0.23, 1, 0.32, 1), border-radius 0.4s'
+            }}
           />
           <motion.div
             initial={{ opacity: 0, scale: 0.96, y: 24 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
+            animate={{ 
+              opacity: 1, 
+              scale: 1, 
+              y: 0,
+              bottom: isPlayerActive ? 'calc(7.2rem + env(safe-area-inset-bottom))' : '0'
+            }}
             exit={{ opacity: 0, scale: 0.96, y: 24 }}
-            transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-            className="fixed bottom-0 left-0 right-0 z-[90] mx-auto max-w-lg sm:inset-0 sm:flex sm:items-center sm:justify-center sm:p-6"
+            transition={{ 
+              type: 'spring', 
+              stiffness: 400, 
+              damping: 32,
+              bottom: { duration: 0.4, ease: [0.23, 1, 0.32, 1] }
+            }}
+            className="fixed bottom-0 left-0 right-0 z-[90] mx-auto max-w-lg sm:inset-x-0 sm:top-0 sm:bottom-auto sm:flex sm:h-full sm:items-center sm:justify-center sm:p-6"
+            style={{
+              bottom: isPlayerActive ? 'calc(7.2rem + env(safe-area-inset-bottom))' : '0',
+              transition: 'bottom 0.4s cubic-bezier(0.23, 1, 0.32, 1)'
+            }}
           >
             <div className="glass-panel w-full rounded-b-none sm:rounded-[4px] flex flex-col max-h-[85vh]">
               {/* Header */}

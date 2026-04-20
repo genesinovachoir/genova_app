@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Upload, X, Music2, FileText, Mic, CheckCircle2, AlertCircle } from 'lucide-react';
+import { useMiniAudioPlayerStore } from '@/store/useMiniAudioPlayerStore';
 import { ALLOWED_SHEET_TYPES, ALLOWED_MIDI_TYPES, ALLOWED_AUDIO_TYPES, ALLOWED_SUBMISSION_TYPES, formatFileSize } from '@/lib/drive';
 import { LottieIcon } from '@/components/LottieIcon';
 
@@ -53,7 +54,7 @@ const MODE_CONFIG: Record<UploadMode, {
     icon: Upload,
     acceptedTypes: ALLOWED_SUBMISSION_TYPES,
     accept: '.mp3,.mp4,.m4a,.wav,.ogg,.mid,.midi,.pdf',
-    hint: 'Ses kaydı, MIDI veya PDF (max 100MB)',
+    hint: 'Video (MP4), Ses veya PDF (max 20MB)',
     color: 'text-[#C0B283]',
   },
 };
@@ -76,6 +77,7 @@ export function FileUploadModal({
   hideNoteInput = false,
   onUpload,
 }: FileUploadModalProps) {
+  const isPlayerActive = useMiniAudioPlayerStore((state) => state.isActive);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [partitionLabel, setPartitionLabel] = useState<string>('');
   const [submissionNote, setSubmissionNote] = useState<string>('');
@@ -119,8 +121,8 @@ export function FileUploadModal({
     if (!config.acceptedTypes.includes(ext)) {
       return `Geçersiz dosya tipi. Kabul edilenler: ${config.acceptedTypes.join(', ')}`;
     }
-    if (file.size > 100 * 1024 * 1024) {
-      return 'Dosya boyutu 100MB\'ı aşamaz';
+    if (file.size > 20 * 1024 * 1024) {
+      return 'Dosya boyutu 20MB\'ı aşamaz';
     }
     return null;
   };
@@ -180,15 +182,33 @@ export function FileUploadModal({
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm"
             onClick={handleClose}
+            style={{ 
+              bottom: isPlayerActive ? 'calc(7.2rem + env(safe-area-inset-bottom))' : '0',
+              borderRadius: isPlayerActive ? '0 0 24px 24px' : '0',
+              transition: 'bottom 0.4s cubic-bezier(0.23, 1, 0.32, 1), border-radius 0.4s'
+            }}
           />
 
           {/* Modal */}
           <motion.div
             initial={{ opacity: 0, y: 40 }}
-            animate={{ opacity: 1, y: 0 }}
+            animate={{ 
+              opacity: 1, 
+              y: 0,
+              bottom: isPlayerActive ? 'calc(7.2rem + env(safe-area-inset-bottom))' : '0'
+            }}
             exit={{ opacity: 0, y: 40 }}
-            transition={{ type: 'spring', bounce: 0.12, duration: 0.45 }}
-            className="fixed inset-0 z-[60] flex flex-col bg-[var(--color-surface-solid)]"
+            transition={{ 
+              type: 'spring', 
+              bounce: 0.12, 
+              duration: 0.45,
+              bottom: { duration: 0.4, ease: [0.23, 1, 0.32, 1] }
+            }}
+            className="fixed inset-x-0 top-0 z-[60] flex flex-col bg-[var(--color-surface-solid)] overflow-hidden"
+            style={{ 
+              borderRadius: isPlayerActive ? '0 0 24px 24px' : '0',
+              borderBottom: isPlayerActive ? '1px solid var(--color-border)' : 'none'
+            }}
           >
             {/* Header */}
             <div className="flex items-center justify-between px-5 pt-[max(env(safe-area-inset-top),1.25rem)] pb-4 border-b border-[var(--color-border)] shrink-0">

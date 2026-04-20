@@ -988,6 +988,9 @@ export function RepertoireWorkspace({
   const coverFiles = [...(song.files ?? [])]
     .filter(isCoverFile)
     .sort((a, b) => {
+      const aIsPdf = isPdfRepertoireFile(a);
+      const bIsPdf = isPdfRepertoireFile(b);
+      if (aIsPdf !== bIsPdf) return aIsPdf ? 1 : -1;
       const aTime = Date.parse(a.created_at || '') || 0;
       const bTime = Date.parse(b.created_at || '') || 0;
       return bTime - aTime;
