@@ -1907,7 +1907,7 @@ export function RepertoireWorkspace({
     );
   }
 
-  function renderToolbar(extraClassName?: string, hideEmptyWarning?: boolean) {
+  function renderToolbar(extraClassName?: string, hideEmptyWarning?: boolean, hideZoom?: boolean) {
     return (
       <div className={`flex items-start justify-between gap-1 ${extraClassName ?? ''}`}>
         <div className="flex flex-wrap items-center gap-1">
@@ -1920,34 +1920,36 @@ export function RepertoireWorkspace({
           {renderWorkspaceControls()}
         </div>
 
-        <div className="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            onClick={zoomOut}
-            disabled={zoomLevel <= MIN_ZOOM}
-            className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] disabled:opacity-40"
-            title="Küçült"
-          >
-            <ZoomOut size={13} />
-          </button>
-          <button
-            type="button"
-            onClick={resetZoom}
-            className="h-8 inline-flex items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 px-1.5 text-[0.62rem] font-bold tracking-[0.12em] text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)]"
-            title="Sıfırla"
-          >
-            %{Math.round(zoomLevel * 100)}
-          </button>
-          <button
-            type="button"
-            onClick={zoomIn}
-            disabled={zoomLevel >= MAX_ZOOM}
-            className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] disabled:opacity-40"
-            title="Büyüt"
-          >
-            <ZoomIn size={13} />
-          </button>
-        </div>
+        {!hideZoom && (
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={zoomOut}
+              disabled={zoomLevel <= MIN_ZOOM}
+              className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] disabled:opacity-40"
+              title="Küçült"
+            >
+              <ZoomOut size={13} />
+            </button>
+            <button
+              type="button"
+              onClick={resetZoom}
+              className="h-8 inline-flex items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 px-1.5 text-[0.62rem] font-bold tracking-[0.12em] text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)]"
+              title="Sıfırla"
+            >
+              %{Math.round(zoomLevel * 100)}
+            </button>
+            <button
+              type="button"
+              onClick={zoomIn}
+              disabled={zoomLevel >= MAX_ZOOM}
+              className="inline-flex h-8 w-7 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] disabled:opacity-40"
+              title="Büyüt"
+            >
+              <ZoomIn size={13} />
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -2177,7 +2179,7 @@ export function RepertoireWorkspace({
 
         {/* Araç çubuğu: kontroller + zoom (Alt) */}
         {!(!selectedPdf && !hasCoverPage) && (selectedPdfSource || selectedPdf || hasCoverPage) && (
-          renderToolbar('mt-3', true)
+          renderToolbar('mt-3', true, true)
         )}
       </div>
 

@@ -1,10 +1,33 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ThemeProvider } from 'next-themes';
+import { ThemeProvider, useTheme } from 'next-themes';
 
 import { ToastProvider } from '@/components/ToastProvider';
+
+function ThemeColorUpdater() {
+  const { resolvedTheme } = useTheme();
+
+  useEffect(() => {
+    if (!resolvedTheme) return;
+    
+    // Light and Dark background colors based on globals.css
+    const color = resolvedTheme === 'light' ? '#f5f3ec' : '#000000';
+    
+    let metaThemeColor = document.querySelector('meta[name="theme-color"]');
+    if (metaThemeColor) {
+      metaThemeColor.setAttribute('content', color);
+    } else {
+      metaThemeColor = document.createElement('meta');
+      metaThemeColor.setAttribute('name', 'theme-color');
+      metaThemeColor.setAttribute('content', color);
+      document.head.appendChild(metaThemeColor);
+    }
+  }, [resolvedTheme]);
+
+  return null;
+}
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -31,6 +54,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
       enableSystem={false}
       disableTransitionOnChange
     >
+      <ThemeColorUpdater />
       <QueryClientProvider client={queryClient}>
         <ToastProvider>{children}</ToastProvider>
       </QueryClientProvider>

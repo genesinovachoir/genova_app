@@ -23,7 +23,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: 'Genova App',
-    statusBarStyle: 'black',
+    statusBarStyle: 'default', // Changed to default so it inherits theme-color
   },
   icons: {
     icon: [
@@ -35,7 +35,6 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#000000',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,

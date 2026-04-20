@@ -14,14 +14,12 @@ import NextImage from 'next/image';
 const CustomBold = TiptapBold.extend({
   addInputRules() {
     return [
-      markInputRule({ find: /(?:^|\s)((?:\*\*)([^*]+)(?:\*\*))$/u, type: this.type }),
-      markInputRule({ find: /(?:^|\s)((?:__)([^_]+)(?:__))$/u, type: this.type })
+      markInputRule({ find: /(?:^|\s)((?:\*)([^*]+)(?:\*))$/u, type: this.type })
     ];
   },
   addPasteRules() {
     return [
-      markPasteRule({ find: /(?:^|\s)((?:\*\*)([^*]+)(?:\*\*))/g, type: this.type }),
-      markPasteRule({ find: /(?:^|\s)((?:__)([^_]+)(?:__))/g, type: this.type })
+      markPasteRule({ find: /(?:^|\s)((?:\*)([^*]+)(?:\*))/g, type: this.type })
     ];
   }
 });
@@ -29,13 +27,11 @@ const CustomBold = TiptapBold.extend({
 const CustomItalic = TiptapItalic.extend({
   addInputRules() {
     return [
-      markInputRule({ find: /(?:^|\s)((?:\*)([^*]+)(?:\*))$/u, type: this.type }),
       markInputRule({ find: /(?:^|\s)((?:_)([^_]+)(?:_))$/u, type: this.type })
     ];
   },
   addPasteRules() {
     return [
-      markPasteRule({ find: /(?:^|\s)((?:\*)([^*]+)(?:\*))/g, type: this.type }),
       markPasteRule({ find: /(?:^|\s)((?:_)([^_]+)(?:_))/g, type: this.type })
     ];
   }
@@ -44,12 +40,12 @@ const CustomItalic = TiptapItalic.extend({
 const CustomStrike = TiptapStrike.extend({
   addInputRules() {
     return [
-      markInputRule({ find: /(?:^|\s)((?:~~)([^~]+)(?:~~))$/u, type: this.type })
+      markInputRule({ find: /(?:^|\s)((?:~)([^~]+)(?:~))$/u, type: this.type })
     ];
   },
   addPasteRules() {
     return [
-      markPasteRule({ find: /(?:^|\s)((?:~~)([^~]+)(?:~~))/g, type: this.type })
+      markPasteRule({ find: /(?:^|\s)((?:~)([^~]+)(?:~))/g, type: this.type })
     ];
   }
 });
