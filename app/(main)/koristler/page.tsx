@@ -10,7 +10,6 @@ import {
   Mail,
   Phone,
   Search,
-  Users,
 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -335,9 +334,6 @@ export default function KoristlerPage() {
                 </span>
               )}
             </div>
-          </div>
-          <div className="hidden shrink-0 items-center justify-center rounded-[10px] border border-[var(--color-border)] bg-white/4 p-4 sm:flex">
-            <Users className="text-[var(--color-accent)]" size={22} />
           </div>
         </div>
 
