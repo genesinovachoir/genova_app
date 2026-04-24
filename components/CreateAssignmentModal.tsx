@@ -24,7 +24,6 @@ interface CreateAssignmentModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
-  creatorMemberId: string;
   isChef: boolean;
   creatorVoiceGroup: string | null;
   editingAssignmentId?: string | null;
@@ -38,6 +37,12 @@ interface ChoirMemberRoleRow {
   roles?: { name?: RoleName } | Array<{ name?: RoleName }> | null;
 }
 
+interface CreateAssignmentResponse {
+  id: string;
+  title: string;
+  deadline: string | null;
+}
+
 const VOICE_ORDER = ['Soprano', 'Alto', 'Tenor', 'Bass'];
 const BLOCKED_ASSIGNMENT_ROLES = new Set<RoleName>(['Şef', 'Partisyon Şefi']);
 
@@ -49,11 +54,38 @@ function hasBlockedAssignmentRole(row: ChoirMemberRoleRow): boolean {
   return roleEntries.some((entry) => Boolean(entry?.name && BLOCKED_ASSIGNMENT_ROLES.has(entry.name)));
 }
 
+async function getAccessToken() {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !sessionData.session?.access_token) {
+    throw new Error('Oturum doğrulanamadı. Lütfen tekrar giriş yapın.');
+  }
+
+  return sessionData.session.access_token;
+}
+
+async function postJsonWithAuth<T>(url: string, payload: Record<string, unknown>) {
+  const accessToken = await getAccessToken();
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `İstek başarısız (${response.status})`);
+  }
+
+  return (await response.json()) as T;
+}
+
 export function CreateAssignmentModal({
   isOpen,
   onClose,
   onSuccess,
-  creatorMemberId,
   isChef,
   creatorVoiceGroup,
   editingAssignmentId = null,
@@ -268,64 +300,22 @@ export function CreateAssignmentModal({
       }
 
       if (isEditMode && editingAssignmentId) {
-        const { error: updateAssignmentError } = await supabase
-          .from('assignments')
-          .update({
-            title: form.title.trim(),
-            description: form.description.trim() || null,
-            deadline: form.deadline ? new Date(form.deadline).toISOString() : null,
-          })
-          .eq('id', editingAssignmentId);
-        if (updateAssignmentError) {
-          throw new Error(updateAssignmentError.message);
-        }
-
-        const { error: deleteTargetsError } = await supabase
-          .from('assignment_targets')
-          .delete()
-          .eq('assignment_id', editingAssignmentId);
-        if (deleteTargetsError) {
-          throw new Error(deleteTargetsError.message);
-        }
-
-        const { error: targetInsertError } = await supabase.from('assignment_targets').insert(
-          targetMemberIds.map((memberId) => ({
-            assignment_id: editingAssignmentId,
-            member_id: memberId,
-          })),
-        );
-        if (targetInsertError) {
-          throw new Error(targetInsertError.message);
-        }
+        await postJsonWithAuth<CreateAssignmentResponse>('/api/assignments/update', {
+          assignment_id: editingAssignmentId,
+          title: form.title.trim(),
+          description: form.description.trim() || null,
+          deadline: form.deadline ? new Date(form.deadline).toISOString() : null,
+          target_member_ids: targetMemberIds,
+        });
       } else {
-        const { data: assignment, error: insertAssignmentError } = await supabase
-          .from('assignments')
-          .insert({
-            title: form.title.trim(),
-            description: form.description.trim() || null,
-            deadline: form.deadline ? new Date(form.deadline).toISOString() : null,
-            target_voice_group: null,
-            created_by: creatorMemberId,
-            is_active: true,
-          })
-          .select('id, title')
-          .single();
+        const assignment = await postJsonWithAuth<CreateAssignmentResponse>('/api/assignments/create', {
+          title: form.title.trim(),
+          description: form.description.trim() || null,
+          deadline: form.deadline ? new Date(form.deadline).toISOString() : null,
+          target_member_ids: targetMemberIds,
+        });
 
-        if (insertAssignmentError || !assignment) {
-          throw new Error(insertAssignmentError?.message || 'Ödev oluşturulamadı.');
-        }
         createdAssignmentId = assignment.id;
-
-        const { error: targetInsertError } = await supabase.from('assignment_targets').insert(
-          targetMemberIds.map((memberId) => ({
-            assignment_id: assignment.id,
-            member_id: memberId,
-          })),
-        );
-        if (targetInsertError) {
-          throw new Error(targetInsertError.message);
-        }
-
         await initAssignmentFolder(assignment.id, assignment.title);
       }
 
@@ -336,7 +326,13 @@ export function CreateAssignmentModal({
       }, 900);
     } catch (submitError) {
       if (createdAssignmentId) {
-        await supabase.from('assignments').delete().eq('id', createdAssignmentId);
+        try {
+          await postJsonWithAuth<{ id: string }>('/api/assignments/delete', {
+            assignment_id: createdAssignmentId,
+          });
+        } catch (rollbackError) {
+          console.error('Assignment rollback failed:', rollbackError);
+        }
       }
       setError(submitError instanceof Error ? submitError.message : 'Bir hata oluştu.');
     } finally {

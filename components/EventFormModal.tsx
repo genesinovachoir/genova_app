@@ -20,6 +20,43 @@ type Invitee = ChoirMember & { selected: boolean };
 
 const VOICE_ORDER = ['Soprano', 'Alto', 'Tenor', 'Bass'];
 
+interface CreateRehearsalResponse {
+  id: string;
+  title: string;
+}
+
+interface RehearsalMutationResponse {
+  id: string;
+}
+
+async function getAccessToken() {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !sessionData.session?.access_token) {
+    throw new Error('Oturum doğrulanamadı. Lütfen tekrar giriş yapın.');
+  }
+
+  return sessionData.session.access_token;
+}
+
+async function postJsonWithAuth<T>(url: string, payload: Record<string, unknown>) {
+  const accessToken = await getAccessToken();
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `İstek başarısız (${response.status})`);
+  }
+
+  return (await response.json()) as T;
+}
+
 export function EventFormModal({ open, onClose, onSaved, rehearsal, defaultDate }: Props) {
   const { member } = useAuth();
 
@@ -149,38 +186,23 @@ export function EventFormModal({ open, onClose, onSaved, rehearsal, defaultDate 
       collect_attendance: collectAttendance,
       attendance_note: notes || null, // notes aynı zamanda swipe ekranında gösterilir
     };
+    const selectedInviteeMemberIds = invitees.filter((m) => m.selected).map((m) => m.id);
 
     try {
       let rehearsalId = rehearsal?.id;
 
       if (isEdit && rehearsalId) {
-        const { error } = await supabase.from('rehearsals').update(payload).eq('id', rehearsalId);
-        if (error) throw new Error(error.message);
+        await postJsonWithAuth<RehearsalMutationResponse>('/api/rehearsals/update', {
+          rehearsal_id: rehearsalId,
+          ...payload,
+          invitee_member_ids: selectedInviteeMemberIds,
+        });
       } else {
-        const { data, error } = await supabase
-          .from('rehearsals')
-          .insert({ ...payload, created_by: member.id })
-          .select('id')
-          .single();
-        if (error) throw new Error(error.message);
-        rehearsalId = data?.id;
-      }
-
-      if (rehearsalId) {
-        const { error: clearInviteeError } = await supabase
-          .from('rehearsal_invitees')
-          .delete()
-          .eq('rehearsal_id', rehearsalId);
-        if (clearInviteeError) throw new Error(clearInviteeError.message);
-
-        const selectedIds = invitees
-          .filter(m => m.selected)
-          .map(m => ({ rehearsal_id: rehearsalId, member_id: m.id }));
-
-        if (selectedIds.length > 0) {
-          const { error: insertInviteeError } = await supabase.from('rehearsal_invitees').insert(selectedIds);
-          if (insertInviteeError) throw new Error(insertInviteeError.message);
-        }
+        const created = await postJsonWithAuth<CreateRehearsalResponse>('/api/rehearsals/create', {
+          ...payload,
+          invitee_member_ids: selectedInviteeMemberIds,
+        });
+        rehearsalId = created.id;
       }
 
       onSaved();
@@ -202,25 +224,9 @@ export function EventFormModal({ open, onClose, onSaved, rehearsal, defaultDate 
     setDeleting(true);
 
     try {
-      const rehearsalId = rehearsal.id;
-
-      const { error: attendanceDeleteError } = await supabase
-        .from('attendance')
-        .delete()
-        .eq('rehearsal_id', rehearsalId);
-      if (attendanceDeleteError) throw new Error(attendanceDeleteError.message);
-
-      const { error: inviteeDeleteError } = await supabase
-        .from('rehearsal_invitees')
-        .delete()
-        .eq('rehearsal_id', rehearsalId);
-      if (inviteeDeleteError) throw new Error(inviteeDeleteError.message);
-
-      const { error: rehearsalDeleteError } = await supabase
-        .from('rehearsals')
-        .delete()
-        .eq('id', rehearsalId);
-      if (rehearsalDeleteError) throw new Error(rehearsalDeleteError.message);
+      await postJsonWithAuth<RehearsalMutationResponse>('/api/rehearsals/delete', {
+        rehearsal_id: rehearsal.id,
+      });
 
       onSaved();
     } catch (error: unknown) {

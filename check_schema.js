@@ -2,12 +2,19 @@ require('dotenv').config({ path: '.env.local' });
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+const testEmail = process.env.TEST_USER_EMAIL;
+const testPassword = process.env.TEST_USER_PASSWORD;
 
 async function check() {
+  if (!testEmail || !testPassword) {
+    console.error('TEST_USER_EMAIL ve TEST_USER_PASSWORD ortam değişkenlerini ayarlayın.');
+    return;
+  }
+
   // Gerçek kullanıcıyla giriş yap
   const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-    email: 'alidiyarduran35@gmail.com',
-    password: 'alidiyar123'
+    email: testEmail,
+    password: testPassword,
   });
 
   if (signInError) {

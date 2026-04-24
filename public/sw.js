@@ -259,7 +259,6 @@ self.addEventListener('push', (event) => {
   }
 
   const options = {
-    body: data.body || 'Yeni bir bildiriminiz var.',
     icon: data.icon || '/icon.png',
     badge: '/icon.png',
     vibrate: [100, 50, 100],
@@ -269,6 +268,10 @@ self.addEventListener('push', (event) => {
       dateOfArrival: Date.now(),
     },
   };
+
+  if (typeof data.body === 'string' && data.body.trim()) {
+    options.body = data.body;
+  }
 
   const title = data.title || 'Genova Korist';
   event.waitUntil(self.registration.showNotification(title, options));

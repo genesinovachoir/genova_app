@@ -42,6 +42,7 @@ async function getAccessToken(): Promise<string> {
 const DRIVE_FILES_API = 'https://www.googleapis.com/drive/v3/files';
 const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3/files';
 const STORAGE_LINK_PREFIX = 'storage://';
+const ASSIGNMENT_STORAGE_BUCKET = 'assignment-submissions';
 
 async function createFolder(token: string, name: string, parentId: string) {
   const res = await fetch(DRIVE_FILES_API + '?fields=id,webViewLink', {
@@ -90,6 +91,29 @@ function sanitizeFolderName(name: string): string {
   return name.replace(/[/\\?%*:|"<>]/g, '_').replace(/\s+/g, '_').trim();
 }
 
+function normalizeRoleName(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ş/gi, 's')
+    .replace(/ı/gi, 'i')
+    .toLocaleLowerCase('tr-TR')
+    .trim();
+}
+
+function detectRoleFlags(rawRoles: Array<string | null | undefined>) {
+  const normalizedRoles = new Set(
+    rawRoles
+      .map((role) => (role ? normalizeRoleName(role) : null))
+      .filter((value): value is string => Boolean(value)),
+  );
+
+  const isChef = normalizedRoles.has('sef');
+  const isSectionLeader = isChef || normalizedRoles.has('partisyon sefi');
+
+  return { isChef, isSectionLeader };
+}
+
 async function findOrCreateFolder(token: string, name: string, parentId: string): Promise<string> {
   const q = encodeURIComponent(`name='${name}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`);
   const res = await fetch(`${DRIVE_FILES_API}?q=${q}&fields=files(id)`, {
@@ -121,10 +145,112 @@ function parseStorageLocation(rawValue: string | null | undefined): { bucket: st
   return { bucket, path };
 }
 
+async function loadAssignmentForSubmission(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  assignmentId: string,
+) {
+  const { data: assignment, error } = await supabaseAdmin
+    .from('assignments')
+    .select('id, drive_folder_id, target_voice_group, created_by')
+    .eq('id', assignmentId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!assignment) {
+    throw new Error('Ödev bulunamadı');
+  }
+  return assignment;
+}
+
+async function assignmentHasExplicitTargets(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  assignmentId: string,
+) {
+  const { count, error } = await supabaseAdmin
+    .from('assignment_targets')
+    .select('id', { count: 'exact', head: true })
+    .eq('assignment_id', assignmentId);
+  if (error) {
+    throw new Error(error.message);
+  }
+  return (count ?? 0) > 0;
+}
+
+async function canMemberSubmitAssignment(params: {
+  supabaseAdmin: ReturnType<typeof createClient>;
+  assignmentId: string;
+  memberId: string;
+  memberVoiceGroup: string | null;
+}) {
+  const { supabaseAdmin, assignmentId, memberId, memberVoiceGroup } = params;
+
+  const { data: explicitTarget, error: explicitTargetError } = await supabaseAdmin
+    .from('assignment_targets')
+    .select('id')
+    .eq('assignment_id', assignmentId)
+    .eq('member_id', memberId)
+    .limit(1)
+    .maybeSingle();
+  if (explicitTargetError) {
+    throw new Error(explicitTargetError.message);
+  }
+  if (explicitTarget?.id) {
+    return true;
+  }
+
+  const hasExplicitTargets = await assignmentHasExplicitTargets(supabaseAdmin, assignmentId);
+  if (hasExplicitTargets) {
+    return false;
+  }
+
+  const assignment = await loadAssignmentForSubmission(supabaseAdmin, assignmentId);
+  const targetVoiceGroup =
+    typeof assignment.target_voice_group === 'string'
+      ? assignment.target_voice_group.trim()
+      : '';
+  if (!targetVoiceGroup) {
+    return true;
+  }
+
+  return Boolean(memberVoiceGroup && memberVoiceGroup === targetVoiceGroup);
+}
+
+async function assertMemberCanSubmitAssignment(params: {
+  supabaseAdmin: ReturnType<typeof createClient>;
+  assignmentId: string;
+  memberId: string;
+  memberVoiceGroup: string | null;
+}) {
+  const allowed = await canMemberSubmitAssignment(params);
+  if (!allowed) {
+    throw new Error('Bu ödev için teslim yetkiniz yok');
+  }
+}
+
+function assertStoragePathBelongsToMember(params: {
+  assignmentId: string;
+  memberId: string;
+  storageBucket: string;
+  storagePath: string;
+}) {
+  const { assignmentId, memberId, storageBucket, storagePath } = params;
+  if (storageBucket !== ASSIGNMENT_STORAGE_BUCKET) {
+    throw new Error('Geçersiz storage bucket');
+  }
+
+  const normalizedPath = storagePath.replace(/^\/+/, '');
+  const expectedPrefix = `${assignmentId}/${memberId}/`;
+  if (!normalizedPath.startsWith(expectedPrefix)) {
+    throw new Error('Bu storage dosyasına erişim yetkiniz yok');
+  }
+}
+
 async function upsertAssignmentSubmission(params: {
   supabaseAdmin: ReturnType<typeof createClient>;
   token: string;
   assignmentId: string;
+  assignmentDriveFolderId?: string | null;
   memberId: string;
   memberFirstName: string;
   memberLastName: string;
@@ -137,6 +263,7 @@ async function upsertAssignmentSubmission(params: {
     supabaseAdmin,
     token,
     assignmentId,
+    assignmentDriveFolderId,
     memberId,
     memberFirstName,
     memberLastName,
@@ -146,16 +273,20 @@ async function upsertAssignmentSubmission(params: {
     submissionNote,
   } = params;
 
-  const { data: assignment } = await supabaseAdmin
-    .from('assignments')
-    .select('drive_folder_id')
-    .eq('id', assignmentId)
-    .single();
-  if (!assignment?.drive_folder_id) {
+  const driveFolderId = assignmentDriveFolderId ?? (
+    (
+      await supabaseAdmin
+        .from('assignments')
+        .select('drive_folder_id')
+        .eq('id', assignmentId)
+        .maybeSingle()
+    ).data?.drive_folder_id
+  );
+  if (!driveFolderId) {
     throw new Error('Ödev klasörü bulunamadı');
   }
 
-  const memberFolderId = await findOrCreateFolder(token, `${memberFirstName}_${memberLastName}`, assignment.drive_folder_id);
+  const memberFolderId = await findOrCreateFolder(token, `${memberFirstName}_${memberLastName}`, driveFolderId);
   const { data: oldSub } = await supabaseAdmin
     .from('assignment_submissions')
     .select('drive_file_id')
@@ -219,10 +350,15 @@ Deno.serve(async (req) => {
     if (authError || !user) return new Response(JSON.stringify({ error: 'Geçersiz oturum' }), { status: 401, headers: jsonHeaders });
 
     const supabaseAdmin = createClient(supabaseUrl, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const { data: member } = await supabaseAdmin.from('choir_members').select('id, first_name, last_name, voice_group, choir_member_roles(roles(name))').eq('auth_user_id', user.id).maybeSingle();
+    const { data: member } = await supabaseAdmin
+      .from('choir_members')
+      .select('id, first_name, last_name, voice_group, choir_member_roles(roles(name))')
+      .eq('auth_user_id', user.id)
+      .maybeSingle();
     if (!member) return new Response(JSON.stringify({ error: 'Üye kaydı bulunamadı' }), { status: 403, headers: jsonHeaders });
-    const roles = (member.choir_member_roles as any[]).map(r => r.roles?.name);
-    const userRole = roles.includes('Şef') ? 'Şef' : roles.includes('Partisyon Şefi') ? 'Partisyon Şefi' : 'Korist';
+    const roles = (member.choir_member_roles as any[]).map((r) => r.roles?.name);
+    const roleFlags = detectRoleFlags(roles);
+    const userRole = roleFlags.isChef ? 'Şef' : roleFlags.isSectionLeader ? 'Partisyon Şefi' : 'Korist';
 
     const body = await req.json();
     const { action } = body;
@@ -252,8 +388,25 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ file: fileRecord }), { headers: jsonHeaders });
       }
       case 'init_assignment_folder': {
-        if (!['Şef', 'Partisyon Şefi'].includes(userRole)) throw new Error('Yetkisiz');
+        if (!roleFlags.isChef && !roleFlags.isSectionLeader) throw new Error('Yetkisiz');
         const { assignment_id, assignment_title } = body;
+        if (!assignment_id || !assignment_title) {
+          throw new Error('assignment_id ve assignment_title zorunlu');
+        }
+        const { data: assignmentRow, error: assignmentRowError } = await supabaseAdmin
+          .from('assignments')
+          .select('id, created_by')
+          .eq('id', assignment_id)
+          .maybeSingle();
+        if (assignmentRowError) {
+          throw new Error(assignmentRowError.message);
+        }
+        if (!assignmentRow?.id) {
+          throw new Error('Ödev bulunamadı');
+        }
+        if (!roleFlags.isChef && assignmentRow.created_by !== member.id) {
+          throw new Error('Yetkisiz');
+        }
         const odevlerId = await findOrCreateFolder(token, 'Ödevler', rootFolderId);
         const creatorId = await findOrCreateFolder(token, `${member.first_name}_${member.last_name}`, odevlerId);
         const folder = await createFolder(token, sanitizeFolderName(assignment_title), creatorId);
@@ -266,6 +419,17 @@ Deno.serve(async (req) => {
           throw new Error('Eksik submission verisi');
         }
 
+        const assignment = await loadAssignmentForSubmission(supabaseAdmin, assignment_id);
+        if (!assignment.drive_folder_id) {
+          throw new Error('Ödev klasörü bulunamadı');
+        }
+        await assertMemberCanSubmitAssignment({
+          supabaseAdmin,
+          assignmentId: assignment_id,
+          memberId: member.id,
+          memberVoiceGroup: member.voice_group ?? null,
+        });
+
         const mimeType = typeof mime_type === 'string' && mime_type.length > 0
           ? mime_type
           : 'application/octet-stream';
@@ -274,6 +438,7 @@ Deno.serve(async (req) => {
           supabaseAdmin,
           token,
           assignmentId: assignment_id,
+          assignmentDriveFolderId: assignment.drive_folder_id,
           memberId: member.id,
           memberFirstName: member.first_name,
           memberLastName: member.last_name,
@@ -298,6 +463,23 @@ Deno.serve(async (req) => {
           throw new Error('Eksik storage submission verisi');
         }
 
+        const assignment = await loadAssignmentForSubmission(supabaseAdmin, assignment_id);
+        if (!assignment.drive_folder_id) {
+          throw new Error('Ödev klasörü bulunamadı');
+        }
+        await assertMemberCanSubmitAssignment({
+          supabaseAdmin,
+          assignmentId: assignment_id,
+          memberId: member.id,
+          memberVoiceGroup: member.voice_group ?? null,
+        });
+        assertStoragePathBelongsToMember({
+          assignmentId: assignment_id,
+          memberId: member.id,
+          storageBucket: storage_bucket,
+          storagePath: storage_path,
+        });
+
         const mimeType = typeof mime_type === 'string' && mime_type.length > 0
           ? mime_type
           : 'application/octet-stream';
@@ -314,6 +496,7 @@ Deno.serve(async (req) => {
           supabaseAdmin,
           token,
           assignmentId: assignment_id,
+          assignmentDriveFolderId: assignment.drive_folder_id,
           memberId: member.id,
           memberFirstName: member.first_name,
           memberLastName: member.last_name,
@@ -325,7 +508,7 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ submission: sub }), { headers: jsonHeaders });
       }
       case 'migrate_submission_from_storage': {
-        if (userRole !== 'Şef') {
+        if (!roleFlags.isChef) {
           throw new Error('Yetkisiz');
         }
 
@@ -399,7 +582,27 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ success: true }), { headers: jsonHeaders });
       }
       case 'list_files': {
+        if (!roleFlags.isChef && !roleFlags.isSectionLeader) {
+          throw new Error('Yetkisiz');
+        }
         const { folder_id } = body;
+        if (!folder_id || !/^[a-zA-Z0-9_-]+$/.test(folder_id)) {
+          throw new Error('Geçersiz folder_id');
+        }
+        if (!roleFlags.isChef) {
+          const { data: ownedAssignment, error: ownedAssignmentError } = await supabaseAdmin
+            .from('assignments')
+            .select('id')
+            .eq('drive_folder_id', folder_id)
+            .eq('created_by', member.id)
+            .maybeSingle();
+          if (ownedAssignmentError) {
+            throw new Error(ownedAssignmentError.message);
+          }
+          if (!ownedAssignment?.id) {
+            throw new Error('Bu klasöre erişim yetkiniz yok');
+          }
+        }
         const q = encodeURIComponent(`'${folder_id}' in parents and trashed = false`);
         const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,webViewLink,webContentLink,size)`, { headers: { Authorization: `Bearer ${token}` } });
         const data = await res.json();
@@ -407,5 +610,13 @@ Deno.serve(async (req) => {
       }
       default: return new Response(JSON.stringify({ error: 'Gecersiz action' }), { status: 400, headers: jsonHeaders });
     }
-  } catch (err) { return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: jsonHeaders }); }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Bilinmeyen hata';
+    const lowered = message.toLocaleLowerCase('tr-TR');
+    const status =
+      message === 'Yetkisiz' || lowered.includes('yetkiniz yok') ? 403
+      : lowered.includes('eksik') || lowered.includes('geçersiz') || lowered.includes('zorunlu') ? 400
+      : 500;
+    return new Response(JSON.stringify({ error: message }), { status, headers: jsonHeaders });
+  }
 });

@@ -18,6 +18,29 @@ interface ReviewerRoleEntry {
   roles?: { name?: string } | { name?: string }[] | null;
 }
 
+const ALLOWED_PROFILE_CHANGE_KEYS = new Set([
+  'email',
+  'phone',
+  'birth_date',
+  'school_id',
+  'department_id',
+  'linkedin_url',
+  'instagram_url',
+  'youtube_url',
+  'spotify_url',
+  'photo_url',
+]);
+
+function normalizeRoleName(value: string) {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ş/gi, 's')
+    .replace(/ı/gi, 'i')
+    .toLocaleLowerCase('tr-TR')
+    .trim();
+}
+
 function hasChefRole(roleRows: ReviewerRoleEntry[] | null | undefined) {
   const roleNames = (roleRows ?? []).flatMap((entry) => {
     const roleData = entry.roles;
@@ -30,7 +53,28 @@ function hasChefRole(roleRows: ReviewerRoleEntry[] | null | undefined) {
     return roleData.name ? [roleData.name] : [];
   });
 
-  return roleNames.includes('Şef');
+  return roleNames.some((roleName) => normalizeRoleName(roleName) === 'sef');
+}
+
+function sanitizeProfileChanges(raw: unknown): Record<string, string | null> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {};
+  }
+
+  const result: Record<string, string | null> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!ALLOWED_PROFILE_CHANGE_KEYS.has(key)) {
+      continue;
+    }
+    if (typeof value === 'string') {
+      result[key] = value.trim();
+      continue;
+    }
+    if (value === null) {
+      result[key] = null;
+    }
+  }
+  return result;
 }
 
 export async function POST(request: Request) {
@@ -97,15 +141,9 @@ export async function POST(request: Request) {
       return new NextResponse('Talep zaten sonuçlandırılmış.', { status: 409 });
     }
 
-    if (action === 'approve') {
-      const { error: memberUpdateError } = await serviceClient
-        .from('choir_members')
-        .update(existingRequest.changes_json as Record<string, unknown>)
-        .eq('id', existingRequest.member_id);
-
-      if (memberUpdateError) {
-        return new NextResponse(memberUpdateError.message, { status: 500 });
-      }
+    const sanitizedChanges = sanitizeProfileChanges(existingRequest.changes_json);
+    if (action === 'approve' && Object.keys(sanitizedChanges).length === 0) {
+      return new NextResponse('Onaylanacak geçerli profil alanı bulunamadı.', { status: 400 });
     }
 
     const reviewedAt = new Date().toISOString();
@@ -130,6 +168,28 @@ export async function POST(request: Request) {
 
     if (!updatedRequest) {
       return new NextResponse('Talep zaten sonuçlandırılmış.', { status: 409 });
+    }
+
+    if (action === 'approve') {
+      const { error: memberUpdateError } = await serviceClient
+        .from('choir_members')
+        .update(sanitizedChanges)
+        .eq('id', updatedRequest.member_id);
+
+      if (memberUpdateError) {
+        await serviceClient
+          .from('profile_change_requests')
+          .update({
+            status: 'pending',
+            reviewed_by: null,
+            reviewed_at: null,
+            reject_reason: null,
+          })
+          .eq('id', requestId)
+          .eq('reviewed_by', reviewer.id);
+
+        return new NextResponse(memberUpdateError.message, { status: 500 });
+      }
     }
 
     try {

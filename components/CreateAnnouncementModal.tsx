@@ -61,6 +61,42 @@ function buildDraft(editAnnouncement?: Announcement | null): AnnouncementDraft {
   };
 }
 
+interface PublishAnnouncementPayload {
+  title: string;
+  description: string;
+  icon: string;
+  target_users: string[];
+  target_voice_groups: string[];
+}
+
+async function getAccessToken() {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !sessionData.session?.access_token) {
+    throw new Error('Oturum doğrulanamadı. Lütfen tekrar giriş yapın.');
+  }
+
+  return sessionData.session.access_token;
+}
+
+async function postJsonWithAuth<TResponse, TPayload = unknown>(url: string, payload: TPayload) {
+  const accessToken = await getAccessToken();
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `İstek başarısız (${response.status})`);
+  }
+
+  return (await response.json()) as TResponse;
+}
+
 export function CreateAnnouncementModal({ open, onClose, onCreated, editAnnouncement = null }: Props) {
   const initialDraft = useMemo(() => buildDraft(editAnnouncement), [editAnnouncement]);
 
@@ -144,7 +180,13 @@ function AnnouncementModalBody({
   }, [member, isAdmin, isSectionLeader, editAnnouncement]);
 
   useEffect(() => {
-    loadMembers();
+    const timeoutId = window.setTimeout(() => {
+      void loadMembers();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
   }, [loadMembers]);
 
   const filteredMembers = useMemo(() => {
@@ -217,7 +259,7 @@ function AnnouncementModalBody({
     // Kullanıcının talebi: Artik "boş = herkes" mantığı yok. 
     // "Bir duyuruyu görmesi için atanmış olması gerekir." 
     // Bu yüzden seçilenleri aynen kaydediyoruz.
-    const payload = {
+    const payload: PublishAnnouncementPayload = {
       title: title.trim(),
       description: sanitizedDescription,
       icon,
@@ -225,18 +267,29 @@ function AnnouncementModalBody({
       target_voice_groups,
     };
 
-    const { error: submitError } = editAnnouncement
-      ? await supabase.from('announcements').update(payload).eq('id', editAnnouncement.id)
-      : await supabase.from('announcements').insert({
+    let submitErrorMessage: string | null = null;
+    if (editAnnouncement) {
+      try {
+        await postJsonWithAuth<{ id: string }>('/api/announcements/update', {
+          announcement_id: editAnnouncement.id,
           ...payload,
-          created_by: member.id,
         });
+      } catch (requestError) {
+        submitErrorMessage = requestError instanceof Error ? requestError.message : 'Duyuru güncellenemedi.';
+      }
+    } else {
+      try {
+        await postJsonWithAuth<{ id: string }>('/api/announcements/publish', payload);
+      } catch (requestError) {
+        submitErrorMessage = requestError instanceof Error ? requestError.message : 'Duyuru yayınlanamadı.';
+      }
+    }
 
     setSubmitting(false);
 
-    if (submitError) {
-      setError(submitError.message);
-      toast.error(submitError.message, 'Duyuru kaydedilemedi');
+    if (submitErrorMessage) {
+      setError(submitErrorMessage);
+      toast.error(submitErrorMessage, 'Duyuru kaydedilemedi');
       return;
     }
 

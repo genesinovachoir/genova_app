@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { sendAssignmentReviewPush } from '@/lib/server/push-notifications';
 import { createSupabaseServiceClient, requireAuthenticatedUser } from '@/lib/server/supabase-auth';
 
 export const dynamic = 'force-dynamic';
@@ -95,7 +96,7 @@ export async function POST(request: Request) {
 
     const { data: existingSubmission, error: existingSubmissionError } = await serviceClient
       .from('assignment_submissions')
-      .select('id, member_id, status')
+      .select('id, assignment_id, member_id, status')
       .eq('id', submissionId)
       .maybeSingle();
     if (existingSubmissionError) {
@@ -150,6 +151,17 @@ export async function POST(request: Request) {
 
     if (!updatedSubmission) {
       return new NextResponse('Değerlendirme uygulanamadı.', { status: 409 });
+    }
+
+    try {
+      await sendAssignmentReviewPush({
+        memberId: existingSubmission.member_id,
+        assignmentId: existingSubmission.assignment_id,
+        status,
+        reviewerMessage: updatedSubmission.reviewer_note,
+      });
+    } catch (pushError) {
+      console.error('Assignment review push send failed:', pushError);
     }
 
     return NextResponse.json(updatedSubmission);

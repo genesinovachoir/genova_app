@@ -3,9 +3,17 @@
 
 const { createClient } = require('@supabase/supabase-js');
 
+function getRequiredEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`${name} env değişkeni zorunlu.`);
+  }
+  return value;
+}
+
 const supabase = createClient(
-  'https://hievmwwctjjlhmssoxsu.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhpZXZtd3djdGpqbGhtc3NveHN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzExMDc3NTIsImV4cCI6MjA4NjY4Mzc1Mn0.4GQLx3_rMYJzsvIW8GfzeJdaNxVtz_NE-aSuYX7qGno'
+  getRequiredEnv('NEXT_PUBLIC_SUPABASE_URL'),
+  getRequiredEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY')
 );
 
 async function main() {

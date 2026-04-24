@@ -33,6 +33,34 @@ function formatDate(iso: string) {
   });
 }
 
+async function getAccessToken() {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !sessionData.session?.access_token) {
+    throw new Error('Oturum doğrulanamadı. Lütfen tekrar giriş yapın.');
+  }
+
+  return sessionData.session.access_token;
+}
+
+async function postJsonWithAuth<T>(url: string, payload: Record<string, unknown>) {
+  const accessToken = await getAccessToken();
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `İstek başarısız (${response.status})`);
+  }
+
+  return (await response.json()) as T;
+}
+
 async function fetchAnnouncement(id: string) {
   const { data, error } = await supabase
     .from('announcements')
@@ -65,10 +93,9 @@ export default function AnnouncementPage() {
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from('announcements').delete().eq('id', id);
-      if (error) {
-        throw error;
-      }
+      await postJsonWithAuth<{ id: string }>('/api/announcements/delete', {
+        announcement_id: id,
+      });
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['announcements'] });
