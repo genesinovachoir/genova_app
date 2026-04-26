@@ -1,5 +1,6 @@
 import webpush from 'web-push';
 
+import { stripHtmlTags } from '@/lib/richText';
 import { createSupabaseServiceClient } from '@/lib/server/supabase-auth';
 
 interface PushSubscriptionRow {
@@ -54,6 +55,34 @@ interface PushPayload {
 }
 
 let vapidConfigured = false;
+const DEFAULT_BODY_MAX_LENGTH = 180;
+const DEFAULT_TITLE_MAX_LENGTH = 90;
+const ISO_TIMESTAMP_WITH_MILLISECONDS = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.\d{1,6}(Z|[+-]\d{2}:?\d{2})?/g;
+
+function truncateText(value: string, maxLength: number) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function stripMillisecondsFromIsoTimestamp(value: string) {
+  return value.replace(ISO_TIMESTAMP_WITH_MILLISECONDS, '$1$2');
+}
+
+function getNotificationTimestampIso() {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+function simplifyNotificationText(value: string | null | undefined, maxLength = DEFAULT_BODY_MAX_LENGTH) {
+  const plain = stripHtmlTags(value);
+  if (!plain) {
+    return '';
+  }
+
+  return truncateText(stripMillisecondsFromIsoTimestamp(plain), maxLength);
+}
 
 function getVapidConfig() {
   const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
@@ -87,7 +116,7 @@ function buildProfileDecisionPayload(input: SendProfileDecisionPushInput): PushP
     ? 'Profil değişiklik talebiniz onaylandı'
     : 'Profil değişiklik talebiniz reddedildi';
 
-  const reviewer = input.reviewerName?.trim();
+  const reviewer = simplifyNotificationText(input.reviewerName, 60);
 
   let body = input.status === 'approved'
     ? 'Şef profil değişiklik talebinizi onayladı.'
@@ -97,8 +126,9 @@ function buildProfileDecisionPayload(input: SendProfileDecisionPushInput): PushP
     body = `${reviewer}: ${body}`;
   }
 
-  if (input.status === 'rejected' && input.rejectReason?.trim()) {
-    body = `${body} Sebep: ${input.rejectReason.trim()}`;
+  const rejectReason = simplifyNotificationText(input.rejectReason, 120);
+  if (input.status === 'rejected' && rejectReason) {
+    body = `${body} Sebep: ${rejectReason}`;
   }
 
   return {
@@ -108,33 +138,34 @@ function buildProfileDecisionPayload(input: SendProfileDecisionPushInput): PushP
     data: {
       type: 'profile_change_request_reviewed',
       status: input.status,
-      at: new Date().toISOString(),
+      at: getNotificationTimestampIso(),
     },
   };
 }
 
 function buildAnnouncementPublishedPayload(input: SendAnnouncementPublishedPushInput): PushPayload {
-  const content = input.description.trim() || 'Yeni duyuru';
-  const titleLine = input.title.trim() || 'Duyuru';
+  const content = simplifyNotificationText(input.description) || 'Yeni duyuru yayınlandı.';
+  const titleLine = simplifyNotificationText(input.title, DEFAULT_TITLE_MAX_LENGTH) || 'Duyuru';
 
   return {
     title: 'Yeni Duyuru',
-    body: `${titleLine} - ${content}`,
+    body: `${titleLine}: ${content}`,
     url: `/announcements/${input.announcementId}`,
     data: {
       type: 'announcement_published',
       announcementId: input.announcementId,
-      at: new Date().toISOString(),
+      at: getNotificationTimestampIso(),
     },
   };
 }
 
 function buildRehearsalCreatedPayload(input: SendRehearsalCreatedPushInput): PushPayload {
-  const titleLine = input.rehearsalTitle.trim() || 'Etkinlik';
-  const details = input.rehearsalDetails.trim() || 'Etkinlik detayları güncellendi.';
-  const body = input.collectAttendance
+  const titleLine = simplifyNotificationText(input.rehearsalTitle, DEFAULT_TITLE_MAX_LENGTH) || 'Etkinlik';
+  const details = simplifyNotificationText(input.rehearsalDetails) || 'Etkinlik detayları güncellendi.';
+  const rawBody = input.collectAttendance
     ? `Yoklama alınacaktır. ${details}`
     : details;
+  const body = truncateText(rawBody, 220);
 
   const dateQuery = input.rehearsalDate?.trim() ? `?date=${encodeURIComponent(input.rehearsalDate.trim())}` : '';
 
@@ -146,13 +177,13 @@ function buildRehearsalCreatedPayload(input: SendRehearsalCreatedPushInput): Pus
       type: 'rehearsal_created',
       rehearsalId: input.rehearsalId,
       rehearsalDate: input.rehearsalDate ?? null,
-      at: new Date().toISOString(),
+      at: getNotificationTimestampIso(),
     },
   };
 }
 
 function buildAssignmentCreatedPayload(input: SendAssignmentCreatedPushInput): PushPayload {
-  const deadlineText = input.deadlineText.trim() || 'Belirlenen son tarihe kadar';
+  const deadlineText = simplifyNotificationText(input.deadlineText, 70) || 'Belirlenen son tarihe kadar';
 
   return {
     title: 'Yeni Ödev',
@@ -161,7 +192,7 @@ function buildAssignmentCreatedPayload(input: SendAssignmentCreatedPushInput): P
     data: {
       type: 'assignment_created',
       assignmentId: input.assignmentId,
-      at: new Date().toISOString(),
+      at: getNotificationTimestampIso(),
     },
   };
 }
@@ -170,7 +201,7 @@ function buildAssignmentReviewPayload(input: SendAssignmentReviewPushInput): Pus
   const title = input.status === 'approved'
     ? 'Ödevin onaylandı'
     : 'Ödevin reddedildi';
-  const body = input.reviewerMessage?.trim();
+  const body = simplifyNotificationText(input.reviewerMessage);
 
   const payload: PushPayload = {
     title,
@@ -179,7 +210,7 @@ function buildAssignmentReviewPayload(input: SendAssignmentReviewPushInput): Pus
       type: 'assignment_reviewed',
       status: input.status,
       assignmentId: input.assignmentId,
-      at: new Date().toISOString(),
+      at: getNotificationTimestampIso(),
     },
   };
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback, type PointerEvent as ReactPointerEvent } from 'react';
 import {
   AlertCircle,
   ArrowRight,
@@ -11,6 +11,7 @@ import {
   Eye,
   EyeOff,
   FileText,
+  GripVertical,
   Loader2,
   Music4,
   Pause,
@@ -85,6 +86,31 @@ const DEFAULT_PAGE_ASPECT_RATIO = 1.414;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.0;
 const ZOOM_STEP = 0.1;
+const FLOATING_BAR_EDGE_GAP = 8;
+const FLOATING_BAR_SETTLE_DURATION = 520;
+
+interface FloatingBarPosition {
+  x: number;
+  y: number;
+}
+
+interface FloatingBarSize {
+  width: number;
+  height: number;
+}
+
+interface FloatingBarBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+interface FloatingBarDragState {
+  pointerId: number;
+  offsetX: number;
+  offsetY: number;
+}
 
 interface RepertoireWorkspaceProps {
   song: RepertoireSong;
@@ -120,6 +146,92 @@ const TOOL_CYCLE: Array<{
 ];
 
 const COLOR_OPTIONS: AnnotationColor[] = ['black', 'red', 'white'];
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getFloatingBarSize(node: HTMLDivElement | null): FloatingBarSize {
+  if (!node) {
+    return { width: 320, height: 44 };
+  }
+
+  const rect = node.getBoundingClientRect();
+  return {
+    width: Math.max(1, rect.width),
+    height: Math.max(1, rect.height),
+  };
+}
+
+function getFloatingBarSectionBounds(
+  section: HTMLDivElement | null,
+  size: FloatingBarSize,
+): FloatingBarBounds | null {
+  if (!section) {
+    return null;
+  }
+
+  const gap = FLOATING_BAR_EDGE_GAP;
+  return {
+    minX: gap,
+    maxX: Math.max(gap, section.clientWidth - size.width - gap),
+    minY: gap,
+    maxY: Math.max(gap, section.clientHeight - size.height - gap),
+  };
+}
+
+function getFloatingBarVisibleBounds(
+  section: HTMLDivElement | null,
+  size: FloatingBarSize,
+): FloatingBarBounds | null {
+  if (!section || typeof window === 'undefined') {
+    return null;
+  }
+
+  const rect = section.getBoundingClientRect();
+  const gap = FLOATING_BAR_EDGE_GAP;
+
+  // Full section bounds (section-relative)
+  const sMinX = gap;
+  const sMinY = gap;
+  const sMaxX = Math.max(gap, section.clientWidth - size.width - gap);
+  const sMaxY = Math.max(gap, section.clientHeight - size.height - gap);
+
+  // Viewport-visible region in section-relative coordinates
+  const vMinX = Math.max(0, -rect.left) + gap;
+  const vMinY = Math.max(0, -rect.top) + gap;
+  const vMaxX = Math.min(section.clientWidth, window.innerWidth - rect.left) - size.width - gap;
+  const vMaxY = Math.min(section.clientHeight, window.innerHeight - rect.top) - size.height - gap;
+
+  // Intersection of section bounds and viewport-visible region
+  let minX = Math.max(sMinX, vMinX);
+  let minY = Math.max(sMinY, vMinY);
+  let maxX = Math.min(sMaxX, vMaxX);
+  let maxY = Math.min(sMaxY, vMaxY);
+
+  if (maxX < minX) {
+    minX = Math.max(sMinX, Math.min(sMaxX, vMinX));
+    maxX = minX;
+  }
+  if (maxY < minY) {
+    minY = Math.max(sMinY, Math.min(sMaxY, vMinY));
+    maxY = minY;
+  }
+
+  return { minX, maxX, minY, maxY };
+}
+
+function clampFloatingBarPosition(position: FloatingBarPosition, bounds: FloatingBarBounds): FloatingBarPosition {
+  return {
+    x: clampNumber(position.x, bounds.minX, bounds.maxX),
+    y: clampNumber(position.y, bounds.minY, bounds.maxY),
+  };
+}
+
+function springProgress(progress: number) {
+  const clamped = clampNumber(progress, 0, 1);
+  return 1 - Math.exp(-7 * clamped) * Math.cos(18 * clamped);
+}
 
 function getSheetTabLabel(file: RepertoireFile) {
   return file.partition_label ? `${file.partition_label} · ${file.file_name}` : file.file_name;
@@ -910,6 +1022,13 @@ export function RepertoireWorkspace({
   }), []);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const pdfStageRef = useRef<HTMLDivElement | null>(null);
+  const editFloatingBarRef = useRef<HTMLDivElement | null>(null);
+  const floatingBarPositionRef = useRef<FloatingBarPosition | null>(null);
+  const floatingBarDesiredRef = useRef<FloatingBarPosition | null>(null);
+  const floatingBarDragRef = useRef<FloatingBarDragState | null>(null);
+  const floatingBarAnimationRef = useRef<number | null>(null);
+  const floatingBarScrollRafRef = useRef<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const saveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const savePayloadRef = useRef<Record<string, QueuedSavePayload>>({});
@@ -917,7 +1036,14 @@ export function RepertoireWorkspace({
   const attemptedAutoSyncVersionRef = useRef<string | null>(null);
 
   const [viewerWidth, setViewerWidth] = useState(0);
+  const [floatingBarPosition, setFloatingBarPosition] = useState<FloatingBarPosition | null>(null);
+  const [isFloatingBarDragging, setFloatingBarDragging] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1.0);
+
+  const outerPdfContainerRef = useRef<HTMLDivElement | null>(null);
+  const pinchStartDistRef = useRef<number | null>(null);
+  const pinchStartZoomRef = useRef<number | null>(null);
+
   const [offlineSupported, setOfflineSupported] = useState(false);
   const [offlineEnabled, setOfflineEnabledState] = useState(false);
   const [offlineSyncing, setOfflineSyncing] = useState(false);
@@ -1236,6 +1362,133 @@ export function RepertoireWorkspace({
   const stageAspectRatio = pageAspectRatio ?? DEFAULT_PAGE_ASPECT_RATIO;
   const offlineSyncedAtLabel = formatSyncedAtLabel(offlineLastSyncedAt);
 
+  const setFloatingBarPositionValue = useCallback((position: FloatingBarPosition | null) => {
+    floatingBarPositionRef.current = position;
+    setFloatingBarPosition(position);
+  }, []);
+
+  const cancelFloatingBarAnimation = useCallback(() => {
+    if (floatingBarAnimationRef.current !== null) {
+      cancelAnimationFrame(floatingBarAnimationRef.current);
+      floatingBarAnimationRef.current = null;
+    }
+  }, []);
+
+  const getDefaultFloatingBarPosition = useCallback((): FloatingBarPosition | null => {
+    const size = getFloatingBarSize(editFloatingBarRef.current);
+    const bounds = getFloatingBarSectionBounds(pdfStageRef.current, size);
+
+    if (!bounds) {
+      return null;
+    }
+
+    return {
+      x: bounds.minX,
+      y: bounds.minY,
+    };
+  }, []);
+
+  const reconcileFloatingBarPosition = useCallback(() => {
+    const desired = floatingBarDesiredRef.current;
+
+    if (!desired) {
+      const defaultPos = getDefaultFloatingBarPosition();
+      if (!defaultPos) {
+        setFloatingBarPositionValue(null);
+        return;
+      }
+      floatingBarDesiredRef.current = defaultPos;
+    }
+
+    const pos = floatingBarDesiredRef.current!;
+    const size = getFloatingBarSize(editFloatingBarRef.current);
+    const bounds = getFloatingBarVisibleBounds(pdfStageRef.current, size);
+
+    if (!bounds) {
+      setFloatingBarPositionValue(null);
+      return;
+    }
+
+    const rendered = clampFloatingBarPosition(pos, bounds);
+
+    // Commit the clamped position as the new desired position so the bar
+    // stays at the edge rather than tracking back to its old location.
+    if (rendered.x !== pos.x || rendered.y !== pos.y) {
+      floatingBarDesiredRef.current = rendered;
+    }
+
+    const current = floatingBarPositionRef.current;
+
+    if (!current || rendered.x !== current.x || rendered.y !== current.y) {
+      setFloatingBarPositionValue(rendered);
+    }
+  }, [getDefaultFloatingBarPosition, setFloatingBarPositionValue]);
+
+  const animateFloatingBarTo = useCallback((target: FloatingBarPosition) => {
+    cancelFloatingBarAnimation();
+
+    const start = floatingBarDesiredRef.current ?? target;
+    const startedAt = performance.now();
+
+    const step = (timestamp: number) => {
+      const progress = clampNumber((timestamp - startedAt) / FLOATING_BAR_SETTLE_DURATION, 0, 1);
+      const eased = springProgress(progress);
+
+      floatingBarDesiredRef.current = {
+        x: start.x + (target.x - start.x) * eased,
+        y: start.y + (target.y - start.y) * eased,
+      };
+      reconcileFloatingBarPosition();
+
+      if (progress < 1) {
+        floatingBarAnimationRef.current = requestAnimationFrame(step);
+        return;
+      }
+
+      floatingBarAnimationRef.current = null;
+      floatingBarDesiredRef.current = target;
+      reconcileFloatingBarPosition();
+    };
+
+    floatingBarAnimationRef.current = requestAnimationFrame(step);
+  }, [cancelFloatingBarAnimation, reconcileFloatingBarPosition]);
+
+  const resetFloatingBarToDefault = useCallback(() => {
+    const defaultPosition = getDefaultFloatingBarPosition();
+    if (!defaultPosition) {
+      return;
+    }
+
+    animateFloatingBarTo(defaultPosition);
+  }, [animateFloatingBarTo, getDefaultFloatingBarPosition]);
+
+  const handleFloatingBarPointerDown = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!canEdit || !isEditMode) {
+      return;
+    }
+
+    if (event.pointerType === 'mouse' && event.button !== 0) {
+      return;
+    }
+
+    const barNode = editFloatingBarRef.current;
+    if (!barNode) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    cancelFloatingBarAnimation();
+
+    const rect = barNode.getBoundingClientRect();
+    floatingBarDragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+    setFloatingBarDragging(true);
+  }, [canEdit, cancelFloatingBarAnimation, isEditMode]);
+
   const syncSongForOffline = useCallback(async (reason: 'manual' | 'auto') => {
     if (!offlineSupported) {
       throw new Error('Bu cihaz offline repertuvar desteğini sunmuyor.');
@@ -1419,6 +1672,188 @@ export function RepertoireWorkspace({
 
     return () => observer.disconnect();
   }, [selectedPdf?.id, hasCoverPage, selectedPdfSource]);
+
+  useEffect(() => {
+    if (!isEditMode || !canEdit) {
+      cancelFloatingBarAnimation();
+      floatingBarDragRef.current = null;
+      floatingBarDesiredRef.current = null;
+      setFloatingBarDragging(false);
+      setFloatingBarPositionValue(null);
+      return;
+    }
+
+    const scheduleSync = () => {
+      if (floatingBarScrollRafRef.current !== null) {
+        return;
+      }
+
+      floatingBarScrollRafRef.current = requestAnimationFrame(() => {
+        floatingBarScrollRafRef.current = null;
+        if (!floatingBarDragRef.current && floatingBarAnimationRef.current === null) {
+          reconcileFloatingBarPosition();
+        }
+      });
+    };
+
+    scheduleSync();
+
+    window.addEventListener('scroll', scheduleSync, { passive: true });
+
+    const scrollContainer = containerRef.current;
+    if (scrollContainer) {
+      scrollContainer.addEventListener('scroll', scheduleSync, { passive: true });
+    }
+
+    const observer = new ResizeObserver(scheduleSync);
+    if (pdfStageRef.current) {
+      observer.observe(pdfStageRef.current);
+    }
+    if (editFloatingBarRef.current) {
+      observer.observe(editFloatingBarRef.current);
+    }
+
+    return () => {
+      window.removeEventListener('scroll', scheduleSync);
+      if (scrollContainer) {
+        scrollContainer.removeEventListener('scroll', scheduleSync);
+      }
+      observer.disconnect();
+      if (floatingBarScrollRafRef.current !== null) {
+        cancelAnimationFrame(floatingBarScrollRafRef.current);
+        floatingBarScrollRafRef.current = null;
+      }
+    };
+  }, [
+    activePdfPageNumber,
+    canEdit,
+    cancelFloatingBarAnimation,
+    isEditMode,
+    reconcileFloatingBarPosition,
+    selectedPdf?.id,
+    setFloatingBarPositionValue,
+    stageAspectRatio,
+    viewerWidth,
+    zoomLevel,
+  ]);
+
+  useEffect(() => {
+    if (!isFloatingBarDragging) {
+      return;
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const drag = floatingBarDragRef.current;
+      if (!drag || event.pointerId !== drag.pointerId) {
+        return;
+      }
+
+      event.preventDefault();
+
+      const section = pdfStageRef.current;
+      if (!section) {
+        return;
+      }
+
+      const size = getFloatingBarSize(editFloatingBarRef.current);
+      const sectionBounds = getFloatingBarSectionBounds(section, size);
+      if (!sectionBounds) {
+        return;
+      }
+
+      const sectionRect = section.getBoundingClientRect();
+      const desired = clampFloatingBarPosition(
+        {
+          x: event.clientX - drag.offsetX - sectionRect.left,
+          y: event.clientY - drag.offsetY - sectionRect.top,
+        },
+        sectionBounds,
+      );
+      floatingBarDesiredRef.current = desired;
+      setFloatingBarPositionValue(desired);
+    };
+
+    const finishDrag = (event: PointerEvent) => {
+      const drag = floatingBarDragRef.current;
+      if (!drag || event.pointerId !== drag.pointerId) {
+        return;
+      }
+
+      floatingBarDragRef.current = null;
+      setFloatingBarDragging(false);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', finishDrag);
+    window.addEventListener('pointercancel', finishDrag);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', finishDrag);
+      window.removeEventListener('pointercancel', finishDrag);
+    };
+  }, [isFloatingBarDragging, setFloatingBarPositionValue]);
+
+  // Pinch to zoom effect
+  useEffect(() => {
+    const container = outerPdfContainerRef.current;
+    if (!container) return;
+
+    const getDistance = (touch1: Touch, touch2: Touch) => {
+      const dx = touch1.clientX - touch2.clientX;
+      const dy = touch1.clientY - touch2.clientY;
+      return Math.hypot(dx, dy);
+    };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        if (e.cancelable) {
+          e.preventDefault();
+        }
+        const dist = getDistance(e.touches[0], e.touches[1]);
+        pinchStartDistRef.current = dist;
+        setZoomLevel((prev) => {
+          pinchStartZoomRef.current = prev;
+          return prev;
+        });
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && pinchStartDistRef.current !== null && pinchStartZoomRef.current !== null) {
+        if (e.cancelable) {
+          e.preventDefault();
+        }
+        const dist = getDistance(e.touches[0], e.touches[1]);
+        const scale = dist / pinchStartDistRef.current;
+        let newZoom = pinchStartZoomRef.current * scale;
+        
+        newZoom = Math.min(Math.max(newZoom, MIN_ZOOM), MAX_ZOOM);
+        
+        // Use 2 decimal places for smoother zooming
+        setZoomLevel(Math.round(newZoom * 100) / 100);
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) {
+        pinchStartDistRef.current = null;
+        pinchStartZoomRef.current = null;
+      }
+    };
+
+    container.addEventListener('touchstart', handleTouchStart, { passive: false });
+    container.addEventListener('touchmove', handleTouchMove, { passive: false });
+    container.addEventListener('touchend', handleTouchEnd);
+    container.addEventListener('touchcancel', handleTouchEnd);
+
+    return () => {
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+      container.removeEventListener('touchend', handleTouchEnd);
+      container.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, []);
 
   useEffect(() => {
     reset();
@@ -1758,6 +2193,105 @@ export function RepertoireWorkspace({
   const toolLabel = activeToolInfo?.label ?? '—';
   const zoomedWidth = viewerWidth > 0 ? Math.floor(viewerWidth * zoomLevel) : 0;
 
+  function renderFloatingEditBar() {
+    if (!isEditMode || !canEdit) {
+      return null;
+    }
+
+    return (
+      <div
+        ref={editFloatingBarRef}
+        className={`absolute z-[80] flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-1.5 rounded-[8px] border border-[var(--color-accent)]/25 bg-[var(--color-surface-solid)]/92 px-2 py-1.5 shadow-[0_14px_40px_rgba(0,0,0,0.34)] backdrop-blur-xl ${
+          floatingBarPosition ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+        style={{
+          left: floatingBarPosition ? Math.round(floatingBarPosition.x) : -9999,
+          top: floatingBarPosition ? Math.round(floatingBarPosition.y) : -9999,
+        }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          onPointerDown={handleFloatingBarPointerDown}
+          onDoubleClick={resetFloatingBarToDefault}
+          title="Taşı"
+          aria-label="Düzenleme araç çubuğunu taşı"
+          className={`grid h-7 w-6 touch-none place-items-center rounded-[6px] border border-[var(--color-border)] bg-white/5 text-[var(--color-text-medium)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-high)] ${
+            isFloatingBarDragging ? 'cursor-grabbing' : 'cursor-grab'
+          }`}
+        >
+          <GripVertical size={14} strokeWidth={2.3} />
+        </button>
+
+        <button
+          type="button"
+          onClick={handleLayerCycle}
+          disabled={editableLayerOptions.length === 0}
+          title="Katman"
+          className="inline-flex items-center gap-1.5 rounded-[6px] border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] px-2 py-1 text-[0.58rem] font-bold uppercase tracking-[0.12em] text-[var(--color-accent)] disabled:opacity-40"
+        >
+          <Users size={12} />
+          {getLayerLabel(activeLayerKey)}
+        </button>
+
+        <span className="h-4 w-px bg-[var(--color-border)]" />
+
+        <button
+          type="button"
+          onClick={handleToolCycle}
+          title={toolLabel}
+          className={`flex h-6 w-6 items-center justify-center rounded-[6px] border ${
+            activeTool
+              ? 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+              : 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)]'
+          }`}
+        >
+          <ToolIcon size={12} />
+        </button>
+
+        <button
+          type="button"
+          onClick={handleColorCycle}
+          title={activeColor === 'black' ? 'Siyah' : activeColor === 'red' ? 'Kırmızı' : 'Beyaz'}
+          className="h-6 w-6 rounded-full border-2 border-white/25 transition-transform active:scale-90"
+          style={{ backgroundColor: ANNOTATION_COLOR_SWATCHES[activeColor] }}
+        />
+
+        <span className="h-4 w-px bg-[var(--color-border)]" />
+
+        <button
+          type="button"
+          onClick={handleUndo}
+          disabled={activeLayerHistory.length === 0}
+          title="Geri Al"
+          className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-30"
+        >
+          <Undo2 size={12} />
+        </button>
+
+        <button
+          type="button"
+          onClick={handleRedo}
+          disabled={activeLayerFuture.length === 0}
+          title="İleri Al"
+          className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-30"
+        >
+          <Redo2 size={12} />
+        </button>
+
+        <button
+          type="button"
+          onClick={handleClearPage}
+          disabled={activeItems.length === 0}
+          title="Sayfayı Temizle"
+          className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-red-500/30 bg-red-500/10 text-red-400 disabled:opacity-30"
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
+    );
+  }
+
   function renderWorkspaceControls(extraClassName?: string) {
     return (
       <div className={`flex flex-wrap items-center gap-1 ${extraClassName ?? ''}`}>
@@ -1837,75 +2371,6 @@ export function RepertoireWorkspace({
           </label>
         )}
 
-        {isEditMode && (
-          <div className="flex items-center gap-1.5 rounded-[8px] border border-[var(--color-accent)]/25 bg-white/3 px-2 py-1.5">
-            <button
-              type="button"
-              onClick={handleLayerCycle}
-              disabled={editableLayerOptions.length === 0}
-              title="Katman"
-              className="inline-flex items-center gap-1.5 rounded-[6px] border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] px-2 py-1 text-[0.58rem] font-bold uppercase tracking-[0.12em] text-[var(--color-accent)] disabled:opacity-40"
-            >
-              <Users size={12} />
-              {getLayerLabel(activeLayerKey)}
-            </button>
-
-            <span className="h-4 w-px bg-[var(--color-border)]" />
-
-            <button
-              type="button"
-              onClick={handleToolCycle}
-              title={toolLabel}
-              className={`flex h-6 w-6 items-center justify-center rounded-[6px] border ${
-                activeTool
-                  ? 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                  : 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)]'
-              }`}
-            >
-              <ToolIcon size={12} />
-            </button>
-
-            <button
-              type="button"
-              onClick={handleColorCycle}
-              title={activeColor === 'black' ? 'Siyah' : activeColor === 'red' ? 'Kırmızı' : 'Beyaz'}
-              className="h-6 w-6 rounded-full border-2 border-white/25 transition-transform active:scale-90"
-              style={{ backgroundColor: ANNOTATION_COLOR_SWATCHES[activeColor] }}
-            />
-
-            <span className="h-4 w-px bg-[var(--color-border)]" />
-
-            <button
-              type="button"
-              onClick={handleUndo}
-              disabled={activeLayerHistory.length === 0}
-              title="Geri Al"
-              className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-30"
-            >
-              <Undo2 size={12} />
-            </button>
-
-            <button
-              type="button"
-              onClick={handleRedo}
-              disabled={activeLayerFuture.length === 0}
-              title="İleri Al"
-              className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] disabled:opacity-30"
-            >
-              <Redo2 size={12} />
-            </button>
-
-            <button
-              type="button"
-              onClick={handleClearPage}
-              disabled={activeItems.length === 0}
-              title="Sayfayı Temizle"
-              className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-red-500/30 bg-red-500/10 text-red-400 disabled:opacity-30"
-            >
-              <Trash2 size={12} />
-            </button>
-          </div>
-        )}
       </div>
     );
   }
@@ -1989,7 +2454,7 @@ export function RepertoireWorkspace({
       )}
 
       {/* PDF Çerçevesi — tam genişlik, üstten boşluk ve negatif margin ayarlı */}
-      <div className="relative mt-4 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-pdf-stage-bg)] p-1 sm:p-2 -mx-[18px] sm:mx-0">
+      <div ref={outerPdfContainerRef} className="relative mt-4 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-pdf-stage-bg)] p-1 sm:p-2 -mx-[18px] sm:mx-0">
 
         {/* Araç çubuğu: kontroller + zoom (Üst) */}
         {renderToolbar('mb-3')}
@@ -2041,6 +2506,7 @@ export function RepertoireWorkspace({
                   }}
                 >
                   <div
+                    ref={pdfStageRef}
                     className="repertoire-pdf-stage relative mx-auto overflow-hidden rounded-[8px]"
                     style={{
                       width: zoomedWidth,
@@ -2100,6 +2566,8 @@ export function RepertoireWorkspace({
                       </div>
                     )}
 
+                    {renderFloatingEditBar()}
+
                     {!isEditMode && totalDisplayPages > 0 && (
                       <>
                         <button
@@ -2122,6 +2590,7 @@ export function RepertoireWorkspace({
                 </Document>
               ) : (
                 <div
+                  ref={pdfStageRef}
                   className="repertoire-pdf-stage relative mx-auto overflow-hidden rounded-[8px]"
                   style={{
                     width: zoomedWidth,
@@ -2148,6 +2617,8 @@ export function RepertoireWorkspace({
                       <FileText size={48} className="text-[var(--color-text-medium)]/40" />
                     </div>
                   )}
+
+                  {renderFloatingEditBar()}
 
                   {!isEditMode && totalDisplayPages > 0 && (
                     <>

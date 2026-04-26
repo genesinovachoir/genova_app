@@ -3,7 +3,7 @@
 
 @theme {
   --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
-  --font-serif: var(--font-noto-serif), ui-serif, Georgia, serif;
+  --font-serif: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
 
   --color-background: #000000;
   --color-surface: rgba(25, 25, 25, 0.4);

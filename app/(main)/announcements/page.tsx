@@ -99,21 +99,21 @@ export default function AnnouncementsPage() {
           <div className="space-y-2">
             {announcements.map((ann) => {
               const Icon = ICON_MAP[ann.icon] ?? Megaphone;
-              const targetGroup = ann.target_voice_groups?.[0];
+              const singleTargetGroup = ann.target_voice_groups?.length === 1 ? ann.target_voice_groups[0] : null;
 
               let borderStyles = 'border-[var(--color-border)] bg-white/4';
               let iconStyles = 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]';
 
-              if (targetGroup === 'Soprano') {
+              if (singleTargetGroup === 'Soprano') {
                 borderStyles = 'bg-[rgba(251,113,133,0.08)] border-[rgba(251,113,133,0.35)]';
                 iconStyles = 'bg-[rgba(251,113,133,0.15)] border-[rgba(251,113,133,0.35)] text-[#fb7185]';
-              } else if (targetGroup === 'Alto') {
+              } else if (singleTargetGroup === 'Alto') {
                 borderStyles = 'bg-[rgba(251,191,36,0.08)] border-[rgba(251,191,36,0.35)]';
                 iconStyles = 'bg-[rgba(251,191,36,0.15)] border-[rgba(251,191,36,0.35)] text-[#fbbf24]';
-              } else if (targetGroup === 'Tenor') {
+              } else if (singleTargetGroup === 'Tenor') {
                 borderStyles = 'bg-[rgba(56,189,248,0.08)] border-[rgba(56,189,248,0.35)]';
                 iconStyles = 'bg-[rgba(56,189,248,0.15)] border-[rgba(56,189,248,0.35)] text-[#38bdf8]';
-              } else if (targetGroup === 'Bass') {
+              } else if (singleTargetGroup === 'Bass') {
                 borderStyles = 'bg-[rgba(167,139,250,0.08)] border-[rgba(167,139,250,0.35)]';
                 iconStyles = 'bg-[rgba(167,139,250,0.15)] border-[rgba(167,139,250,0.35)] text-[#a78bfa]';
               }

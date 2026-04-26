@@ -106,6 +106,10 @@ export function AnnotationStage({
       return;
     }
 
+    if (window.TouchEvent && event.evt instanceof TouchEvent && event.evt.touches.length > 1) {
+      return;
+    }
+
     const stage = event.target.getStage();
 
     if (!stage) {
@@ -131,6 +135,10 @@ export function AnnotationStage({
 
   function handlePointerMove(event: KonvaEventObject<MouseEvent | TouchEvent>) {
     if (!isEditMode || !activeTool) {
+      return;
+    }
+
+    if (window.TouchEvent && event.evt instanceof TouchEvent && event.evt.touches.length > 1) {
       return;
     }
 
@@ -398,6 +406,7 @@ export function AnnotationStage({
           height,
           cursor: stageCursor,
           pointerEvents: isEditMode ? 'auto' : 'none',
+          touchAction: isEditMode ? 'none' : 'auto',
         }}
         onMouseDown={handlePointerStart}
         onTouchStart={handlePointerStart}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isRichTextMeaningful, sanitizeRichText } from '@/lib/richText';
+import { isRichTextMeaningful, sanitizeRichText, stripHtmlTags } from '@/lib/richText';
 
 describe('sanitizeRichText', () => {
   it('keeps the allowlist and strips dangerous HTML', () => {
@@ -40,5 +40,13 @@ describe('isRichTextMeaningful', () => {
 
   it('treats image-only content as meaningful', () => {
     expect(isRichTextMeaningful('<img src="https://example.com/test.png" alt="kapak" />')).toBe(true);
+  });
+});
+
+describe('stripHtmlTags', () => {
+  it('returns simplified plain text from rich html', () => {
+    const plainText = stripHtmlTags('<p>Merhaba&nbsp;<strong>dunya</strong><br/>Bugun &amp; yarin</p><p>Not: &#39;deneme&#39;</p>');
+
+    expect(plainText).toBe("Merhaba dunya Bugun & yarin Not: 'deneme'");
   });
 });

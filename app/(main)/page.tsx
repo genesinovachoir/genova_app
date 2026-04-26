@@ -458,21 +458,21 @@ export default function Dashboard() {
             ) : (
               announcements.map((announcement) => {
                 const Icon = ICON_MAP[announcement.icon] ?? Megaphone;
-                const targetGroup = announcement.target_voice_groups?.[0];
+                const singleTargetGroup = announcement.target_voice_groups?.length === 1 ? announcement.target_voice_groups[0] : null;
                 
                 let borderStyles = 'border-[var(--color-border)] bg-white/4';
                 let iconStyles = 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]';
 
-                if (targetGroup === 'Soprano') {
+                if (singleTargetGroup === 'Soprano') {
                   borderStyles = 'bg-[rgba(251,113,133,0.08)] border-[rgba(251,113,133,0.35)]';
                   iconStyles = 'bg-[rgba(251,113,133,0.15)] border-[rgba(251,113,133,0.35)] text-[#fb7185]';
-                } else if (targetGroup === 'Alto') {
+                } else if (singleTargetGroup === 'Alto') {
                   borderStyles = 'bg-[rgba(251,191,36,0.08)] border-[rgba(251,191,36,0.35)]';
                   iconStyles = 'bg-[rgba(251,191,36,0.15)] border-[rgba(251,191,36,0.35)] text-[#fbbf24]';
-                } else if (targetGroup === 'Tenor') {
+                } else if (singleTargetGroup === 'Tenor') {
                   borderStyles = 'bg-[rgba(56,189,248,0.08)] border-[rgba(56,189,248,0.35)]';
                   iconStyles = 'bg-[rgba(56,189,248,0.15)] border-[rgba(56,189,248,0.35)] text-[#38bdf8]';
-                } else if (targetGroup === 'Bass') {
+                } else if (singleTargetGroup === 'Bass') {
                   borderStyles = 'bg-[rgba(167,139,250,0.08)] border-[rgba(167,139,250,0.35)]';
                   iconStyles = 'bg-[rgba(167,139,250,0.15)] border-[rgba(167,139,250,0.35)] text-[#a78bfa]';
                 }
@@ -507,14 +507,16 @@ export default function Dashboard() {
         >
           <div className="flex items-start justify-between gap-4">
             <div>
-              <span className="page-kicker">Devam Çizelgesi</span>
+              <span className="page-kicker">Devamlılık ve Takvim</span>
               <h3 className="mt-4 font-serif text-2xl tracking-[-0.05em]">Genel devamlılık</h3>
             </div>
             <Link
               href="/devamsizlik"
-              className="mt-1 text-xs uppercase tracking-widest text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-accent)]"
+              aria-label="Takvim"
+              title="Takvim"
+              className="mt-1 inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-accent)] active:scale-95"
             >
-              Genişlet
+              <CalendarDays size={15} />
             </Link>
           </div>
 
