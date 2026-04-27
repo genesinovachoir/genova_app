@@ -30,17 +30,28 @@ export function ConfirmDialog({
   const [countdown, setCountdown] = useState(tone === 'danger' ? 5 : 0);
 
   useEffect(() => {
+    let resetTimer: ReturnType<typeof setTimeout> | null = null;
+
     if (!open || tone !== 'danger') {
-      setCountdown(0);
-      return;
+      resetTimer = setTimeout(() => setCountdown(0), 0);
+      return () => {
+        if (resetTimer) {
+          clearTimeout(resetTimer);
+        }
+      };
     }
 
-    setCountdown(5);
+    resetTimer = setTimeout(() => setCountdown(5), 0);
     const timer = setInterval(() => {
       setCountdown((prev) => (prev <= 0 ? 0 : prev - 1));
     }, 1000);
 
-    return () => clearInterval(timer);
+    return () => {
+      if (resetTimer) {
+        clearTimeout(resetTimer);
+      }
+      clearInterval(timer);
+    };
   }, [open, tone]);
 
   const confirmClassName =

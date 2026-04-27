@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, Clock, XCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, Clock, XCircle, Loader2, RotateCcw, Users } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { supabase, type Rehearsal, type Attendance } from '@/lib/supabase';
@@ -14,6 +14,8 @@ import { useToast } from '@/components/ToastProvider';
 const DAY_LABELS = ['PZT', 'SAL', 'ÇAR', 'PER', 'CUM', 'CMT', 'PAZ'];
 
 type DayStatus = 'attended' | 'pending' | 'missed' | 'no-rehearsal' | 'future';
+type AttendanceRecordStatus = 'pending' | 'approved' | 'rejected';
+type ManualAttendanceStatus = 'approved' | 'rejected' | 'clear';
 
 interface RehearsalWithInviteeCount extends Rehearsal {
   inviteeCount: number;
@@ -43,6 +45,45 @@ interface PendingAttendance {
     date: string;
     title: string;
   };
+}
+
+interface RehearsalParticipant {
+  member_id: string;
+  first_name: string;
+  last_name: string;
+  voice_group: string | null;
+  sub_voice_group: string | null;
+  attendance_id: string | null;
+  status: AttendanceRecordStatus | null;
+  checked_in_at: string | null;
+}
+
+async function getAccessToken() {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !sessionData.session?.access_token) {
+    throw new Error('Oturum doğrulanamadı. Lütfen tekrar giriş yapın.');
+  }
+
+  return sessionData.session.access_token;
+}
+
+async function postJsonWithAuth<T>(url: string, payload: Record<string, unknown>) {
+  const accessToken = await getAccessToken();
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `İstek başarısız (${response.status})`);
+  }
+
+  return (await response.json()) as T;
 }
 
 function toLocalDateStr(y: number, m: number, d: number) {
@@ -148,6 +189,78 @@ async function fetchPendingApprovals() {
   })) as PendingAttendance[];
 }
 
+async function fetchRehearsalParticipants(
+  rehearsalId: string,
+  options: { isAdmin: boolean; voiceGroup: string | null },
+) {
+  const { data: inviteeRows, error: inviteeError } = await supabase
+    .from('rehearsal_invitees')
+    .select('member_id')
+    .eq('rehearsal_id', rehearsalId);
+
+  if (inviteeError) {
+    throw inviteeError;
+  }
+
+  const invitedMemberIds = Array.from(new Set((inviteeRows ?? []).map((row) => row.member_id).filter(Boolean)));
+  if (invitedMemberIds.length === 0) {
+    return [] as RehearsalParticipant[];
+  }
+
+  if (!options.isAdmin && !options.voiceGroup) {
+    return [] as RehearsalParticipant[];
+  }
+
+  let membersQuery = supabase
+    .from('choir_members')
+    .select('id, first_name, last_name, voice_group, sub_voice_group')
+    .in('id', invitedMemberIds)
+    .order('voice_group')
+    .order('first_name');
+
+  if (!options.isAdmin) {
+    membersQuery = membersQuery.eq('voice_group', options.voiceGroup);
+  }
+
+  const { data: members, error: membersError } = await membersQuery;
+  if (membersError) {
+    throw membersError;
+  }
+
+  const visibleMemberIds = (members ?? []).map((memberRow) => memberRow.id);
+  if (visibleMemberIds.length === 0) {
+    return [] as RehearsalParticipant[];
+  }
+
+  const { data: attendanceRows, error: attendanceError } = await supabase
+    .from('attendance')
+    .select('id, member_id, status, checked_in_at')
+    .eq('rehearsal_id', rehearsalId)
+    .in('member_id', visibleMemberIds);
+
+  if (attendanceError) {
+    throw attendanceError;
+  }
+
+  const attendanceByMemberId = new Map(
+    (attendanceRows ?? []).map((attendance) => [attendance.member_id, attendance]),
+  );
+
+  return (members ?? []).map((memberRow) => {
+    const attendance = attendanceByMemberId.get(memberRow.id);
+    return {
+      member_id: memberRow.id,
+      first_name: memberRow.first_name,
+      last_name: memberRow.last_name,
+      voice_group: memberRow.voice_group,
+      sub_voice_group: memberRow.sub_voice_group,
+      attendance_id: attendance?.id ?? null,
+      status: (attendance?.status as AttendanceRecordStatus | undefined) ?? null,
+      checked_in_at: attendance?.checked_in_at ?? null,
+    };
+  }) as RehearsalParticipant[];
+}
+
 async function fetchContinuityInfo(memberId: string) {
   const { data, error } = await supabase.rpc('get_member_continuity_info', { p_member_id: memberId });
   if (error) {
@@ -175,6 +288,7 @@ export default function DevamsizlikPage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showEventForm, setShowEventForm] = useState(false);
   const [editRehearsal, setEditRehearsal] = useState<Rehearsal | null>(null);
+  const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
 
   const todayStr = useMemo(() => getTodayString(), []);
   const canApprove = isAdmin() || isSectionLeader();
@@ -255,12 +369,35 @@ export default function DevamsizlikPage() {
       toast.success('Katılım onaylandı.');
     },
     onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['devamsizlik'] });
       await queryClient.invalidateQueries({ queryKey: ['devamsizlik', 'pending', member?.id] });
+    },
+  });
+
+  const manualAttendanceMutation = useMutation({
+    mutationFn: async (input: { rehearsalId: string; memberId: string; status: ManualAttendanceStatus }) => {
+      await postJsonWithAuth<{ ok: true }>('/api/rehearsals/attendance/update', {
+        rehearsal_id: input.rehearsalId,
+        member_id: input.memberId,
+        status: input.status,
+      });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Katılım durumu güncellenemedi.', 'Katılım');
+    },
+    onSuccess: () => {
+      toast.success('Katılım durumu güncellendi.');
+      setSelectedParticipantId(null);
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['devamsizlik'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
 
   const rehearsals = monthDataQuery.data?.rehearsals;
   const myAttendance = monthDataQuery.data?.myAttendance;
+  const myInvitedRehearsalIds = monthDataQuery.data?.myInvitedRehearsalIds;
   const pendingAttendances = pendingQuery.data ?? [];
   const continuity = continuityQuery.data;
 
@@ -289,7 +426,7 @@ export default function DevamsizlikPage() {
         let isVisible = false;
         if (canManageAdmin) isVisible = true;
         else if (canManageSectionLeader && rehearsal.created_by === member?.id) isVisible = true;
-        else if (monthDataQuery.data?.myInvitedRehearsalIds?.has(rehearsal.id)) isVisible = true;
+        else if (myInvitedRehearsalIds?.has(rehearsal.id)) isVisible = true;
         
         if (!isVisible) {
           rehearsal = null;
@@ -308,6 +445,8 @@ export default function DevamsizlikPage() {
           attendanceStatus = 'attended';
         } else if (attendance?.status === 'pending') {
           attendanceStatus = 'pending';
+        } else if (attendance?.status === 'rejected') {
+          attendanceStatus = 'missed';
         } else if (!isFuture && !isToday) {
           attendanceStatus = 'missed';
         } else {
@@ -326,20 +465,33 @@ export default function DevamsizlikPage() {
     }
 
     return days;
-  }, [currentMonth, myAttendance, rehearsals, todayStr]);
+  }, [canManageAdmin, canManageSectionLeader, currentMonth, member?.id, myAttendance, myInvitedRehearsalIds, rehearsals, todayStr]);
 
   const selectedDay = useMemo(
     () => calendarDays.find((day) => day.date === selectedDate) ?? null,
     [calendarDays, selectedDate],
   );
 
+  const selectedRehearsalId = selectedDay?.rehearsal?.id ?? null;
+  const participantsQuery = useQuery({
+    queryKey: ['devamsizlik', 'participants', selectedRehearsalId, canManageAdmin, member?.voice_group],
+    queryFn: () => fetchRehearsalParticipants(selectedRehearsalId!, {
+      isAdmin: canManageAdmin,
+      voiceGroup: member?.voice_group ?? null,
+    }),
+    enabled: Boolean(canApprove && selectedRehearsalId),
+  });
+
   const loading = monthDataQuery.isPending || (canApprove && pendingQuery.isPending);
   const hasQueryError = monthDataQuery.isError || pendingQuery.isError;
   const approvingId = approveMutation.isPending ? approveMutation.variables : null;
+  const participants = participantsQuery.data ?? [];
+  const manualAttendanceVariables = manualAttendanceMutation.variables;
 
   const navigateMonth = (delta: number) => {
     setCurrentMonth((previous) => new Date(previous.getFullYear(), previous.getMonth() + delta, 1));
     setSelectedDate(null);
+    setSelectedParticipantId(null);
   };
 
   function dayBgClass(day: CalendarDay) {
@@ -365,6 +517,32 @@ export default function DevamsizlikPage() {
       default:
         return 'bg-white/4';
     }
+  }
+
+  function participantStatusLabel(status: AttendanceRecordStatus | null) {
+    if (status === 'approved') return 'Katıldı';
+    if (status === 'pending') return 'Onay bekliyor';
+    if (status === 'rejected') return 'Katılmadı';
+    return 'Katılım yok';
+  }
+
+  function participantStatusClass(status: AttendanceRecordStatus | null) {
+    if (status === 'approved') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 [.light_&]:text-emerald-700';
+    if (status === 'pending') return 'border-[#9A8455]/40 bg-[#9A8455]/15 text-[#C0B283] [.light_&]:text-[#4f3b12]';
+    if (status === 'rejected') return 'border-rose-500/30 bg-rose-500/10 text-rose-300 [.light_&]:text-rose-700';
+    return 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)]';
+  }
+
+  function updateParticipantAttendance(memberId: string, status: ManualAttendanceStatus) {
+    if (!selectedRehearsalId) {
+      return;
+    }
+
+    manualAttendanceMutation.mutate({
+      rehearsalId: selectedRehearsalId,
+      memberId,
+      status,
+    });
   }
 
   return (
@@ -431,7 +609,10 @@ export default function DevamsizlikPage() {
                   return (
                     <button
                       key={day.date}
-                      onClick={() => setSelectedDate(isSelected ? null : day.date)}
+                      onClick={() => {
+                        setSelectedDate(isSelected ? null : day.date);
+                        setSelectedParticipantId(null);
+                      }}
                       className={`aspect-square rounded-lg transition-all active:scale-90 ${dayBgClass(day)} ${isSelected ? 'ring-2 ring-white/50 ring-offset-1 ring-offset-black' : ''}`}
                     >
                       <div className="flex h-full flex-col items-center justify-center gap-0.5">
@@ -524,6 +705,103 @@ export default function DevamsizlikPage() {
                           </span>
                         </p>
                       ) : null}
+                    </div>
+                  ) : null}
+
+                  {selectedDay.rehearsal && canApprove ? (
+                    <div className="border-t border-[var(--color-border)] pt-4">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <span className="page-kicker">Katılımcılar</span>
+                        <span className="inline-flex items-center gap-1.5 text-[0.65rem] font-bold uppercase tracking-[0.12em] text-[var(--color-text-medium)]">
+                          <Users size={13} />
+                          {participantsQuery.isPending ? '—' : participants.length}
+                        </span>
+                      </div>
+
+                      {participantsQuery.isPending ? (
+                        <div className="flex justify-center py-5">
+                          <Loader2 className="animate-spin text-[var(--color-accent)]" size={18} />
+                        </div>
+                      ) : participantsQuery.isError ? (
+                        <div className="rounded-[8px] border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                          Katılımcılar yüklenemedi.
+                        </div>
+                      ) : participants.length === 0 ? (
+                        <div className="rounded-[8px] border border-[var(--color-border)] bg-white/4 px-3 py-3 text-sm text-[var(--color-text-medium)]">
+                          Katılımcı bulunamadı.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {participants.map((participant) => {
+                            const isExpanded = selectedParticipantId === participant.member_id;
+                            const isUpdatingParticipant = manualAttendanceMutation.isPending && manualAttendanceVariables?.memberId === participant.member_id;
+                            const updatingStatus = isUpdatingParticipant ? manualAttendanceVariables?.status : null;
+
+                            return (
+                              <div key={participant.member_id} className="rounded-[8px] border border-[var(--color-border)] bg-white/4">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedParticipantId(isExpanded ? null : participant.member_id)}
+                                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-white/5"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-medium">
+                                      {participant.first_name} {participant.last_name}
+                                    </p>
+                                    <p className="mt-0.5 text-[0.65rem] uppercase tracking-[0.12em] text-[var(--color-text-medium)]">
+                                      {participant.sub_voice_group ?? participant.voice_group ?? '—'}
+                                    </p>
+                                  </div>
+                                  <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[0.58rem] font-bold uppercase tracking-[0.1em] ${participantStatusClass(participant.status)}`}>
+                                    {participantStatusLabel(participant.status)}
+                                  </span>
+                                </button>
+
+                                <AnimatePresence initial={false}>
+                                  {isExpanded ? (
+                                    <motion.div
+                                      initial={{ height: 0, opacity: 0 }}
+                                      animate={{ height: 'auto', opacity: 1 }}
+                                      exit={{ height: 0, opacity: 0 }}
+                                      className="overflow-hidden"
+                                    >
+                                      <div className="grid grid-cols-3 gap-2 border-t border-[var(--color-border)] p-3">
+                                        <button
+                                          type="button"
+                                          onClick={() => updateParticipantAttendance(participant.member_id, 'approved')}
+                                          disabled={manualAttendanceMutation.isPending || participant.status === 'approved'}
+                                          className="flex items-center justify-center gap-1.5 rounded-[6px] border border-emerald-500/30 bg-emerald-500/10 px-2 py-2 text-[0.62rem] font-bold uppercase tracking-[0.1em] text-emerald-300 transition-all active:scale-95 disabled:opacity-45 [.light_&]:text-emerald-700"
+                                        >
+                                          {updatingStatus === 'approved' ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                                          Katıldı
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => updateParticipantAttendance(participant.member_id, 'rejected')}
+                                          disabled={manualAttendanceMutation.isPending || participant.status === 'rejected'}
+                                          className="flex items-center justify-center gap-1.5 rounded-[6px] border border-rose-500/30 bg-rose-500/10 px-2 py-2 text-[0.62rem] font-bold uppercase tracking-[0.1em] text-rose-300 transition-all active:scale-95 disabled:opacity-45 [.light_&]:text-rose-700"
+                                        >
+                                          {updatingStatus === 'rejected' ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />}
+                                          Katılmadı
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => updateParticipantAttendance(participant.member_id, 'clear')}
+                                          disabled={manualAttendanceMutation.isPending || !participant.status}
+                                          className="flex items-center justify-center gap-1.5 rounded-[6px] border border-[var(--color-border)] bg-white/4 px-2 py-2 text-[0.62rem] font-bold uppercase tracking-[0.1em] text-[var(--color-text-medium)] transition-all hover:text-[var(--color-text-high)] active:scale-95 disabled:opacity-45"
+                                        >
+                                          {updatingStatus === 'clear' ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                                          Kaldır
+                                        </button>
+                                      </div>
+                                    </motion.div>
+                                  ) : null}
+                                </AnimatePresence>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   ) : null}
                 </motion.div>

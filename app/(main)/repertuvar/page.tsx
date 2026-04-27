@@ -3,17 +3,16 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useRouter } from 'next/navigation';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   FileText, Search, Plus,
-  Users, Eye, EyeOff, Loader2, AlertCircle, Pencil, Trash2
+  Eye, EyeOff, Loader2, AlertCircle, Pencil, Trash2
 } from 'lucide-react';
 import {
   supabase,
   RepertoireFile,
   RepertoireSong,
-  RepertoireSongRow,
   RepertoireTag,
-  normalizeRepertoireSongs,
 } from '@/lib/supabase';
 import { useAuth } from '@/components/AuthProvider';
 import { AddSongModal } from '@/components/AddSongModal';
@@ -21,6 +20,18 @@ import { ProtectedDriveImage } from '@/components/ProtectedDriveImage';
 import { SongAssignmentModal } from '@/components/SongAssignmentModal';
 import { SongEditModal } from '@/components/SongEditModal';
 import { createSlugLookup, getRepertoirePath } from '@/lib/internalPageLinks';
+import {
+  getRepertoireCatalogCacheScope,
+  getRepertoireRoleScope,
+  readRepertoireCatalogCache,
+  type RepertoireCatalogData,
+  writeRepertoireCatalogCache,
+} from '@/lib/repertuvar/cache';
+import {
+  getRepertoireCatalogQueryKey,
+  loadRepertoireCatalog,
+  REPERTOIRE_CATALOG_QUERY_ROOT_KEY,
+} from '@/lib/repertuvar/queries';
 
 const ACCENT_GRADIENTS = [
   'from-[#D4C8A0]/20 via-[#E0D8B8]/5 to-transparent',
@@ -50,22 +61,27 @@ function isPdfRepertoireFile(file: RepertoireFile | null | undefined): boolean {
 export default function Repertuvar() {
   const router = useRouter();
   const { isAdmin, isSectionLeader, member, isLoading: authLoading } = useAuth();
+  const queryClient = useQueryClient();
   const isChef = isAdmin();
   const isLeader = isSectionLeader();
   const isChoristUser = !isChef && !isLeader;
+  const roleScope = getRepertoireRoleScope(isChef, isLeader);
+  const catalogCacheScope = useMemo(
+    () => getRepertoireCatalogCacheScope(member?.id ?? null, roleScope),
+    [member?.id, roleScope],
+  );
+  const catalogQueryKey = useMemo(
+    () => getRepertoireCatalogQueryKey(member?.id ?? null, roleScope),
+    [member?.id, roleScope],
+  );
 
-  const [songs, setSongs] = useState<RepertoireSong[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [activeTag, setActiveTag] = useState('Tümü');
-  const [tags, setTags] = useState<RepertoireTag[]>([]);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [assignModal, setAssignModal] = useState<{ songId: string; songTitle: string } | null>(null);
   const [editSong, setEditSong] = useState<RepertoireSong | null>(null);
-  const [userParts, setUserParts] = useState<Record<string, string>>({});
-  const [assignedSongIds, setAssignedSongIds] = useState<Set<string>>(new Set());
   const [pendingDeleteTag, setPendingDeleteTag] = useState<RepertoireTag | null>(null);
   const [deletingTagId, setDeletingTagId] = useState<string | null>(null);
   const [isTagEditMode, setIsTagEditMode] = useState(false);
@@ -73,6 +89,40 @@ export default function Repertuvar() {
   const [editingTagName, setEditingTagName] = useState('');
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ignoreNextClickRef = useRef<string | null>(null);
+
+  const catalogQuery = useQuery({
+    queryKey: catalogQueryKey,
+    queryFn: () => loadRepertoireCatalog({ memberId: member?.id ?? null, roleScope }),
+    enabled: !authLoading,
+    initialData: () => readRepertoireCatalogCache(catalogCacheScope) ?? undefined,
+    staleTime: 30_000,
+    gcTime: 24 * 60 * 60_000,
+  });
+
+  const songs = useMemo(() => catalogQuery.data?.songs ?? [], [catalogQuery.data?.songs]);
+  const tags = useMemo(() => catalogQuery.data?.tags ?? [], [catalogQuery.data?.tags]);
+  const userParts = useMemo(() => catalogQuery.data?.userParts ?? {}, [catalogQuery.data?.userParts]);
+  const assignedSongIds = useMemo(
+    () => new Set(catalogQuery.data?.assignedSongIds ?? []),
+    [catalogQuery.data?.assignedSongIds],
+  );
+  const loading = !catalogQuery.data && (authLoading || catalogQuery.isLoading);
+  const queryError = catalogQuery.error instanceof Error ? catalogQuery.error.message : null;
+  const error = actionError ?? queryError;
+  const isRefreshing = Boolean(catalogQuery.data && catalogQuery.isFetching);
+
+  const updateCatalogData = useCallback((updater: (current: RepertoireCatalogData) => RepertoireCatalogData) => {
+    queryClient.setQueryData<RepertoireCatalogData>(catalogQueryKey, (current) => {
+      const base = current ?? readRepertoireCatalogCache(catalogCacheScope);
+      if (!base) {
+        return current;
+      }
+
+      const next = updater(base);
+      writeRepertoireCatalogCache(catalogCacheScope, next);
+      return next;
+    });
+  }, [catalogCacheScope, catalogQueryKey, queryClient]);
 
   const visibleTags = useMemo(() => {
     // Şefler ve Bölüm Şefleri tüm etiketleri her zaman görebilir.
@@ -95,80 +145,6 @@ export default function Repertuvar() {
     [isChef, visibleTags],
   );
 
-  const fetchTags = useCallback(async () => {
-    try {
-      const { data } = await supabase
-        .from('repertoire_tags')
-        .select('id, name, color, created_by, created_at')
-        .order('created_at');
-      setTags((data ?? []) as RepertoireTag[]);
-    } catch {
-      setTags([]);
-    }
-  }, []);
-
-  const fetchSongs = useCallback(async () => {
-    setLoading(true); setError(null);
-    try {
-      const { data, error: fetchErr } = await supabase
-        .from('repertoire')
-        .select(`
-          id, title, composer, drive_folder_id, is_visible, created_at,
-          repertoire_files (
-            id, song_id, file_name, file_type, partition_label, drive_file_id,
-            drive_web_view_link, drive_download_link, mime_type, file_size_bytes,
-            created_at, updated_at, uploaded_by
-          ),
-          repertoire_song_tags (
-            tag_id,
-            repertoire_tags ( id, name, color, created_by, created_at )
-          )
-        `)
-        .order('title');
-
-      if (fetchErr) throw new Error(fetchErr.message);
-      const normalizedSongs = normalizeRepertoireSongs(data as RepertoireSongRow[] | null);
-      setSongs(normalizedSongs.filter((song) => Boolean(song.drive_folder_id)));
-
-      if (member?.id) {
-        const { data: assignmentsData, error: assignmentsError } = await supabase
-          .from('song_assignments')
-          .select('song_id, part_name')
-          .eq('member_id', member.id);
-
-        if (assignmentsError) {
-          throw new Error(assignmentsError.message);
-        }
-
-        const partsMap = (assignmentsData ?? []).reduce((acc, row) => {
-          if (row.part_name) {
-            acc[row.song_id] = row.part_name;
-          }
-          return acc;
-        }, {} as Record<string, string>);
-
-        const assignedIds = new Set((assignmentsData ?? []).map((row) => row.song_id));
-        setUserParts(partsMap);
-        setAssignedSongIds(assignedIds);
-      } else {
-        setUserParts({});
-        setAssignedSongIds(new Set());
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Veri yüklenemedi');
-    } finally {
-      setLoading(false);
-    }
-  }, [member?.id]);
-
-  useEffect(() => {
-    if (authLoading) {
-      return;
-    }
-    fetchSongs();
-    fetchTags();
-  }, [authLoading, fetchSongs, fetchTags]);
-
   useEffect(() => {
     if (!tagOptions.includes(activeTag)) {
       setActiveTag('Tümü');
@@ -176,8 +152,9 @@ export default function Repertuvar() {
   }, [activeTag, tagOptions]);
 
   const refreshSongsAndTags = useCallback(async () => {
-    await Promise.all([fetchSongs(), fetchTags()]);
-  }, [fetchSongs, fetchTags]);
+    setActionError(null);
+    await queryClient.invalidateQueries({ queryKey: REPERTOIRE_CATALOG_QUERY_ROOT_KEY });
+  }, [queryClient]);
 
   const clearTagLongPress = useCallback(() => {
     if (longPressTimerRef.current) {
@@ -213,7 +190,7 @@ export default function Repertuvar() {
 
     const tagToDelete = pendingDeleteTag;
     setDeletingTagId(tagToDelete.id);
-    setError(null);
+    setActionError(null);
 
     try {
       const { error: deleteError } = await supabase
@@ -233,7 +210,7 @@ export default function Repertuvar() {
       ignoreNextClickRef.current = null;
       await refreshSongsAndTags();
     } catch (deleteErr: unknown) {
-      setError(deleteErr instanceof Error ? deleteErr.message : 'Etiket silinemedi.');
+      setActionError(deleteErr instanceof Error ? deleteErr.message : 'Etiket silinemedi.');
     } finally {
       setDeletingTagId(null);
     }
@@ -246,7 +223,7 @@ export default function Repertuvar() {
       return;
     }
 
-    setError(null);
+    setActionError(null);
     try {
       const { error: updateErr } = await supabase
         .from('repertoire_tags')
@@ -255,17 +232,38 @@ export default function Repertuvar() {
 
       if (updateErr) throw updateErr;
 
-      await fetchTags();
+      const previousName = tags.find((tag) => tag.id === tagId)?.name;
+      if (previousName && activeTag === previousName) {
+        setActiveTag(newName);
+      }
+      await refreshSongsAndTags();
       setEditingTagId(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Etiket güncellenemedi');
+      setActionError(err instanceof Error ? err.message : 'Etiket güncellenemedi');
     }
   };
 
   const toggleVisibility = async (song: RepertoireSong) => {
     if (!isChef) return;
-    await supabase.from('repertoire').update({ is_visible: !song.is_visible }).eq('id', song.id);
-    setSongs(prev => prev.map(s => s.id === song.id ? { ...s, is_visible: !s.is_visible } : s));
+    setActionError(null);
+    const nextVisible = !song.is_visible;
+    const { error: updateError } = await supabase
+      .from('repertoire')
+      .update({ is_visible: nextVisible })
+      .eq('id', song.id);
+
+    if (updateError) {
+      setActionError(updateError.message);
+      return;
+    }
+
+    updateCatalogData((current) => ({
+      ...current,
+      songs: current.songs.map((item) => (
+        item.id === song.id ? { ...item, is_visible: nextVisible } : item
+      )),
+    }));
+    void refreshSongsAndTags();
   };
 
   const filtered = songs
@@ -467,6 +465,13 @@ export default function Repertuvar() {
             );
           })}
         </div>
+
+        {isRefreshing && !loading && (
+          <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-white/5 px-3 py-1.5 text-[0.62rem] font-bold uppercase tracking-[0.16em] text-[var(--color-text-medium)]">
+            <Loader2 size={12} className="animate-spin text-[var(--color-accent)]" />
+            Repertuvar güncelleniyor
+          </div>
+        )}
       </motion.section>
 
       {/* Content */}
@@ -618,7 +623,7 @@ export default function Repertuvar() {
               </h3>
               
               <p className="mb-6 text-center text-[0.75rem] leading-relaxed text-[var(--color-text-medium)]">
-                <span className="font-bold text-[var(--color-text-high)]">"{pendingDeleteTag.name}"</span> etiketi silinecek. Bu işlem geri alınamaz ve şarkıları etkilemez.
+                <span className="font-bold text-[var(--color-text-high)]">&quot;{pendingDeleteTag.name}&quot;</span> etiketi silinecek. Bu işlem geri alınamaz ve şarkıları etkilemez.
               </p>
               
               <div className="flex flex-col gap-2">
@@ -647,7 +652,7 @@ export default function Repertuvar() {
       </AnimatePresence>
 
       {/* Modals */}
-      <AddSongModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onSuccess={fetchSongs} />
+      <AddSongModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onSuccess={refreshSongsAndTags} />
       <SongEditModal
         isOpen={Boolean(editSong)}
         song={editSong}
@@ -661,6 +666,7 @@ export default function Repertuvar() {
           onClose={() => setAssignModal(null)}
           songId={assignModal.songId}
           songTitle={assignModal.songTitle}
+          onSaved={refreshSongsAndTags}
         />
       )}
     </main>

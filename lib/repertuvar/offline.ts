@@ -33,6 +33,22 @@ export interface OfflineSyncResult {
   syncedAt: number;
 }
 
+export interface RuntimeDriveFileInput {
+  driveFileId: string;
+  url: string;
+  version: string;
+  fileName?: string | null;
+  mimeType?: string | null;
+}
+
+export interface RuntimeDriveFileCacheStatus {
+  cached: boolean;
+  stale: boolean;
+  version: string | null;
+  cachedAt: number | null;
+  sizeBytes: number | null;
+}
+
 interface ServiceWorkerSuccessResponse<T> {
   ok: true;
   payload: T;
@@ -58,6 +74,10 @@ export function isRepertoireOfflineSupported() {
     'localStorage' in window &&
     typeof navigator.serviceWorker.register === 'function'
   );
+}
+
+export function isRepertoireRuntimeCacheSupported() {
+  return isRepertoireOfflineSupported();
 }
 
 function readSettingsStore(): OfflineSongSettingsStore {
@@ -151,12 +171,29 @@ export function buildOfflineSongVersion(files: Array<Pick<RepertoireFile, 'drive
     .join('||');
 }
 
-export function getOfflineDriveFileUrl(file: Pick<RepertoireFile, 'drive_file_id'> | null | undefined) {
+export function buildRuntimeDriveFileVersion(
+  file: (Pick<RepertoireFile, 'drive_file_id'> & Partial<Pick<RepertoireFile, 'updated_at' | 'file_size_bytes' | 'file_name' | 'mime_type'>>) | null | undefined,
+) {
+  if (!file?.drive_file_id) {
+    return '';
+  }
+
+  return [
+    file.drive_file_id,
+    file.updated_at ?? '',
+    file.file_size_bytes ?? '',
+    file.file_name ?? '',
+    file.mime_type ?? '',
+  ].join('|');
+}
+
+export function getOfflineDriveFileUrl(file: Pick<RepertoireFile, 'drive_file_id'> | null | undefined, version?: string | null) {
   if (!file?.drive_file_id) {
     return null;
   }
 
-  return `${OFFLINE_DRIVE_ROUTE_PREFIX}${encodeURIComponent(file.drive_file_id)}`;
+  const versionSuffix = version ? `?v=${encodeURIComponent(version)}` : '';
+  return `${OFFLINE_DRIVE_ROUTE_PREFIX}${encodeURIComponent(file.drive_file_id)}${versionSuffix}`;
 }
 
 async function getMessagingServiceWorker(): Promise<ServiceWorker> {
@@ -219,5 +256,32 @@ export async function removeOfflineSongFiles(songId: string) {
     payload: {
       songId,
     },
+  });
+}
+
+export async function getRuntimeDriveFileCacheStatus(driveFileId: string, version: string) {
+  return sendMessageToServiceWorker<RuntimeDriveFileCacheStatus>({
+    type: 'RUNTIME_GET_DRIVE_FILE_STATUS',
+    payload: {
+      driveFileId,
+      version,
+    },
+  });
+}
+
+export async function cacheRuntimeDriveFile(file: RuntimeDriveFileInput) {
+  return sendMessageToServiceWorker<RuntimeDriveFileCacheStatus>({
+    type: 'RUNTIME_CACHE_DRIVE_FILE',
+    payload: file,
+  });
+}
+
+export async function clearRuntimeDriveFileCache() {
+  if (!isRepertoireRuntimeCacheSupported()) {
+    return { removedCount: 0 };
+  }
+
+  return sendMessageToServiceWorker<{ removedCount: number }>({
+    type: 'RUNTIME_CLEAR_DRIVE_FILE_CACHE',
   });
 }

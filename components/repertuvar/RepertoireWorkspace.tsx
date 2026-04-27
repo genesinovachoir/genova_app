@@ -39,6 +39,7 @@ import {
 } from '@/lib/repertuvar/annotations';
 import {
   buildOfflineSongVersion,
+  buildRuntimeDriveFileVersion,
   clearOfflineSongSyncState,
   getOfflineDriveFileUrl,
   getOfflineSongSettings,
@@ -251,12 +252,12 @@ function isPdfRepertoireFile(file: RepertoireFile | null | undefined): boolean {
 }
 
 function getInlineFileSource(
-  file: Pick<RepertoireFile, 'drive_download_link' | 'drive_file_id'> | null | undefined,
+  file: (Pick<RepertoireFile, 'drive_download_link' | 'drive_file_id'> & Partial<Pick<RepertoireFile, 'updated_at' | 'file_size_bytes' | 'file_name' | 'mime_type'>>) | null | undefined,
   protectedUrl: string | null,
   allowOfflineFallback: boolean,
 ): string | null {
   if (allowOfflineFallback) {
-    const offlineUrl = getOfflineDriveFileUrl(file);
+    const offlineUrl = getOfflineDriveFileUrl(file, buildRuntimeDriveFileVersion(file));
     if (offlineUrl) {
       return offlineUrl;
     }
@@ -731,7 +732,7 @@ function AudioPanel({
           }
           // For others: use offline route only when offline fallback is explicitly active.
           if (allowOfflineFallback) {
-            const offlineUrl = getOfflineDriveFileUrl(file);
+            const offlineUrl = getOfflineDriveFileUrl(file, buildRuntimeDriveFileVersion(file));
             if (offlineUrl) {
               return { id: file.id, label: getAudioDisplayName(file), source: offlineUrl };
             }
@@ -1043,6 +1044,7 @@ export function RepertoireWorkspace({
   const outerPdfContainerRef = useRef<HTMLDivElement | null>(null);
   const pinchStartDistRef = useRef<number | null>(null);
   const pinchStartZoomRef = useRef<number | null>(null);
+  const pinchLastCenterRef = useRef<{ x: number; y: number } | null>(null);
 
   const [offlineSupported, setOfflineSupported] = useState(false);
   const [offlineEnabled, setOfflineEnabledState] = useState(false);
@@ -1157,9 +1159,9 @@ export function RepertoireWorkspace({
   const selectedAudio =
     audioFiles.find((file) => file.id === selectedAudioId) ??
     defaultAudioFile;
-  const { url: protectedSelectedPdfSource } = useProtectedDriveFileUrl(selectedPdf);
-  const { url: protectedSelectedCoverSource } = useProtectedDriveFileUrl(selectedCover);
-  const { url: protectedSelectedAudioSource } = useProtectedDriveFileUrl(selectedAudio);
+  const { url: protectedSelectedPdfSource, isStaleLocal: selectedPdfIsStaleLocal } = useProtectedDriveFileUrl(selectedPdf);
+  const { url: protectedSelectedCoverSource, isStaleLocal: selectedCoverIsStaleLocal } = useProtectedDriveFileUrl(selectedCover);
+  const { url: protectedSelectedAudioSource, isStaleLocal: selectedAudioIsStaleLocal } = useProtectedDriveFileUrl(selectedAudio);
   const hasFreshOfflineSnapshot = offlineEnabled && offlineSyncedVersion === offlineSongVersion;
   const allowOfflineFallback = offlineEnabled && (!isOnline || hasFreshOfflineSnapshot);
   const selectedPdfSource = getInlineFileSource(selectedPdf, protectedSelectedPdfSource, allowOfflineFallback);
@@ -1361,6 +1363,7 @@ export function RepertoireWorkspace({
     Boolean(activePdfPageNumber);
   const stageAspectRatio = pageAspectRatio ?? DEFAULT_PAGE_ASPECT_RATIO;
   const offlineSyncedAtLabel = formatSyncedAtLabel(offlineLastSyncedAt);
+  const isShowingStaleLocalFile = selectedPdfIsStaleLocal || selectedCoverIsStaleLocal || selectedAudioIsStaleLocal;
 
   const setFloatingBarPositionValue = useCallback((position: FloatingBarPosition | null) => {
     floatingBarPositionRef.current = position;
@@ -1794,7 +1797,7 @@ export function RepertoireWorkspace({
     };
   }, [isFloatingBarDragging, setFloatingBarPositionValue]);
 
-  // Pinch to zoom effect
+  // Pinch to zoom + two-finger pan effect
   useEffect(() => {
     const container = outerPdfContainerRef.current;
     if (!container) return;
@@ -1805,6 +1808,11 @@ export function RepertoireWorkspace({
       return Math.hypot(dx, dy);
     };
 
+    const getCenter = (touch1: Touch, touch2: Touch) => ({
+      x: (touch1.clientX + touch2.clientX) / 2,
+      y: (touch1.clientY + touch2.clientY) / 2,
+    });
+
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 2) {
         if (e.cancelable) {
@@ -1812,6 +1820,7 @@ export function RepertoireWorkspace({
         }
         const dist = getDistance(e.touches[0], e.touches[1]);
         pinchStartDistRef.current = dist;
+        pinchLastCenterRef.current = getCenter(e.touches[0], e.touches[1]);
         setZoomLevel((prev) => {
           pinchStartZoomRef.current = prev;
           return prev;
@@ -1824,6 +1833,8 @@ export function RepertoireWorkspace({
         if (e.cancelable) {
           e.preventDefault();
         }
+
+        // --- Zoom ---
         const dist = getDistance(e.touches[0], e.touches[1]);
         const scale = dist / pinchStartDistRef.current;
         let newZoom = pinchStartZoomRef.current * scale;
@@ -1832,6 +1843,32 @@ export function RepertoireWorkspace({
         
         // Use 2 decimal places for smoother zooming
         setZoomLevel(Math.round(newZoom * 100) / 100);
+
+        // --- Two-finger pan ---
+        const center = getCenter(e.touches[0], e.touches[1]);
+        const lastCenter = pinchLastCenterRef.current;
+
+        if (lastCenter) {
+          const dx = lastCenter.x - center.x;
+          const dy = lastCenter.y - center.y;
+
+          // Apply pan to the scrollable inner container
+          const scrollContainer = containerRef.current;
+          if (scrollContainer) {
+            scrollContainer.scrollLeft += dx;
+          }
+
+          // Also pan the outer page scroll (vertical)
+          if (Math.abs(dy) > 0) {
+            container.scrollTop += dy;
+            // If the outer container itself doesn't scroll, try window
+            if (container.scrollHeight <= container.clientHeight) {
+              window.scrollBy(0, dy);
+            }
+          }
+        }
+
+        pinchLastCenterRef.current = center;
       }
     };
 
@@ -1839,6 +1876,7 @@ export function RepertoireWorkspace({
       if (e.touches.length < 2) {
         pinchStartDistRef.current = null;
         pinchStartZoomRef.current = null;
+        pinchLastCenterRef.current = null;
       }
     };
 
@@ -2213,9 +2251,9 @@ export function RepertoireWorkspace({
         <button
           type="button"
           onPointerDown={handleFloatingBarPointerDown}
-          onDoubleClick={resetFloatingBarToDefault}
-          title="Taşı"
-          aria-label="Düzenleme araç çubuğunu taşı"
+          onDoubleClick={handleEditToggle}
+          title="Taşı · Çift tıkla: Kapat"
+          aria-label="Düzenleme araç çubuğunu taşı veya çift tıklayarak kapat"
           className={`grid h-7 w-6 touch-none place-items-center rounded-[6px] border border-[var(--color-border)] bg-white/5 text-[var(--color-text-medium)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-high)] ${
             isFloatingBarDragging ? 'cursor-grabbing' : 'cursor-grab'
           }`}
@@ -2450,6 +2488,13 @@ export function RepertoireWorkspace({
         <div className="flex items-center gap-2 rounded-[10px] border border-orange-500/30 bg-orange-500/10 px-4 py-3">
           <AlertCircle size={14} className="text-orange-300" />
           <p className="text-sm text-orange-200">{annotationError}</p>
+        </div>
+      )}
+
+      {isShowingStaleLocalFile && (
+        <div className="flex items-center gap-2 rounded-[10px] border border-orange-500/30 bg-orange-500/10 px-4 py-3">
+          <AlertCircle size={14} className="text-orange-300" />
+          <p className="text-sm text-orange-200">Güncel dosya alınamadı; son local kopya gösteriliyor.</p>
         </div>
       )}
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Arrow, Label, Layer, Line, Rect, Stage, Tag, Text } from 'react-konva';
 import Konva from 'konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
@@ -77,15 +77,79 @@ export function AnnotationStage({
 }: AnnotationStageProps) {
   const stageRef = useRef<Konva.Stage | null>(null);
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const twoFingerRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [penDraft, setPenDraft] = useState<PenDraft | null>(null);
   const [shapeDraft, setShapeDraft] = useState<ShapeDraft | null>(null);
   const [draftTextEditor, setDraftTextEditor] = useState<DraftTextEditor | null>(null);
+  const [isTwoFingerGesture, setIsTwoFingerGesture] = useState(false);
 
   useEffect(() => {
     if (draftTextEditor && textAreaRef.current) {
       textAreaRef.current.focus();
     }
   }, [draftTextEditor]);
+
+  // Cancel any in-progress drawing drafts (used when switching to 2-finger gesture)
+  const cancelActiveDrafts = useCallback(() => {
+    setPenDraft(null);
+    setShapeDraft(null);
+  }, []);
+
+  // Eraser drag state: track IDs of items erased during a single drag gesture
+  // so we can commit them all at once (one undo entry) and show visual feedback.
+  const isErasingRef = useRef(false);
+  const pendingEraseIdsRef = useRef<Set<string>>(new Set());
+  const [erasedDuringDragIds, setErasedDuringDragIds] = useState<Set<string>>(new Set());
+
+  // Two-finger gesture detection: temporarily disable pointer events on the
+  // annotation layer so touch events fall through to the parent container's
+  // pinch-to-zoom / two-finger-pan handler.
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper || !isEditMode) {
+      return;
+    }
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length >= 2) {
+        // Clear any pending restore timer
+        if (twoFingerRestoreTimerRef.current !== null) {
+          clearTimeout(twoFingerRestoreTimerRef.current);
+          twoFingerRestoreTimerRef.current = null;
+        }
+
+        cancelActiveDrafts();
+        setIsTwoFingerGesture(true);
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) {
+        // Small delay before re-enabling pointer events to prevent the
+        // remaining single finger from accidentally starting a stroke.
+        twoFingerRestoreTimerRef.current = setTimeout(() => {
+          twoFingerRestoreTimerRef.current = null;
+          setIsTwoFingerGesture(false);
+        }, 80);
+      }
+    };
+
+    wrapper.addEventListener('touchstart', handleTouchStart, { passive: true });
+    wrapper.addEventListener('touchend', handleTouchEnd, { passive: true });
+    wrapper.addEventListener('touchcancel', handleTouchEnd, { passive: true });
+
+    return () => {
+      wrapper.removeEventListener('touchstart', handleTouchStart);
+      wrapper.removeEventListener('touchend', handleTouchEnd);
+      wrapper.removeEventListener('touchcancel', handleTouchEnd);
+
+      if (twoFingerRestoreTimerRef.current !== null) {
+        clearTimeout(twoFingerRestoreTimerRef.current);
+        twoFingerRestoreTimerRef.current = null;
+      }
+    };
+  }, [isEditMode, cancelActiveDrafts]);
 
   function getPointerPosition(stage: Konva.Stage): NormalizedPoint | null {
     const pointer = stage.getPointerPosition();
@@ -102,7 +166,7 @@ export function AnnotationStage({
   }
 
   function handlePointerStart(event: KonvaEventObject<MouseEvent | TouchEvent>) {
-    if (!isEditMode || !activeTool || activeTool === 'eraser' || activeTool === 'text') {
+    if (!isEditMode || !activeTool || activeTool === 'text') {
       return;
     }
 
@@ -113,6 +177,25 @@ export function AnnotationStage({
     const stage = event.target.getStage();
 
     if (!stage) {
+      return;
+    }
+
+    // ── Eraser drag: initiate continuous erasing ──────────────────────────────
+    if (activeTool === 'eraser') {
+      isErasingRef.current = true;
+      pendingEraseIdsRef.current = new Set();
+      setErasedDuringDragIds(new Set());
+
+      // Also check the start point immediately (same as moving to it)
+      const pos = stage.getPointerPosition();
+      if (pos) {
+        const node = stage.getIntersection(pos);
+        const nodeId = node?.id();
+        if (nodeId && activeItems.some((item) => item.id === nodeId)) {
+          pendingEraseIdsRef.current.add(nodeId);
+          setErasedDuringDragIds(new Set([nodeId]));
+        }
+      }
       return;
     }
 
@@ -145,6 +228,29 @@ export function AnnotationStage({
     const stage = event.target.getStage();
 
     if (!stage) {
+      return;
+    }
+
+    // ── Eraser drag: erase items under the pointer continuously ───────────────
+    if (activeTool === 'eraser' && isErasingRef.current) {
+      const pos = stage.getPointerPosition();
+      if (pos) {
+        const node = stage.getIntersection(pos);
+        const nodeId = node?.id();
+        if (
+          nodeId &&
+          !pendingEraseIdsRef.current.has(nodeId) &&
+          activeItems.some((item) => item.id === nodeId)
+        ) {
+          pendingEraseIdsRef.current.add(nodeId);
+          // Update state for immediate visual feedback (shape disappears)
+          setErasedDuringDragIds((prev) => {
+            const next = new Set(prev);
+            next.add(nodeId);
+            return next;
+          });
+        }
+      }
       return;
     }
 
@@ -182,6 +288,17 @@ export function AnnotationStage({
 
   function handlePointerEnd() {
     if (!isEditMode || !activeTool) {
+      return;
+    }
+
+    // ── Eraser drag: commit all erased items in one go (single undo entry) ────
+    if (activeTool === 'eraser') {
+      if (isErasingRef.current && pendingEraseIdsRef.current.size > 0) {
+        commitItems(activeItems.filter((item) => !pendingEraseIdsRef.current.has(item.id)));
+      }
+      isErasingRef.current = false;
+      pendingEraseIdsRef.current = new Set();
+      setErasedDuringDragIds(new Set());
       return;
     }
 
@@ -285,9 +402,15 @@ export function AnnotationStage({
   }
 
   function renderItem(entry: VisibleAnnotationEntry) {
+    // During drag-erase, hide items already marked for deletion
+    if (erasedDuringDragIds.has(entry.item.id)) {
+      return null;
+    }
+
     const color = ANNOTATION_COLOR_SWATCHES[entry.item.color];
     const isErasable = isEditMode && activeTool === 'eraser' && entry.isActiveLayer;
     const commonProps = {
+      id: entry.item.id,
       listening: isErasable,
       onClick: isErasable ? () => deleteActiveItem(entry.item.id) : undefined,
       onTap: isErasable ? () => deleteActiveItem(entry.item.id) : undefined,
@@ -396,7 +519,7 @@ export function AnnotationStage({
           : 'default';
 
   return (
-    <div className="absolute inset-0 z-10 overflow-hidden rounded-[12px]">
+    <div ref={wrapperRef} className="absolute inset-0 z-10 overflow-hidden rounded-[12px]">
       <Stage
         ref={stageRef}
         width={width}
@@ -405,7 +528,7 @@ export function AnnotationStage({
           width,
           height,
           cursor: stageCursor,
-          pointerEvents: isEditMode ? 'auto' : 'none',
+          pointerEvents: isEditMode && !isTwoFingerGesture ? 'auto' : 'none',
           touchAction: isEditMode ? 'none' : 'auto',
         }}
         onMouseDown={handlePointerStart}

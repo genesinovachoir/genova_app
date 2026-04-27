@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { sendAssignmentCreatedPush } from '@/lib/server/push-notifications';
 import { createSupabaseServiceClient, requireAuthenticatedUser } from '@/lib/server/supabase-auth';
 
 export const dynamic = 'force-dynamic';
@@ -84,6 +85,32 @@ function normalizeDeadline(deadline: string | null | undefined) {
   return parsed.toISOString();
 }
 
+function formatDeadlineText(deadlineIso: string | null) {
+  if (!deadlineIso) {
+    return 'Belirlenen son tarih';
+  }
+
+  const date = new Date(deadlineIso);
+  if (Number.isNaN(date.getTime())) {
+    return 'Belirlenen son tarih';
+  }
+
+  const dateLabel = date.toLocaleDateString('tr-TR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: 'Europe/Istanbul',
+  });
+  const timeLabel = date.toLocaleTimeString('tr-TR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Europe/Istanbul',
+  });
+
+  return `${dateLabel} ${timeLabel}`;
+}
+
 export async function POST(request: Request) {
   try {
     const { user } = await requireAuthenticatedUser(request);
@@ -165,6 +192,18 @@ export async function POST(request: Request) {
       return new NextResponse('Partisyon şefi için ses grubu tanımlı değil.', { status: 403 });
     }
 
+    const { data: previousTargetRows, error: previousTargetRowsError } = await serviceClient
+      .from('assignment_targets')
+      .select('member_id')
+      .eq('assignment_id', assignmentId);
+
+    if (previousTargetRowsError) {
+      return new NextResponse(previousTargetRowsError.message, { status: 500 });
+    }
+
+    const previousTargetMemberIds = new Set((previousTargetRows ?? []).map((row) => row.member_id));
+    const newlyAddedTargetMemberIds = targetMemberIds.filter((memberId) => !previousTargetMemberIds.has(memberId));
+
     const { data: targetMembers, error: targetMembersError } = await serviceClient
       .from('choir_members')
       .select('id, voice_group, is_active')
@@ -240,6 +279,18 @@ export async function POST(request: Request) {
 
     if (insertTargetsError) {
       return new NextResponse(insertTargetsError.message, { status: 500 });
+    }
+
+    if (newlyAddedTargetMemberIds.length > 0) {
+      try {
+        await sendAssignmentCreatedPush({
+          assignmentId,
+          deadlineText: formatDeadlineText(deadlineIso),
+          targetMemberIds: newlyAddedTargetMemberIds,
+        });
+      } catch (pushError) {
+        console.error('Assignment update push send failed:', pushError);
+      }
     }
 
     return NextResponse.json({

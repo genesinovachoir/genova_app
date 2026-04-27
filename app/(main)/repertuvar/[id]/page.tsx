@@ -1,15 +1,24 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useMemo } from 'react';
 import { motion } from 'motion/react';
 import { use } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
-import { supabase, RepertoireSong, RepertoireSongRow, normalizeRepertoireSong } from '@/lib/supabase';
 import { useAuth } from '@/components/AuthProvider';
 import { LottieIcon } from '@/components/LottieIcon';
 import { createSlugLookup, isUuidLike } from '@/lib/internalPageLinks';
+import {
+  getRepertoireCatalogCacheScope,
+  getRepertoireRoleScope,
+  readRepertoireCatalogCache,
+} from '@/lib/repertuvar/cache';
+import {
+  getRepertoireCatalogQueryKey,
+  loadRepertoireCatalog,
+} from '@/lib/repertuvar/queries';
 
 const RepertoireWorkspace = dynamic(
   () => import('@/components/repertuvar/RepertoireWorkspace').then((mod) => mod.RepertoireWorkspace),
@@ -38,80 +47,67 @@ export default function SongDetailPage({ params }: { params: Promise<{ id: strin
   const isChef = isAdmin();
   const isLeader = isSectionLeader();
   const isChoristUser = !isLeader;
+  const roleScope = getRepertoireRoleScope(isChef, isLeader);
+  const catalogCacheScope = useMemo(
+    () => getRepertoireCatalogCacheScope(member?.id ?? null, roleScope),
+    [member?.id, roleScope],
+  );
+  const catalogQueryKey = useMemo(
+    () => getRepertoireCatalogQueryKey(member?.id ?? null, roleScope),
+    [member?.id, roleScope],
+  );
 
-  const [song, setSong] = useState<RepertoireSong | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const catalogQuery = useQuery({
+    queryKey: catalogQueryKey,
+    queryFn: () => loadRepertoireCatalog({ memberId: member?.id ?? null, roleScope }),
+    enabled: !authLoading,
+    initialData: () => readRepertoireCatalogCache(catalogCacheScope) ?? undefined,
+    staleTime: 30_000,
+    gcTime: 24 * 60 * 60_000,
+  });
 
-  const fetchSong = useCallback(async () => {
-    setLoading(true); setError(null);
-    try {
-      let resolvedSongId: string | null = null;
-      if (isUuidLike(identifier)) {
-        resolvedSongId = identifier;
-      } else {
-        const { data: slugRows, error: slugError } = await supabase
-          .from('repertoire')
-          .select('id, title, created_at');
-
-        if (slugError) {
-          throw new Error(slugError.message);
-        }
-
-        const slugLookup = createSlugLookup((slugRows ?? []) as Array<{ id: string; title: string | null; created_at: string | null }>, 'sarki');
-        resolvedSongId = slugLookup.itemBySlug.get(identifier.toLowerCase())?.id ?? null;
-      }
-
-      if (!resolvedSongId) {
-        setSong(null);
-        setError('Şarkı bulunamadı.');
-        return;
-      }
-
-      if (isChoristUser && member?.id) {
-        const { data: assignmentData, error: assignmentError } = await supabase
-          .from('song_assignments')
-          .select('song_id')
-          .eq('song_id', resolvedSongId)
-          .eq('member_id', member.id)
-          .limit(1)
-          .maybeSingle();
-
-        if (assignmentError) {
-          throw new Error(assignmentError.message);
-        }
-
-        if (!assignmentData) {
-          setSong(null);
-          setError('Bu şarkı size atanmadı.');
-          return;
-        }
-      }
-
-      const { data, error: fetchErr } = await supabase
-        .from('repertoire')
-        .select(`
-          id, title, composer, drive_folder_id, is_visible, created_at,
-          repertoire_files ( id, file_name, file_type, partition_label, drive_file_id, drive_web_view_link, drive_download_link, mime_type, file_size_bytes, created_at, updated_at, song_id, uploaded_by )
-        `)
-        .eq('id', resolvedSongId)
-        .single();
-
-      if (fetchErr) throw new Error(fetchErr.message);
-      setSong(normalizeRepertoireSong(data as RepertoireSongRow));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Şarkı yüklenemedi');
-    } finally {
-      setLoading(false);
+  const slugLookup = useMemo(() => {
+    if (!catalogQuery.data) {
+      return null;
     }
-  }, [identifier, isChoristUser, member?.id]);
 
-  useEffect(() => {
-    if (authLoading) {
-      return;
+    return createSlugLookup(
+      catalogQuery.data.songs.map((song) => ({
+        id: song.id,
+        title: song.title,
+        created_at: song.created_at,
+      })),
+      'sarki',
+    );
+  }, [catalogQuery.data]);
+
+  const resolvedSongId = useMemo(() => {
+    if (isUuidLike(identifier)) {
+      return identifier;
     }
-    fetchSong();
-  }, [authLoading, fetchSong]);
+
+    return slugLookup?.itemBySlug.get(identifier.toLowerCase())?.id ?? null;
+  }, [identifier, slugLookup]);
+
+  const song = useMemo(() => {
+    if (!catalogQuery.data || !resolvedSongId) {
+      return null;
+    }
+
+    return catalogQuery.data.songs.find((item) => item.id === resolvedSongId) ?? null;
+  }, [catalogQuery.data, resolvedSongId]);
+
+  const assignedSongIds = useMemo(
+    () => new Set(catalogQuery.data?.assignedSongIds ?? []),
+    [catalogQuery.data?.assignedSongIds],
+  );
+  const loading = !catalogQuery.data && (authLoading || catalogQuery.isLoading);
+  const isRefreshing = Boolean(catalogQuery.data && catalogQuery.isFetching);
+  const queryError = catalogQuery.error instanceof Error ? catalogQuery.error.message : null;
+  const error = queryError
+    ?? (!loading && !resolvedSongId ? 'Şarkı bulunamadı.' : null)
+    ?? (!loading && isChoristUser && resolvedSongId && !assignedSongIds.has(resolvedSongId) ? 'Bu şarkı size atanmadı.' : null)
+    ?? (!loading && resolvedSongId && !song ? 'Şarkı bulunamadı.' : null);
 
   return (
     <main className="min-h-screen bg-[var(--color-background)] pb-[max(2rem,env(safe-area-inset-bottom))]">
@@ -139,6 +135,12 @@ export default function SongDetailPage({ params }: { params: Promise<{ id: strin
             <p className="mt-1 text-[0.62rem] font-bold uppercase tracking-[0.2em] italic text-[var(--color-accent)] opacity-80">
               {song.composer}
             </p>
+          )}
+          {isRefreshing && !loading && (
+            <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-white/5 px-3 py-1.5 text-[0.6rem] font-bold uppercase tracking-[0.16em] text-[var(--color-text-medium)]">
+              <Loader2 size={12} className="animate-spin text-[var(--color-accent)]" />
+              Güncelleniyor
+            </div>
           )}
         </div>
       </div>

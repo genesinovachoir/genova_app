@@ -2,7 +2,11 @@
 
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { Session, User } from '@supabase/supabase-js';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase, ChoirMember, UserRole } from '@/lib/supabase';
+import { clearRepertoireMetadataCaches } from '@/lib/repertuvar/cache';
+import { clearRuntimeDriveFileCache } from '@/lib/repertuvar/offline';
+import { REPERTOIRE_QUERY_ROOT_KEY } from '@/lib/repertuvar/queries';
 
 type MemberWithRelations = ChoirMember & {
   schools?: { name: string } | null;
@@ -45,6 +49,7 @@ function toCanonicalRole(value: string): UserRole | null {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [member, setMember] = useState<ChoirMember | null>(null);
@@ -120,13 +125,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session?.user) {
         fetchMemberData(session.user.id);
       } else {
+        clearRepertoireMetadataCaches();
+        queryClient.removeQueries({ queryKey: REPERTOIRE_QUERY_ROOT_KEY });
+        void clearRuntimeDriveFileCache().catch(() => {});
         setMember(null);
         setRoles([]);
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [fetchMemberData]);
+  }, [fetchMemberData, queryClient]);
 
   const isAdmin = () => roles.includes('Şef');
   const isSectionLeader = () => roles.includes('Partisyon Şefi') || roles.includes('Şef');
@@ -140,6 +148,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    clearRepertoireMetadataCaches();
+    queryClient.removeQueries({ queryKey: REPERTOIRE_QUERY_ROOT_KEY });
+    void clearRuntimeDriveFileCache().catch(() => {
+      // Best-effort cleanup; sign-out should not be blocked by Cache API failures.
+    });
     await supabase.auth.signOut();
     setMember(null);
     setRoles([]);

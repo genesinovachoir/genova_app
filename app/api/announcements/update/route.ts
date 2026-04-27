@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { sendAnnouncementPublishedPush } from '@/lib/server/push-notifications';
 import { createSupabaseServiceClient, requireAuthenticatedUser } from '@/lib/server/supabase-auth';
 
 export const dynamic = 'force-dynamic';
@@ -95,7 +96,7 @@ export async function POST(request: Request) {
 
     const { data: actorMember, error: actorError } = await serviceClient
       .from('choir_members')
-      .select('id, voice_group')
+      .select('id, voice_group, first_name, last_name')
       .eq('auth_user_id', user.id)
       .maybeSingle();
 
@@ -126,7 +127,7 @@ export async function POST(request: Request) {
 
     const { data: announcement, error: announcementError } = await serviceClient
       .from('announcements')
-      .select('id, created_by')
+      .select('id, created_by, target_users')
       .eq('id', announcementId)
       .maybeSingle();
 
@@ -143,6 +144,7 @@ export async function POST(request: Request) {
     }
 
     const targetMemberIds = Array.from(new Set([...requestedTargetUsers, actorMember.id]));
+    const previousTargetUserIds = new Set(toUniqueStringArray(announcement.target_users));
 
     const { data: targetMembers, error: targetMembersError } = await serviceClient
       .from('choir_members')
@@ -191,7 +193,7 @@ export async function POST(request: Request) {
         target_voice_groups: targetVoiceGroups,
       })
       .eq('id', announcementId)
-      .select('id, title')
+      .select('id, title, description')
       .maybeSingle();
 
     if (updateError) {
@@ -200,6 +202,26 @@ export async function POST(request: Request) {
 
     if (!updatedAnnouncement?.id) {
       return new NextResponse('Duyuru güncellenemedi.', { status: 500 });
+    }
+
+    const newlyAddedTargetMemberIds = targetMemberIds.filter(
+      (memberId) => memberId !== actorMember.id && !previousTargetUserIds.has(memberId),
+    );
+
+    if (newlyAddedTargetMemberIds.length > 0) {
+      const publisherName = `${actorMember.first_name ?? ''} ${actorMember.last_name ?? ''}`.trim() || null;
+
+      try {
+        await sendAnnouncementPublishedPush({
+          announcementId: updatedAnnouncement.id,
+          title: updatedAnnouncement.title ?? title,
+          description: updatedAnnouncement.description ?? description,
+          targetMemberIds: newlyAddedTargetMemberIds,
+          publisherName,
+        });
+      } catch (pushError) {
+        console.error('Announcement update push send failed:', pushError);
+      }
     }
 
     return NextResponse.json({

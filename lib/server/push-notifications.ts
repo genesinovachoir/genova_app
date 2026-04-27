@@ -39,6 +39,13 @@ interface SendAssignmentCreatedPushInput {
   targetMemberIds: string[];
 }
 
+interface SendRepertoireAssignmentPushInput {
+  songId: string;
+  songTitle: string;
+  partName?: string | null;
+  targetMemberIds: string[];
+}
+
 interface SendAssignmentReviewPushInput {
   memberId: string;
   assignmentId: string;
@@ -197,6 +204,23 @@ function buildAssignmentCreatedPayload(input: SendAssignmentCreatedPushInput): P
   };
 }
 
+function buildRepertoireAssignmentPayload(input: SendRepertoireAssignmentPushInput): PushPayload {
+  const titleLine = simplifyNotificationText(input.songTitle, DEFAULT_TITLE_MAX_LENGTH) || 'Repertuvar';
+  const partLine = simplifyNotificationText(input.partName, 60);
+
+  return {
+    title: 'Yeni Repertuvar Ataması',
+    body: partLine ? `${titleLine} - ${partLine}` : titleLine,
+    url: `/repertuvar/${input.songId}`,
+    data: {
+      type: 'repertoire_assignment_created',
+      songId: input.songId,
+      partName: input.partName ?? null,
+      at: getNotificationTimestampIso(),
+    },
+  };
+}
+
 function buildAssignmentReviewPayload(input: SendAssignmentReviewPushInput): PushPayload {
   const title = input.status === 'approved'
     ? 'Ödevin onaylandı'
@@ -296,6 +320,10 @@ export async function sendRehearsalCreatedPush(input: SendRehearsalCreatedPushIn
 
 export async function sendAssignmentCreatedPush(input: SendAssignmentCreatedPushInput) {
   return sendPushToMembers(input.targetMemberIds, buildAssignmentCreatedPayload(input));
+}
+
+export async function sendRepertoireAssignmentPush(input: SendRepertoireAssignmentPushInput) {
+  return sendPushToMembers(input.targetMemberIds, buildRepertoireAssignmentPayload(input));
 }
 
 export async function sendAssignmentReviewPush(input: SendAssignmentReviewPushInput) {

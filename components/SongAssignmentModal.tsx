@@ -15,6 +15,40 @@ interface SongAssignmentModalProps {
   onSaved?: () => Promise<void> | void;
 }
 
+interface UpdateRepertoireAssignmentsResponse {
+  ok: true;
+  song_id: string;
+  part_name: string | null;
+}
+
+async function getAccessToken() {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !sessionData.session?.access_token) {
+    throw new Error('Oturum doğrulanamadı. Lütfen tekrar giriş yapın.');
+  }
+
+  return sessionData.session.access_token;
+}
+
+async function postJsonWithAuth<TResponse, TPayload = unknown>(url: string, payload: TPayload) {
+  const accessToken = await getAccessToken();
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `İstek başarısız (${response.status})`);
+  }
+
+  return (await response.json()) as TResponse;
+}
+
 export function SongAssignmentModal({ isOpen, onClose, songId, songTitle, partName, onSaved }: SongAssignmentModalProps) {
   const isPlayerActive = useMiniAudioPlayerStore((state) => state.isActive);
   const [members, setMembers] = useState<ChoirMember[]>([]);
@@ -117,20 +151,11 @@ export function SongAssignmentModal({ isOpen, onClose, songId, songTitle, partNa
   const handleSave = async () => {
     setSaving(true); setError(null);
     try {
-      // Tüm mevcut atamaları sil, yenilerini ekle
-      let deleteQuery = supabase.from('song_assignments').delete().eq('song_id', songId);
-      if (partName) {
-        deleteQuery = deleteQuery.eq('part_name', partName);
-      } else {
-        deleteQuery = deleteQuery.is('part_name', null);
-      }
-      await deleteQuery;
-
-      if (assigned.size > 0) {
-        const inserts = Array.from(assigned).map(member_id => ({ song_id: songId, member_id, part_name: partName || null }));
-        const { error: insertErr } = await supabase.from('song_assignments').upsert(inserts, { onConflict: 'song_id,member_id' });
-        if (insertErr) throw new Error(insertErr.message);
-      }
+      await postJsonWithAuth<UpdateRepertoireAssignmentsResponse>('/api/repertoire/assignments/update', {
+        song_id: songId,
+        part_name: partName || null,
+        member_ids: Array.from(assigned),
+      });
 
       await onSaved?.();
       setSuccess(true);

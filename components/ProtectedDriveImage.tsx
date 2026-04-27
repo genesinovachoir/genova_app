@@ -6,7 +6,7 @@ import { useProtectedDriveFileUrl } from '@/hooks/useProtectedDriveFileUrl';
 import type { RepertoireFile } from '@/lib/supabase';
 
 interface ProtectedDriveImageProps extends Omit<ImgHTMLAttributes<HTMLImageElement>, 'src'> {
-  file: Pick<RepertoireFile, 'drive_file_id' | 'file_name' | 'mime_type'> | null | undefined;
+  file: (Pick<RepertoireFile, 'drive_file_id'> & Partial<Pick<RepertoireFile, 'file_name' | 'mime_type' | 'updated_at' | 'file_size_bytes'>>) | null | undefined;
   fallback?: ReactNode;
 }
 

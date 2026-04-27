@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { sendRehearsalCreatedPush } from '@/lib/server/push-notifications';
 import { createSupabaseServiceClient, requireAuthenticatedUser } from '@/lib/server/supabase-auth';
 
 export const dynamic = 'force-dynamic';
@@ -80,6 +81,45 @@ function normalizeTime(value: string | null | undefined) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(trimmed) ? trimmed : null;
 }
 
+function stripHtml(raw: string | null | undefined) {
+  if (!raw) {
+    return '';
+  }
+
+  return raw
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function formatDateLabel(date: string) {
+  const [year, month, day] = date.split('-');
+  return `${day}.${month}.${year}`;
+}
+
+function buildEventDetails(input: {
+  date: string;
+  startTime: string;
+  endTime: string | null;
+  location: string;
+  notes: string | null;
+}) {
+  const timeLabel = input.endTime ? `${input.startTime} - ${input.endTime}` : input.startTime;
+  const segments = [
+    `Tarih: ${formatDateLabel(input.date)}`,
+    `Saat: ${timeLabel}`,
+    `Yer: ${input.location}`,
+  ];
+
+  const cleanedNotes = stripHtml(input.notes);
+  if (cleanedNotes) {
+    segments.push(`Detay: ${cleanedNotes}`);
+  }
+
+  return segments.join(' | ');
+}
+
 export async function POST(request: Request) {
   try {
     const { user } = await requireAuthenticatedUser(request);
@@ -157,6 +197,22 @@ export async function POST(request: Request) {
       return new NextResponse('Sadece kendi oluşturduğunuz etkinliği güncelleyebilirsiniz.', { status: 403 });
     }
 
+    const { data: previousInvitees, error: previousInviteesError } = await serviceClient
+      .from('rehearsal_invitees')
+      .select('member_id')
+      .eq('rehearsal_id', rehearsalId);
+
+    if (previousInviteesError) {
+      return new NextResponse(previousInviteesError.message, { status: 500 });
+    }
+
+    const nextInviteeMemberIdSet = new Set(inviteeMemberIds);
+    const previousInviteeMemberIdSet = new Set((previousInvitees ?? []).map((invitee) => invitee.member_id));
+    const newlyAddedInviteeMemberIds = inviteeMemberIds.filter((memberId) => !previousInviteeMemberIdSet.has(memberId));
+    const removedInviteeMemberIds = (previousInvitees ?? [])
+      .map((invitee) => invitee.member_id)
+      .filter((memberId) => memberId && !nextInviteeMemberIdSet.has(memberId));
+
     if (inviteeMemberIds.length > 0) {
       const { data: invitedMembers, error: invitedMembersError } = await serviceClient
         .from('choir_members')
@@ -215,6 +271,18 @@ export async function POST(request: Request) {
       return new NextResponse(clearInviteeError.message, { status: 500 });
     }
 
+    if (removedInviteeMemberIds.length > 0) {
+      const { error: attendanceDeleteError } = await serviceClient
+        .from('attendance')
+        .delete()
+        .eq('rehearsal_id', rehearsalId)
+        .in('member_id', removedInviteeMemberIds);
+
+      if (attendanceDeleteError) {
+        return new NextResponse(attendanceDeleteError.message, { status: 500 });
+      }
+    }
+
     if (inviteeMemberIds.length > 0) {
       const { error: insertInviteeError } = await serviceClient
         .from('rehearsal_invitees')
@@ -222,6 +290,29 @@ export async function POST(request: Request) {
 
       if (insertInviteeError) {
         return new NextResponse(insertInviteeError.message, { status: 500 });
+      }
+    }
+
+    if (newlyAddedInviteeMemberIds.length > 0) {
+      const details = buildEventDetails({
+        date,
+        startTime,
+        endTime,
+        location,
+        notes,
+      });
+
+      try {
+        await sendRehearsalCreatedPush({
+          rehearsalId,
+          rehearsalTitle: title,
+          rehearsalDetails: details,
+          collectAttendance,
+          targetMemberIds: newlyAddedInviteeMemberIds,
+          rehearsalDate: date,
+        });
+      } catch (pushError) {
+        console.error('Rehearsal update invitee push send failed:', pushError);
       }
     }
 
