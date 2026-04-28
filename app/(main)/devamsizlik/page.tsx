@@ -749,7 +749,7 @@ export default function DevamsizlikPage() {
                                       {participant.first_name} {participant.last_name}
                                     </p>
                                     <p className="mt-0.5 text-[0.65rem] uppercase tracking-[0.12em] text-[var(--color-text-medium)]">
-                                      {participant.sub_voice_group ?? participant.voice_group ?? '—'}
+                                      {participant.sub_voice_group ?? participant.voice_group ?? 'ŞEF'}
                                     </p>
                                   </div>
                                   <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[0.58rem] font-bold uppercase tracking-[0.1em] ${participantStatusClass(participant.status)}`}>
@@ -820,7 +820,7 @@ export default function DevamsizlikPage() {
                             {attendance.choir_members.first_name} {attendance.choir_members.last_name}
                           </p>
                           <p className="text-[0.65rem] uppercase tracking-[0.12em] text-[var(--color-text-medium)]">
-                            {attendance.choir_members.voice_group}
+                            {attendance.choir_members.voice_group ?? 'ŞEF'}
                           </p>
                         </div>
                         <button
