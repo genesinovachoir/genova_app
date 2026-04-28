@@ -57,15 +57,21 @@ import {
   AnnotationItem,
   AnnotationLayerKey,
   AnnotationTool,
+  LEGACY_ANNOTATION_COLORS,
+  LegacyAnnotationColor,
+  MAX_ANNOTATION_STROKE_WIDTH_PX,
+  MIN_ANNOTATION_STROKE_WIDTH_PX,
   PreviewVoiceGroup,
   VOICE_GROUPS,
   VoiceGroup,
   asVoiceGroup,
+  clampAnnotationStrokeWidthPx,
   cloneAnnotationItems,
   getPreviewVoiceGroupLabel,
   getLayerLabel,
   makeLayerPageKey,
   makeSharedVoiceGroupLayerKey,
+  resolveAnnotationColor,
 } from '@/lib/repertuvar/annotation-types';
 import { RepertoireFile, RepertoireSong } from '@/lib/supabase';
 import {
@@ -87,6 +93,7 @@ const DEFAULT_PAGE_ASPECT_RATIO = 1.414;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.0;
 const ZOOM_STEP = 0.1;
+const PDF_RENDER_SETTLE_DELAY = 180;
 const FLOATING_BAR_EDGE_GAP = 8;
 const FLOATING_BAR_SETTLE_DURATION = 520;
 
@@ -128,6 +135,12 @@ interface QueuedSavePayload {
   items: AnnotationItem[];
 }
 
+interface PdfRenderLayer {
+  id: string;
+  baseKey: string;
+  zoomLevel: number;
+}
+
 interface VisibilityModeOption {
   label: string;
   personal: boolean;
@@ -146,10 +159,25 @@ const TOOL_CYCLE: Array<{
   { tool: 'eraser', label: 'Silgi', Icon: Eraser },
 ];
 
-const COLOR_OPTIONS: AnnotationColor[] = ['black', 'red', 'white'];
+const COLOR_OPTIONS = LEGACY_ANNOTATION_COLORS;
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function areZoomLevelsEqual(a: number, b: number) {
+  return Math.abs(a - b) < 0.001;
+}
+
+function isStrokeConfigurableTool(tool: AnnotationTool) {
+  return tool === 'pen' || tool === 'arrow' || tool === 'rectangle';
+}
+
+function getAnnotationColorLabel(color: AnnotationColor): string {
+  if (color === 'black') return 'Siyah';
+  if (color === 'red') return 'Kırmızı';
+  if (color === 'white') return 'Beyaz';
+  return color.toUpperCase();
 }
 
 function getFloatingBarSize(node: HTMLDivElement | null): FloatingBarSize {
@@ -1035,11 +1063,16 @@ export function RepertoireWorkspace({
   const savePayloadRef = useRef<Record<string, QueuedSavePayload>>({});
   const saveStateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptedAutoSyncVersionRef = useRef<string | null>(null);
+  const zoomRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestZoomLevelRef = useRef(1.0);
+  const pendingPdfRenderLayerRef = useRef<PdfRenderLayer | null>(null);
 
   const [viewerWidth, setViewerWidth] = useState(0);
   const [floatingBarPosition, setFloatingBarPosition] = useState<FloatingBarPosition | null>(null);
   const [isFloatingBarDragging, setFloatingBarDragging] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1.0);
+  const [activePdfRenderLayer, setActivePdfRenderLayer] = useState<PdfRenderLayer | null>(null);
+  const [pendingPdfRenderLayer, setPendingPdfRenderLayer] = useState<PdfRenderLayer | null>(null);
 
   const outerPdfContainerRef = useRef<HTMLDivElement | null>(null);
   const pinchStartDistRef = useRef<number | null>(null);
@@ -1065,6 +1098,7 @@ export function RepertoireWorkspace({
     previewVoiceGroup,
     activeTool,
     activeColor,
+    activeStrokeWidthPx,
     visibility,
     layersByPage,
     historyByLayerPage,
@@ -1084,6 +1118,7 @@ export function RepertoireWorkspace({
     setPreviewVoiceGroup,
     setActiveTool,
     setActiveColor,
+    setActiveStrokeWidthPx,
     toggleVisibility,
     replaceFileLayers,
     commitLayerItems,
@@ -1099,30 +1134,39 @@ export function RepertoireWorkspace({
   } = store;
   const normalizedVoiceGroup = asVoiceGroup(voiceGroup);
 
-  const sheetFiles = [...(song.files ?? [])]
-    .filter((file) => file.file_type === 'sheet')
-    .sort((a, b) => {
-      const aTime = Date.parse(a.created_at || '') || 0;
-      const bTime = Date.parse(b.created_at || '') || 0;
-      return bTime - aTime;
-    });
-  const audioFiles = [...(song.files ?? [])]
-    .filter((file) => file.file_type === 'audio')
-    .sort((a, b) => {
-      const aTime = Date.parse(a.created_at || '') || 0;
-      const bTime = Date.parse(b.created_at || '') || 0;
-      return aTime - bTime;
-    });
-  const coverFiles = [...(song.files ?? [])]
-    .filter(isCoverFile)
-    .sort((a, b) => {
-      const aIsPdf = isPdfRepertoireFile(a);
-      const bIsPdf = isPdfRepertoireFile(b);
-      if (aIsPdf !== bIsPdf) return aIsPdf ? 1 : -1;
-      const aTime = Date.parse(a.created_at || '') || 0;
-      const bTime = Date.parse(b.created_at || '') || 0;
-      return bTime - aTime;
-    });
+  const sheetFiles = useMemo(
+    () => [...(song.files ?? [])]
+      .filter((file) => file.file_type === 'sheet')
+      .sort((a, b) => {
+        const aTime = Date.parse(a.created_at || '') || 0;
+        const bTime = Date.parse(b.created_at || '') || 0;
+        return bTime - aTime;
+      }),
+    [song.files],
+  );
+  const audioFiles = useMemo(
+    () => [...(song.files ?? [])]
+      .filter((file) => file.file_type === 'audio')
+      .sort((a, b) => {
+        const aTime = Date.parse(a.created_at || '') || 0;
+        const bTime = Date.parse(b.created_at || '') || 0;
+        return aTime - bTime;
+      }),
+    [song.files],
+  );
+  const coverFiles = useMemo(
+    () => [...(song.files ?? [])]
+      .filter(isCoverFile)
+      .sort((a, b) => {
+        const aIsPdf = isPdfRepertoireFile(a);
+        const bIsPdf = isPdfRepertoireFile(b);
+        if (aIsPdf !== bIsPdf) return aIsPdf ? 1 : -1;
+        const aTime = Date.parse(a.created_at || '') || 0;
+        const bTime = Date.parse(b.created_at || '') || 0;
+        return bTime - aTime;
+      }),
+    [song.files],
+  );
   const filesWithDriveId = useMemo(
     () => [...(song.files ?? [])].filter((file) => Boolean(file.drive_file_id)),
     [song.files],
@@ -1362,8 +1406,52 @@ export function RepertoireWorkspace({
     Boolean(memberId) &&
     Boolean(activePdfPageNumber);
   const stageAspectRatio = pageAspectRatio ?? DEFAULT_PAGE_ASPECT_RATIO;
+  const pdfRenderBaseKey = selectedPdfSource && selectedPdf && activePdfPageNumber && viewerWidth > 0
+    ? `${selectedPdf.id}:${activePdfPageNumber}:${viewerWidth}:${selectedPdfSource}`
+    : null;
   const offlineSyncedAtLabel = formatSyncedAtLabel(offlineLastSyncedAt);
   const isShowingStaleLocalFile = selectedPdfIsStaleLocal || selectedCoverIsStaleLocal || selectedAudioIsStaleLocal;
+
+  const makePdfRenderLayer = useCallback((nextZoomLevel: number): PdfRenderLayer | null => {
+    if (!pdfRenderBaseKey) {
+      return null;
+    }
+
+    const normalizedZoom = Math.round(nextZoomLevel * 100) / 100;
+
+    return {
+      id: `${pdfRenderBaseKey}:${normalizedZoom.toFixed(2)}`,
+      baseKey: pdfRenderBaseKey,
+      zoomLevel: normalizedZoom,
+    };
+  }, [pdfRenderBaseKey]);
+
+  const visiblePdfRenderLayer = activePdfRenderLayer?.baseKey === pdfRenderBaseKey
+    ? activePdfRenderLayer
+    : makePdfRenderLayer(zoomLevel);
+  const validPendingPdfRenderLayer = pendingPdfRenderLayer?.baseKey === pdfRenderBaseKey
+    ? pendingPdfRenderLayer
+    : null;
+  const pdfRenderLayers = visiblePdfRenderLayer
+    ? validPendingPdfRenderLayer && validPendingPdfRenderLayer.id !== visiblePdfRenderLayer.id
+      ? [visiblePdfRenderLayer, validPendingPdfRenderLayer]
+      : [visiblePdfRenderLayer]
+    : [];
+
+  const handlePdfLayerRenderSuccess = useCallback((layer: PdfRenderLayer) => {
+    const pendingLayer = pendingPdfRenderLayerRef.current;
+
+    if (!pendingLayer || pendingLayer.id !== layer.id) {
+      return;
+    }
+
+    setActivePdfRenderLayer(layer);
+    setPendingPdfRenderLayer(null);
+  }, []);
+
+  const handlePdfLayerRenderError = useCallback((layer: PdfRenderLayer) => {
+    setPendingPdfRenderLayer((currentLayer) => currentLayer?.id === layer.id ? null : currentLayer);
+  }, []);
 
   const setFloatingBarPositionValue = useCallback((position: FloatingBarPosition | null) => {
     floatingBarPositionRef.current = position;
@@ -1661,6 +1749,60 @@ export function RepertoireWorkspace({
   ]);
 
   useEffect(() => {
+    latestZoomLevelRef.current = zoomLevel;
+  }, [zoomLevel]);
+
+  useEffect(() => {
+    pendingPdfRenderLayerRef.current = pendingPdfRenderLayer;
+  }, [pendingPdfRenderLayer]);
+
+  useEffect(() => {
+    const nextLayer = makePdfRenderLayer(latestZoomLevelRef.current);
+    setActivePdfRenderLayer(nextLayer);
+    setPendingPdfRenderLayer(null);
+
+    if (zoomRenderTimerRef.current) {
+      clearTimeout(zoomRenderTimerRef.current);
+      zoomRenderTimerRef.current = null;
+    }
+  }, [makePdfRenderLayer]);
+
+  useEffect(() => {
+    if (zoomRenderTimerRef.current) {
+      clearTimeout(zoomRenderTimerRef.current);
+      zoomRenderTimerRef.current = null;
+    }
+
+    const targetLayer = makePdfRenderLayer(zoomLevel);
+
+    if (!targetLayer) {
+      setPendingPdfRenderLayer(null);
+      return;
+    }
+
+    if (!activePdfRenderLayer || activePdfRenderLayer.baseKey !== targetLayer.baseKey) {
+      return;
+    }
+
+    if (activePdfRenderLayer.id === targetLayer.id || areZoomLevelsEqual(activePdfRenderLayer.zoomLevel, targetLayer.zoomLevel)) {
+      setPendingPdfRenderLayer(null);
+      return;
+    }
+
+    zoomRenderTimerRef.current = setTimeout(() => {
+      zoomRenderTimerRef.current = null;
+      setPendingPdfRenderLayer((currentLayer) => currentLayer?.id === targetLayer.id ? currentLayer : targetLayer);
+    }, PDF_RENDER_SETTLE_DELAY);
+
+    return () => {
+      if (zoomRenderTimerRef.current) {
+        clearTimeout(zoomRenderTimerRef.current);
+        zoomRenderTimerRef.current = null;
+      }
+    };
+  }, [activePdfRenderLayer, makePdfRenderLayer, zoomLevel]);
+
+  useEffect(() => {
     const node = containerRef.current;
     if (!node) return;
 
@@ -1901,6 +2043,10 @@ export function RepertoireWorkspace({
       Object.values(timerMap).forEach((timer) => clearTimeout(timer));
       if (saveStateTimeoutRef.current) {
         clearTimeout(saveStateTimeoutRef.current);
+      }
+      if (zoomRenderTimerRef.current) {
+        clearTimeout(zoomRenderTimerRef.current);
+        zoomRenderTimerRef.current = null;
       }
       reset();
     };
@@ -2210,8 +2356,12 @@ export function RepertoireWorkspace({
   }
 
   function handleColorCycle() {
-    const idx = COLOR_OPTIONS.indexOf(activeColor);
+    const idx = COLOR_OPTIONS.indexOf(activeColor as LegacyAnnotationColor);
     setActiveColor(COLOR_OPTIONS[(idx + 1) % COLOR_OPTIONS.length]);
+  }
+
+  function handleStrokeWidthChange(value: number) {
+    setActiveStrokeWidthPx(clampAnnotationStrokeWidthPx(value));
   }
 
   function zoomIn() {
@@ -2231,10 +2381,141 @@ export function RepertoireWorkspace({
   const toolLabel = activeToolInfo?.label ?? '—';
   const zoomedWidth = viewerWidth > 0 ? Math.floor(viewerWidth * zoomLevel) : 0;
 
+  function renderPdfPageLayer(layer: PdfRenderLayer) {
+    if (!activePdfPageNumber || viewerWidth <= 0) {
+      return null;
+    }
+
+    const isActiveLayer = visiblePdfRenderLayer?.id === layer.id;
+    const layerWidth = Math.max(1, Math.floor(viewerWidth * layer.zoomLevel));
+    const layerHeight = layerWidth * stageAspectRatio;
+    const displayScale = isActiveLayer && layerWidth > 0 ? zoomedWidth / layerWidth : 1;
+
+    return (
+      <div
+        key={layer.id}
+        aria-hidden={!isActiveLayer}
+        className="absolute left-0 top-0 origin-top-left"
+        style={{
+          width: layerWidth,
+          height: layerHeight,
+          opacity: isActiveLayer ? 1 : 0,
+          pointerEvents: 'none',
+          transform: `scale(${displayScale})`,
+          transformOrigin: 'top left',
+          willChange: isActiveLayer ? 'transform' : undefined,
+          zIndex: isActiveLayer ? 1 : 0,
+        }}
+      >
+        <Page
+          _enableRegisterUnregisterPage={false}
+          pageNumber={activePdfPageNumber}
+          width={layerWidth}
+          renderAnnotationLayer={false}
+          renderTextLayer={false}
+          loading={null}
+          onLoadSuccess={(page) => {
+            const viewport = page.getViewport({ scale: 1 });
+            setPageAspectRatio(viewport.height / viewport.width);
+          }}
+          onRenderSuccess={() => handlePdfLayerRenderSuccess(layer)}
+          onRenderError={() => handlePdfLayerRenderError(layer)}
+        />
+      </div>
+    );
+  }
+
+  function renderLegacyColorButton(color: LegacyAnnotationColor) {
+    const selected = activeColor === color;
+
+    return (
+      <button
+        key={color}
+        type="button"
+        onClick={() => setActiveColor(color)}
+        title={getAnnotationColorLabel(color)}
+        aria-label={getAnnotationColorLabel(color)}
+        className={`h-5 w-5 rounded-full border transition-transform active:scale-90 ${
+          selected
+            ? 'border-[var(--color-accent)] ring-2 ring-[var(--color-accent)]/25'
+            : 'border-white/20 hover:border-[var(--color-border-strong)]'
+        }`}
+        style={{ backgroundColor: ANNOTATION_COLOR_SWATCHES[color] }}
+      />
+    );
+  }
+
+  function renderStrokeStrip() {
+    const resolvedColor = resolveAnnotationColor(activeColor);
+    const strokeWidth = clampAnnotationStrokeWidthPx(activeStrokeWidthPx);
+
+    return (
+      <div className="flex min-h-7 max-w-full flex-wrap items-center gap-1 rounded-[7px] border border-[var(--color-border)] bg-white/[0.045] px-1.5 py-1">
+        <div
+          className="h-6 w-6 shrink-0 rounded-full border-2 border-[var(--color-border-strong)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.22)]"
+          style={{ backgroundColor: resolvedColor }}
+          title={getAnnotationColorLabel(activeColor)}
+        />
+
+        <div className="flex items-center gap-1">
+          {COLOR_OPTIONS.map(renderLegacyColorButton)}
+          <label
+            title="Özel renk"
+            aria-label="Özel renk"
+            className="relative grid h-5 w-5 cursor-pointer place-items-center overflow-hidden rounded-full border border-dashed border-[var(--color-border-strong)] bg-white/5"
+          >
+            <span
+              className="h-3.5 w-3.5 rounded-full border border-white/20"
+              style={{ backgroundColor: resolvedColor }}
+            />
+            <input
+              type="color"
+              value={resolvedColor}
+              onChange={(event) => setActiveColor(event.target.value as AnnotationColor)}
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              aria-label="Özel renk seç"
+            />
+          </label>
+        </div>
+
+        <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--color-border)]" />
+
+        <div className="flex min-w-[138px] flex-1 items-center gap-1.5">
+          <div className="flex h-6 w-11 shrink-0 items-center justify-center rounded-[6px] border border-[var(--color-border)] bg-black/10 px-1">
+            <span
+              className="w-8 rounded-full"
+              style={{
+                height: strokeWidth,
+                backgroundColor: resolvedColor,
+              }}
+            />
+          </div>
+          <input
+            type="range"
+            min={MIN_ANNOTATION_STROKE_WIDTH_PX}
+            max={MAX_ANNOTATION_STROKE_WIDTH_PX}
+            step={1}
+            value={strokeWidth}
+            onChange={(event) => handleStrokeWidthChange(Number(event.target.value))}
+            className="annotation-stroke-range h-6 w-24 min-w-20 flex-1"
+            style={{ accentColor: resolvedColor, color: resolvedColor }}
+            aria-label="Çizgi kalınlığı"
+            title="Çizgi kalınlığı"
+          />
+          <span className="w-8 shrink-0 text-right text-[0.58rem] font-bold tabular-nums text-[var(--color-text-medium)]">
+            {strokeWidth}px
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   function renderFloatingEditBar() {
     if (!isEditMode || !canEdit) {
       return null;
     }
+
+    const showStrokeStrip = isStrokeConfigurableTool(activeTool);
 
     return (
       <div
@@ -2287,13 +2568,17 @@ export function RepertoireWorkspace({
           <ToolIcon size={12} />
         </button>
 
-        <button
-          type="button"
-          onClick={handleColorCycle}
-          title={activeColor === 'black' ? 'Siyah' : activeColor === 'red' ? 'Kırmızı' : 'Beyaz'}
-          className="h-6 w-6 rounded-full border-2 border-white/25 transition-transform active:scale-90"
-          style={{ backgroundColor: ANNOTATION_COLOR_SWATCHES[activeColor] }}
-        />
+        {showStrokeStrip ? (
+          renderStrokeStrip()
+        ) : (
+          <button
+            type="button"
+            onClick={handleColorCycle}
+            title={getAnnotationColorLabel(activeColor)}
+            className="h-6 w-6 rounded-full border-2 border-white/25 transition-transform active:scale-90"
+            style={{ backgroundColor: resolveAnnotationColor(activeColor) }}
+          />
+        )}
 
         <span className="h-4 w-px bg-[var(--color-border)]" />
 
@@ -2575,16 +2860,9 @@ export function RepertoireWorkspace({
                       )
                     ) : (
                       <>
-                        <Page
-                          pageNumber={activePdfPageNumber ?? 1}
-                          width={zoomedWidth}
-                          renderAnnotationLayer={false}
-                          renderTextLayer={false}
-                          onLoadSuccess={(page) => {
-                            const viewport = page.getViewport({ scale: 1 });
-                            setPageAspectRatio(viewport.height / viewport.width);
-                          }}
-                        />
+                        <div className="absolute inset-0 z-0">
+                          {pdfRenderLayers.map(renderPdfPageLayer)}
+                        </div>
 
                         {activePdfPageNumber && pageAspectRatio && (
                           <AnnotationStage
@@ -2595,6 +2873,7 @@ export function RepertoireWorkspace({
                             activeItems={activeItems}
                             activeTool={activeTool}
                             activeColor={activeColor}
+                            activeStrokeWidthPx={activeStrokeWidthPx}
                             isEditMode={isEditMode}
                             onCommitActiveItems={commitActiveItems}
                           />

@@ -1,14 +1,22 @@
 'use client';
 
 import { motion, AnimatePresence } from 'motion/react';
-import { CheckCircle2, XCircle, Clock, ChevronRight, ArrowLeft } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, ChevronRight, ArrowLeft, X, Maximize2, ImageIcon, LockKeyhole } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
 import { supabase } from '@/lib/supabase';
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useToast } from '@/components/ToastProvider';
+import {
+  getProfileChangeKeys,
+  haveOverlappingProfileChangeKeys,
+  sanitizeProfileChanges,
+  type ProfileChangeKey,
+  type ProfileChangeMap,
+  type ProfileChangeValue,
+} from '@/lib/profile-change-requests';
 
-interface PersonSummary {
+interface PersonSummary extends Partial<Record<ProfileChangeKey, ProfileChangeValue>> {
   first_name: string;
   last_name: string;
   voice_group: string | null;
@@ -17,7 +25,8 @@ interface PersonSummary {
 interface ChangeRequest {
   id: string;
   member_id: string;
-  changes_json: Record<string, string>;
+  changes_json: ProfileChangeMap;
+  previous_values_json: ProfileChangeMap;
   status: 'pending' | 'approved' | 'rejected';
   note: string | null;
   reject_reason: string | null;
@@ -28,7 +37,13 @@ interface ChangeRequest {
   reviewer: PersonSummary | null;
 }
 
-const FIELD_LABELS: Record<string, string> = {
+interface PhotoCompareState {
+  title: string;
+  oldUrl: string | null;
+  newUrl: string | null;
+}
+
+const FIELD_LABELS: Record<ProfileChangeKey, string> = {
   email: 'E-posta',
   phone: 'Telefon',
   birth_date: 'Doğum Tarihi',
@@ -66,7 +81,10 @@ const DEPTS: Record<string, string> = {
   '8a794ff4-c307-4e93-9652-ec2e36e1d8c3': 'Müzik',
 };
 
-function displayValue(key: string, val: string) {
+function displayValue(key: ProfileChangeKey, val: ProfileChangeValue | undefined) {
+  if (val === null || val === undefined || val === '') {
+    return '—';
+  }
   if (key === 'school_id') {
     return SCHOOLS[val] || val;
   }
@@ -79,7 +97,7 @@ function displayValue(key: string, val: string) {
   if (key === 'photo_url') {
     return val ? 'Profil fotoğrafı güncellendi' : 'Profil fotoğrafı temizlendi';
   }
-  return val || '—';
+  return val;
 }
 
 function formatFullDate(iso: string | null) {
@@ -121,6 +139,48 @@ function statusPillClass(status: ChangeRequest['status']) {
   return 'bg-[var(--status-pending-bg)] text-[var(--status-pending-text)] border-[var(--status-pending-border)]';
 }
 
+function sortByCreatedAtAsc(first: ChangeRequest, second: ChangeRequest) {
+  return new Date(first.created_at).getTime() - new Date(second.created_at).getTime();
+}
+
+function sortByDecisionDesc(first: ChangeRequest, second: ChangeRequest) {
+  const firstTime = new Date(first.reviewed_at ?? first.created_at).getTime();
+  const secondTime = new Date(second.reviewed_at ?? second.created_at).getTime();
+  return secondTime - firstTime;
+}
+
+function getRequestChangeEntries(req: ChangeRequest): Array<[ProfileChangeKey, ProfileChangeValue]> {
+  return getProfileChangeKeys(req.changes_json).map((key) => [key, req.changes_json[key] ?? null]);
+}
+
+function getPreviousValue(req: ChangeRequest, key: ProfileChangeKey): ProfileChangeValue {
+  if (req.status === 'pending' && req.requester) {
+    return req.requester[key] ?? null;
+  }
+  return req.previous_values_json?.[key] ?? null;
+}
+
+function getBlockingRequest(req: ChangeRequest, requests: ChangeRequest[]) {
+  if (req.status !== 'pending') {
+    return null;
+  }
+
+  const createdAt = new Date(req.created_at).getTime();
+  return (
+    requests
+      .filter((candidate) => {
+        if (candidate.id === req.id || candidate.status !== 'pending' || candidate.member_id !== req.member_id) {
+          return false;
+        }
+        return (
+          new Date(candidate.created_at).getTime() < createdAt &&
+          haveOverlappingProfileChangeKeys(candidate.changes_json, req.changes_json)
+        );
+      })
+      .sort(sortByCreatedAtAsc)[0] ?? null
+  );
+}
+
 async function reviewRequest(params: { requestId: string; action: 'approve' | 'reject'; rejectReason?: string }) {
   const { data } = await supabase.auth.getSession();
   const accessToken = data.session?.access_token;
@@ -154,13 +214,14 @@ export default function ProfilDegisiklikler() {
   const [expandedDone, setExpandedDone] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
   const [rejectText, setRejectText] = useState<Record<string, string>>({});
+  const [photoCompare, setPhotoCompare] = useState<PhotoCompareState | null>(null);
 
   const fetchRequests = useCallback(async () => {
     setLoadingReqs(true);
 
     const { data, error } = await supabase
       .from('profile_change_requests')
-      .select('id, member_id, changes_json, status, note, reject_reason, reviewed_by, reviewed_at, created_at')
+      .select('id, member_id, changes_json, previous_values_json, status, note, reject_reason, reviewed_by, reviewed_at, created_at')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -183,7 +244,7 @@ export default function ProfilDegisiklikler() {
     if (personIds.length > 0) {
       const { data: people, error: peopleError } = await supabase
         .from('choir_members')
-        .select('id, first_name, last_name, voice_group')
+        .select('id, first_name, last_name, voice_group, email, phone, birth_date, school_id, department_id, linkedin_url, instagram_url, youtube_url, spotify_url, photo_url')
         .in('id', personIds);
 
       if (peopleError) {
@@ -196,6 +257,16 @@ export default function ProfilDegisiklikler() {
               first_name: person.first_name,
               last_name: person.last_name,
               voice_group: person.voice_group,
+              email: person.email ?? null,
+              phone: person.phone ?? null,
+              birth_date: person.birth_date ?? null,
+              school_id: person.school_id ?? null,
+              department_id: person.department_id ?? null,
+              linkedin_url: person.linkedin_url ?? null,
+              instagram_url: person.instagram_url ?? null,
+              youtube_url: person.youtube_url ?? null,
+              spotify_url: person.spotify_url ?? null,
+              photo_url: person.photo_url ?? null,
             },
           ]),
         );
@@ -205,6 +276,8 @@ export default function ProfilDegisiklikler() {
     setRequests(
       rows.map((row) => ({
         ...row,
+        changes_json: sanitizeProfileChanges(row.changes_json),
+        previous_values_json: sanitizeProfileChanges(row.previous_values_json),
         requester: peopleMap.get(row.member_id) ?? null,
         reviewer: row.reviewed_by ? peopleMap.get(row.reviewed_by) ?? null : null,
       })),
@@ -291,8 +364,8 @@ export default function ProfilDegisiklikler() {
   }
 
   const isChefView = chefView;
-  const pending = requests.filter((request) => request.status === 'pending');
-  const done = requests.filter((request) => request.status !== 'pending');
+  const pending = requests.filter((request) => request.status === 'pending').sort(sortByCreatedAtAsc);
+  const done = requests.filter((request) => request.status !== 'pending').sort(sortByDecisionDesc);
 
   return (
     <main className="page-shell pb-28 space-y-4 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
@@ -328,6 +401,7 @@ export default function ProfilDegisiklikler() {
                 <ChefPendingRequestCard
                   key={request.id}
                   req={request}
+                  blockingRequest={getBlockingRequest(request, requests)}
                   expanded={expanded === request.id}
                   onToggle={() => setExpanded(expanded === request.id ? null : request.id)}
                   onApprove={() => handleApprove(request)}
@@ -339,6 +413,7 @@ export default function ProfilDegisiklikler() {
                       [request.id]: text,
                     }))
                   }
+                  onOpenPhotoCompare={setPhotoCompare}
                   processing={processing === request.id}
                 />
               ))}
@@ -359,6 +434,7 @@ export default function ProfilDegisiklikler() {
                     req={request}
                     expanded={expandedDone === request.id}
                     onToggle={() => setExpandedDone(expandedDone === request.id ? null : request.id)}
+                    onOpenPhotoCompare={setPhotoCompare}
                   />
                 ))}
               </div>
@@ -373,16 +449,28 @@ export default function ProfilDegisiklikler() {
               req={request}
               expanded={expanded === request.id}
               onToggle={() => setExpanded(expanded === request.id ? null : request.id)}
+              onOpenPhotoCompare={setPhotoCompare}
             />
           ))}
         </div>
       )}
+      <PhotoCompareOverlay state={photoCompare} onClose={() => setPhotoCompare(null)} />
     </main>
   );
 }
 
-function ChoristRequestCard({ req, expanded, onToggle }: { req: ChangeRequest; expanded: boolean; onToggle: () => void }) {
-  const changes = Object.entries(req.changes_json);
+function ChoristRequestCard({
+  req,
+  expanded,
+  onToggle,
+  onOpenPhotoCompare,
+}: {
+  req: ChangeRequest;
+  expanded: boolean;
+  onToggle: () => void;
+  onOpenPhotoCompare: (state: PhotoCompareState) => void;
+}) {
+  const changes = getRequestChangeEntries(req);
   const reviewerName = req.reviewer ? `${req.reviewer.first_name} ${req.reviewer.last_name}` : '—';
 
   return (
@@ -427,17 +515,7 @@ function ChoristRequestCard({ req, expanded, onToggle }: { req: ChangeRequest; e
                 </div>
               )}
 
-              <div className="space-y-2">
-                <p className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)]">Değişiklik Detayları</p>
-                {changes.map(([key, value]) => (
-                  <div key={key} className="rounded-lg bg-[var(--color-soft-bg)] p-3">
-                    <span className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)] block">
-                      {FIELD_LABELS[key] || key}
-                    </span>
-                    <span className="text-[0.85rem] text-[var(--color-text-high)] break-all">{displayValue(key, value)}</span>
-                  </div>
-                ))}
-              </div>
+              <ChangeDetails req={req} onOpenPhotoCompare={onOpenPhotoCompare} />
             </div>
           </motion.div>
         )}
@@ -448,25 +526,29 @@ function ChoristRequestCard({ req, expanded, onToggle }: { req: ChangeRequest; e
 
 function ChefPendingRequestCard({
   req,
+  blockingRequest,
   expanded,
   onToggle,
   onApprove,
   onReject,
   rejectText,
   onRejectTextChange,
+  onOpenPhotoCompare,
   processing,
 }: {
   req: ChangeRequest;
+  blockingRequest: ChangeRequest | null;
   expanded: boolean;
   onToggle: () => void;
   onApprove: () => void;
   onReject: () => void;
   rejectText: string;
   onRejectTextChange: (value: string) => void;
+  onOpenPhotoCompare: (state: PhotoCompareState) => void;
   processing: boolean;
 }) {
   const requesterName = req.requester ? `${req.requester.first_name} ${req.requester.last_name}` : 'Bilinmiyor';
-  const changes = Object.entries(req.changes_json);
+  const changes = getRequestChangeEntries(req);
 
   return (
     <motion.div layout className="glass-panel overflow-hidden">
@@ -480,6 +562,11 @@ function ChefPendingRequestCard({
             {changes.length} değişiklik · {formatFullDate(req.created_at)}
           </p>
         </div>
+        {blockingRequest && (
+          <span className="hidden sm:inline-flex rounded-full border border-[var(--status-pending-border)] bg-[var(--status-pending-bg)] px-2.5 py-1 text-[0.60rem] font-semibold uppercase tracking-[0.12em] text-[var(--status-pending-text)]">
+            Sıra bekliyor
+          </span>
+        )}
         <ChevronRight size={16} className={`text-[var(--color-text-medium)] transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`} />
       </button>
 
@@ -495,18 +582,16 @@ function ChefPendingRequestCard({
             <div className="px-4 pb-4 space-y-4">
               <div className="h-px w-full bg-[var(--color-border)]" />
 
-              <div className="space-y-2">
-                {changes.map(([key, value]) => (
-                  <div key={key} className="flex items-start gap-2 rounded-lg bg-[var(--color-soft-bg)] p-3">
-                    <div className="flex-1 min-w-0">
-                      <span className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)] block">
-                        {FIELD_LABELS[key] || key}
-                      </span>
-                      <span className="text-[0.85rem] text-[var(--color-text-high)] break-all">{displayValue(key, value)}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <ChangeDetails req={req} onOpenPhotoCompare={onOpenPhotoCompare} />
+
+              {blockingRequest && (
+                <div className="flex items-start gap-3 rounded-lg border border-[var(--status-pending-border)] bg-[var(--status-pending-bg)] p-3 text-[var(--status-pending-text)]">
+                  <LockKeyhole size={15} className="mt-0.5 shrink-0" />
+                  <p className="text-[0.78rem] leading-5">
+                    Bu talepteki alanlardan biri daha eski bir bekleyen taleple çakışıyor. Önce {formatFullDate(blockingRequest.created_at)} tarihli talep sonuçlandırılmalı.
+                  </p>
+                </div>
+              )}
 
               {req.note && (
                 <div className="rounded-lg border border-[var(--color-border)] p-3">
@@ -529,14 +614,14 @@ function ChefPendingRequestCard({
               <div className="flex gap-2">
                 <button
                   onClick={onApprove}
-                  disabled={processing}
+                  disabled={processing || Boolean(blockingRequest)}
                   className="flex-1 flex items-center justify-center gap-2 rounded-full bg-green-500/20 border border-green-500/30 text-green-400 py-2.5 text-[0.82rem] font-bold hover:bg-green-500/30 transition-colors disabled:opacity-50"
                 >
                   {processing ? '...' : (<><CheckCircle2 size={15} /> Onayla</>)}
                 </button>
                 <button
                   onClick={onReject}
-                  disabled={processing}
+                  disabled={processing || Boolean(blockingRequest)}
                   className="flex-1 flex items-center justify-center gap-2 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 py-2.5 text-[0.82rem] font-bold hover:bg-red-500/20 transition-colors disabled:opacity-50"
                 >
                   {processing ? '...' : (<><XCircle size={15} /> Reddet</>)}
@@ -550,11 +635,20 @@ function ChefPendingRequestCard({
   );
 }
 
-function ChefDoneCard({ req, expanded, onToggle }: { req: ChangeRequest; expanded: boolean; onToggle: () => void }) {
+function ChefDoneCard({
+  req,
+  expanded,
+  onToggle,
+  onOpenPhotoCompare,
+}: {
+  req: ChangeRequest;
+  expanded: boolean;
+  onToggle: () => void;
+  onOpenPhotoCompare: (state: PhotoCompareState) => void;
+}) {
   const requesterName = req.requester ? `${req.requester.first_name} ${req.requester.last_name}` : 'Bilinmiyor';
   const reviewerName = req.reviewer ? `${req.reviewer.first_name} ${req.reviewer.last_name}` : '—';
-  const changes = Object.keys(req.changes_json).length;
-  const changeEntries = Object.entries(req.changes_json);
+  const changes = getRequestChangeEntries(req).length;
   const isApproved = req.status === 'approved';
 
   return (
@@ -603,22 +697,212 @@ function ChefDoneCard({ req, expanded, onToggle }: { req: ChangeRequest; expande
                 </div>
               )}
 
-              <div className="space-y-2">
-                <p className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)]">Değişiklik Detayları</p>
-                {changeEntries.map(([key, value]) => (
-                  <div key={key} className="rounded-lg bg-[var(--color-soft-bg)] p-3">
-                    <span className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)] block">
-                      {FIELD_LABELS[key] || key}
-                    </span>
-                    <span className="text-[0.85rem] text-[var(--color-text-high)] break-all">{displayValue(key, value)}</span>
-                  </div>
-                ))}
-              </div>
+              <ChangeDetails req={req} onOpenPhotoCompare={onOpenPhotoCompare} />
             </div>
           </motion.div>
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+function ChangeDetails({
+  req,
+  onOpenPhotoCompare,
+}: {
+  req: ChangeRequest;
+  onOpenPhotoCompare: (state: PhotoCompareState) => void;
+}) {
+  const entries = getRequestChangeEntries(req);
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)]">Değişiklik Detayları</p>
+      {entries.map(([key, value]) => {
+        const previousValue = getPreviousValue(req, key);
+        if (key === 'photo_url') {
+          return (
+            <PhotoChangeRow
+              key={key}
+              label={FIELD_LABELS[key]}
+              oldUrl={typeof previousValue === 'string' ? previousValue : null}
+              newUrl={typeof value === 'string' ? value : null}
+              onOpen={() =>
+                onOpenPhotoCompare({
+                  title: FIELD_LABELS[key],
+                  oldUrl: typeof previousValue === 'string' ? previousValue : null,
+                  newUrl: typeof value === 'string' ? value : null,
+                })
+              }
+            />
+          );
+        }
+
+        return (
+          <ValueChangeRow
+            key={key}
+            label={FIELD_LABELS[key]}
+            oldValue={displayValue(key, previousValue)}
+            newValue={displayValue(key, value)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function ValueChangeRow({ label, oldValue, newValue }: { label: string; oldValue: string; newValue: string }) {
+  return (
+    <div className="rounded-lg bg-[var(--color-soft-bg)] p-3">
+      <span className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)] block">{label}</span>
+      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <ValueBox label="Eskisi" value={oldValue} />
+        <ValueBox label="Yenisi" value={newValue} emphasis />
+      </div>
+    </div>
+  );
+}
+
+function ValueBox({ label, value, emphasis = false }: { label: string; value: string; emphasis?: boolean }) {
+  return (
+    <div className="min-w-0 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+      <p className="text-[0.58rem] uppercase tracking-[0.16em] text-[var(--color-text-medium)]">{label}</p>
+      <p className={`mt-1 text-[0.84rem] break-all ${emphasis ? 'text-[var(--color-text-high)]' : 'text-[var(--color-text-medium)]'}`}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function PhotoChangeRow({
+  label,
+  oldUrl,
+  newUrl,
+  onOpen,
+}: {
+  label: string;
+  oldUrl: string | null;
+  newUrl: string | null;
+  onOpen: () => void;
+}) {
+  return (
+    <div className="rounded-lg bg-[var(--color-soft-bg)] p-3">
+      <span className="text-[0.60rem] uppercase tracking-wider text-[var(--color-text-medium)] block">{label}</span>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <PhotoThumb label="Eskisi" url={oldUrl} onOpen={onOpen} />
+        <PhotoThumb label="Yenisi" url={newUrl} onOpen={onOpen} emphasis />
+      </div>
+    </div>
+  );
+}
+
+function PhotoThumb({
+  label,
+  url,
+  onOpen,
+  emphasis = false,
+}: {
+  label: string;
+  url: string | null;
+  onOpen: () => void;
+  emphasis?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group relative overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-left transition-colors hover:border-[var(--color-accent-soft)]"
+      aria-label={`${label} profil fotoğrafını büyüt`}
+    >
+      <div className="aspect-square w-full overflow-hidden bg-black/20">
+        {url ? (
+          <img src={url} alt={label} className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[var(--color-text-medium)]">
+            <ImageIcon size={22} />
+            <span className="text-[0.68rem]">Fotoğraf yok</span>
+          </div>
+        )}
+      </div>
+      <div className="flex items-center justify-between gap-2 px-3 py-2">
+        <span className={`text-[0.62rem] uppercase tracking-[0.14em] ${emphasis ? 'text-[var(--color-text-high)]' : 'text-[var(--color-text-medium)]'}`}>
+          {label}
+        </span>
+        <Maximize2 size={13} className="text-[var(--color-text-medium)] transition-colors group-hover:text-[var(--color-accent)]" />
+      </div>
+    </button>
+  );
+}
+
+function PhotoCompareOverlay({ state, onClose }: { state: PhotoCompareState | null; onClose: () => void }) {
+  useEffect(() => {
+    if (!state) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, state]);
+
+  return (
+    <AnimatePresence>
+      {state && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[300] bg-black/90 backdrop-blur-sm"
+        >
+          <button type="button" aria-label="Kapat" className="absolute inset-0 cursor-default" onClick={onClose} />
+          <div className="relative z-[301] flex h-full flex-col gap-4 p-4 pt-[calc(1rem+env(safe-area-inset-top))] sm:p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[0.65rem] uppercase tracking-[0.18em] text-white/55">{state.title}</p>
+                <h2 className="font-serif text-xl text-white">Eski ve yeni fotoğraf</h2>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/10 text-white transition-colors hover:bg-white/20"
+                aria-label="Kapat"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto md:grid-cols-2">
+              <FullPhotoPanel label="Eskisi" url={state.oldUrl} />
+              <FullPhotoPanel label="Yenisi" url={state.newUrl} />
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function FullPhotoPanel({ label, url }: { label: string; url: string | null }) {
+  return (
+    <div className="flex min-h-[45vh] flex-col overflow-hidden rounded-lg border border-white/15 bg-white/[0.04]">
+      <div className="border-b border-white/10 px-4 py-3 text-[0.68rem] font-bold uppercase tracking-[0.18em] text-white/70">
+        {label}
+      </div>
+      <div className="flex min-h-0 flex-1 items-center justify-center p-3">
+        {url ? (
+          <img src={url} alt={label} className="max-h-full max-w-full object-contain" />
+        ) : (
+          <div className="flex flex-col items-center gap-3 text-white/55">
+            <ImageIcon size={34} />
+            <span className="text-sm">Fotoğraf yok</span>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

@@ -6,8 +6,11 @@ import {
   AnnotationLayerKey,
   AnnotationSaveState,
   AnnotationTool,
+  DEFAULT_ANNOTATION_COLOR,
+  DEFAULT_ANNOTATION_STROKE_WIDTH_PX,
   LayerVisibility,
   PreviewVoiceGroup,
+  clampAnnotationStrokeWidthPx,
   cloneAnnotationItems,
 } from '@/lib/repertuvar/annotation-types';
 
@@ -30,6 +33,7 @@ interface RepertoireWorkspaceState {
   previewVoiceGroup: PreviewVoiceGroup;
   activeTool: AnnotationTool;
   activeColor: AnnotationColor;
+  activeStrokeWidthPx: number;
   visibility: LayerVisibility;
   layersByPage: LayerState;
   historyByLayerPage: HistoryState;
@@ -50,6 +54,7 @@ interface RepertoireWorkspaceState {
   setPreviewVoiceGroup: (value: PreviewVoiceGroup) => void;
   setActiveTool: (value: AnnotationTool) => void;
   setActiveColor: (value: AnnotationColor) => void;
+  setActiveStrokeWidthPx: (value: number) => void;
   toggleVisibility: (key: keyof LayerVisibility) => void;
   replaceFileLayers: (fileId: string, layers: LayerState) => void;
   setLayerItems: (layerPageKey: string, items: AnnotationItem[]) => void;
@@ -99,7 +104,8 @@ export const useRepertoireWorkspaceStore = create<RepertoireWorkspaceState>((set
   activeLayerKey: 'personal',
   previewVoiceGroup: 'ALL',
   activeTool: null,
-  activeColor: 'red',
+  activeColor: DEFAULT_ANNOTATION_COLOR,
+  activeStrokeWidthPx: DEFAULT_ANNOTATION_STROKE_WIDTH_PX,
   visibility: {
     personal: true,
     shared: true,
@@ -124,6 +130,8 @@ export const useRepertoireWorkspaceStore = create<RepertoireWorkspaceState>((set
   setPreviewVoiceGroup: (previewVoiceGroup) => set({ previewVoiceGroup }),
   setActiveTool: (activeTool) => set({ activeTool }),
   setActiveColor: (activeColor) => set({ activeColor }),
+  setActiveStrokeWidthPx: (activeStrokeWidthPx) =>
+    set({ activeStrokeWidthPx: clampAnnotationStrokeWidthPx(activeStrokeWidthPx) }),
   toggleVisibility: (key) =>
     set((state) => ({
       visibility: {
@@ -271,7 +279,8 @@ export const useRepertoireWorkspaceStore = create<RepertoireWorkspaceState>((set
       activeLayerKey: 'personal',
       previewVoiceGroup: 'ALL',
       activeTool: null,
-      activeColor: 'red',
+      activeColor: DEFAULT_ANNOTATION_COLOR,
+      activeStrokeWidthPx: DEFAULT_ANNOTATION_STROKE_WIDTH_PX,
       visibility: {
         personal: true,
         shared: true,

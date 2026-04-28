@@ -291,6 +291,47 @@ select {
   border-radius: 12px;
 }
 
+.annotation-stroke-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+.annotation-stroke-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.annotation-stroke-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border: 2px solid var(--color-surface-solid);
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 1px var(--color-border-strong), 0 4px 12px rgba(0, 0, 0, 0.32);
+}
+
+.annotation-stroke-range::-moz-range-track {
+  height: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.annotation-stroke-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-surface-solid);
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 1px var(--color-border-strong), 0 4px 12px rgba(0, 0, 0, 0.32);
+}
+
 .fade-overlay {
   pointer-events: none;
   position: fixed;

@@ -1,5 +1,12 @@
 import { NextResponse } from 'next/server';
 
+import {
+  getProfileChangeKeys,
+  haveOverlappingProfileChangeKeys,
+  pickProfileChangeValues,
+  sanitizeProfileChanges,
+  toProfileChangePayload,
+} from '@/lib/profile-change-requests';
 import { sendProfileDecisionPush } from '@/lib/server/push-notifications';
 import { createSupabaseServiceClient, requireAuthenticatedUser } from '@/lib/server/supabase-auth';
 
@@ -18,18 +25,8 @@ interface ReviewerRoleEntry {
   roles?: { name?: string } | { name?: string }[] | null;
 }
 
-const ALLOWED_PROFILE_CHANGE_KEYS = new Set([
-  'email',
-  'phone',
-  'birth_date',
-  'school_id',
-  'department_id',
-  'linkedin_url',
-  'instagram_url',
-  'youtube_url',
-  'spotify_url',
-  'photo_url',
-]);
+const PROFILE_MEMBER_SELECT =
+  'id, email, phone, birth_date, school_id, department_id, linkedin_url, instagram_url, youtube_url, spotify_url, photo_url';
 
 function normalizeRoleName(value: string) {
   return value
@@ -54,27 +51,6 @@ function hasChefRole(roleRows: ReviewerRoleEntry[] | null | undefined) {
   });
 
   return roleNames.some((roleName) => normalizeRoleName(roleName) === 'sef');
-}
-
-function sanitizeProfileChanges(raw: unknown): Record<string, string | null> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return {};
-  }
-
-  const result: Record<string, string | null> = {};
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!ALLOWED_PROFILE_CHANGE_KEYS.has(key)) {
-      continue;
-    }
-    if (typeof value === 'string') {
-      result[key] = value.trim();
-      continue;
-    }
-    if (value === null) {
-      result[key] = null;
-    }
-  }
-  return result;
 }
 
 export async function POST(request: Request) {
@@ -125,7 +101,7 @@ export async function POST(request: Request) {
 
     const { data: existingRequest, error: existingRequestError } = await serviceClient
       .from('profile_change_requests')
-      .select('id, member_id, changes_json, status')
+      .select('id, member_id, changes_json, status, created_at')
       .eq('id', requestId)
       .maybeSingle();
 
@@ -142,9 +118,49 @@ export async function POST(request: Request) {
     }
 
     const sanitizedChanges = sanitizeProfileChanges(existingRequest.changes_json);
-    if (action === 'approve' && Object.keys(sanitizedChanges).length === 0) {
+    const changeKeys = getProfileChangeKeys(sanitizedChanges);
+    if (action === 'approve' && changeKeys.length === 0) {
       return new NextResponse('Onaylanacak geçerli profil alanı bulunamadı.', { status: 400 });
     }
+
+    const { data: olderPendingRequests, error: olderPendingError } = await serviceClient
+      .from('profile_change_requests')
+      .select('id, changes_json, created_at')
+      .eq('member_id', existingRequest.member_id)
+      .eq('status', 'pending')
+      .lt('created_at', existingRequest.created_at)
+      .order('created_at', { ascending: true });
+
+    if (olderPendingError) {
+      return new NextResponse(olderPendingError.message, { status: 500 });
+    }
+
+    const blockingRequest = (olderPendingRequests ?? []).find((row) =>
+      haveOverlappingProfileChangeKeys(sanitizeProfileChanges(row.changes_json), sanitizedChanges),
+    );
+
+    if (blockingRequest) {
+      return new NextResponse(
+        'Bu talep daha eski bekleyen bir profil talebiyle aynı alanı değiştiriyor. Önce önceki talebi onaylayın veya reddedin.',
+        { status: 409 },
+      );
+    }
+
+    const { data: targetMember, error: targetMemberError } = await serviceClient
+      .from('choir_members')
+      .select(PROFILE_MEMBER_SELECT)
+      .eq('id', existingRequest.member_id)
+      .maybeSingle();
+
+    if (targetMemberError) {
+      return new NextResponse(targetMemberError.message, { status: 500 });
+    }
+
+    if (!targetMember) {
+      return new NextResponse('Talep sahibi bulunamadı.', { status: 404 });
+    }
+
+    const reviewPreviousValues = pickProfileChangeValues(targetMember as Record<string, unknown>, changeKeys);
 
     const reviewedAt = new Date().toISOString();
     const nextStatus = action === 'approve' ? 'approved' : 'rejected';
@@ -153,6 +169,7 @@ export async function POST(request: Request) {
       .from('profile_change_requests')
       .update({
         status: nextStatus,
+        previous_values_json: toProfileChangePayload(reviewPreviousValues),
         reviewed_by: reviewer.id,
         reviewed_at: reviewedAt,
         reject_reason: action === 'reject' ? rejectReason : null,
@@ -173,7 +190,7 @@ export async function POST(request: Request) {
     if (action === 'approve') {
       const { error: memberUpdateError } = await serviceClient
         .from('choir_members')
-        .update(sanitizedChanges)
+        .update(toProfileChangePayload(sanitizedChanges))
         .eq('id', updatedRequest.member_id);
 
       if (memberUpdateError) {

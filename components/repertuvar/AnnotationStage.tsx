@@ -6,7 +6,6 @@ import Konva from 'konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 
 import {
-  ANNOTATION_COLOR_SWATCHES,
   AnnotationColor,
   AnnotationItem,
   AnnotationTool,
@@ -14,10 +13,12 @@ import {
   NormalizedPoint,
   RectangleShape,
   TextNote,
+  clampAnnotationStrokeWidthPx,
   clampNormalizedPoint,
   createAnnotationId,
   denormalizePoint,
   normalizePoint,
+  resolveAnnotationColor,
 } from '@/lib/repertuvar/annotation-types';
 
 interface VisibleAnnotationEntry {
@@ -33,6 +34,7 @@ interface AnnotationStageProps {
   activeItems: AnnotationItem[];
   activeTool: AnnotationTool;
   activeColor: AnnotationColor;
+  activeStrokeWidthPx: number;
   isEditMode: boolean;
   onCommitActiveItems: (items: AnnotationItem[]) => void;
 }
@@ -53,8 +55,8 @@ interface ShapeDraft {
   end: NormalizedPoint;
 }
 
-function getStrokeWidth(width: number): number {
-  return Math.max(0.0025, Math.min(0.008, 2.5 / Math.max(width, 1)));
+function normalizeStrokeWidth(width: number, strokeWidthPx: number): number {
+  return clampAnnotationStrokeWidthPx(strokeWidthPx) / Math.max(width, 1);
 }
 
 function getTextWidth(width: number): number {
@@ -72,6 +74,7 @@ export function AnnotationStage({
   activeItems,
   activeTool,
   activeColor,
+  activeStrokeWidthPx,
   isEditMode,
   onCommitActiveItems,
 }: AnnotationStageProps) {
@@ -304,6 +307,8 @@ export function AnnotationStage({
 
     if (activeTool === 'pen' && penDraft) {
       if (penDraft.points.length > 1) {
+        const strokeWidth = normalizeStrokeWidth(width, activeStrokeWidthPx);
+
         commitItems([
           ...activeItems,
           {
@@ -311,7 +316,7 @@ export function AnnotationStage({
             type: 'pen',
             color: activeColor,
             points: penDraft.points,
-            strokeWidth: getStrokeWidth(width),
+            strokeWidth,
           },
         ]);
       }
@@ -321,6 +326,7 @@ export function AnnotationStage({
 
     if ((activeTool === 'arrow' || activeTool === 'rectangle') && shapeDraft) {
       if (hasRenderableArea(shapeDraft.start, shapeDraft.end)) {
+        const strokeWidth = normalizeStrokeWidth(width, activeStrokeWidthPx);
         const nextItem: ArrowShape | RectangleShape = activeTool === 'arrow'
           ? {
               id: createAnnotationId(),
@@ -328,7 +334,7 @@ export function AnnotationStage({
               color: activeColor,
               start: shapeDraft.start,
               end: shapeDraft.end,
-              strokeWidth: getStrokeWidth(width),
+              strokeWidth,
             }
           : {
               id: createAnnotationId(),
@@ -336,7 +342,7 @@ export function AnnotationStage({
               color: activeColor,
               start: shapeDraft.start,
               end: shapeDraft.end,
-              strokeWidth: getStrokeWidth(width),
+              strokeWidth,
             };
 
         commitItems([...activeItems, nextItem]);
@@ -407,7 +413,7 @@ export function AnnotationStage({
       return null;
     }
 
-    const color = ANNOTATION_COLOR_SWATCHES[entry.item.color];
+    const color = resolveAnnotationColor(entry.item.color);
     const isErasable = isEditMode && activeTool === 'eraser' && entry.isActiveLayer;
     const commonProps = {
       id: entry.item.id,
@@ -427,7 +433,7 @@ export function AnnotationStage({
             return [pixelPoint.x, pixelPoint.y];
           })}
           stroke={color}
-          strokeWidth={Math.max(entry.item.strokeWidth * width, 2)}
+          strokeWidth={Math.max(entry.item.strokeWidth * width, 1)}
           lineCap="round"
           lineJoin="round"
           tension={0.2}
@@ -449,7 +455,7 @@ export function AnnotationStage({
           fill={color}
           pointerLength={10}
           pointerWidth={10}
-          strokeWidth={Math.max(entry.item.strokeWidth * width, 2)}
+          strokeWidth={Math.max(entry.item.strokeWidth * width, 1)}
           hitStrokeWidth={18}
         />
       );
@@ -472,7 +478,7 @@ export function AnnotationStage({
           width={rectWidth}
           height={rectHeight}
           stroke={color}
-          strokeWidth={Math.max(entry.item.strokeWidth * width, 2)}
+          strokeWidth={Math.max(entry.item.strokeWidth * width, 1)}
           cornerRadius={6}
           hitStrokeWidth={18}
         />
@@ -507,7 +513,8 @@ export function AnnotationStage({
     );
   }
 
-  const draftColor = ANNOTATION_COLOR_SWATCHES[activeColor];
+  const draftColor = resolveAnnotationColor(activeColor);
+  const draftStrokeWidthPx = clampAnnotationStrokeWidthPx(activeStrokeWidthPx);
   const stageCursor = !isEditMode
     ? 'default'
     : activeTool === 'eraser'
@@ -550,7 +557,7 @@ export function AnnotationStage({
                 return [pixelPoint.x, pixelPoint.y];
               })}
               stroke={draftColor}
-              strokeWidth={Math.max(getStrokeWidth(width) * width, 2)}
+              strokeWidth={draftStrokeWidthPx}
               lineCap="round"
               lineJoin="round"
               tension={0.2}
@@ -569,7 +576,7 @@ export function AnnotationStage({
               fill={draftColor}
               pointerLength={10}
               pointerWidth={10}
-              strokeWidth={Math.max(getStrokeWidth(width) * width, 2)}
+              strokeWidth={draftStrokeWidthPx}
             />
           )}
 
@@ -592,7 +599,7 @@ export function AnnotationStage({
                   denormalizePoint(shapeDraft.end, width, height).y,
               )}
               stroke={draftColor}
-              strokeWidth={Math.max(getStrokeWidth(width) * width, 2)}
+              strokeWidth={draftStrokeWidthPx}
               cornerRadius={6}
             />
           )}

@@ -45,7 +45,8 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
     playbackRate,
     setPlaybackState,
     setCurrentTrackId,
-    reset,
+    setActive,
+    dismissSession,
   } = useMiniAudioPlayerStore((state) => state);
 
   const isSongDetailPage = pathname.startsWith('/repertuvar/');
@@ -103,7 +104,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
 
   useEffect(() => {
     const el = audioRef.current;
-    if (!el || !currentTrack?.source) {
+    if (!el || !currentTrack?.source || !isActive) {
       return;
     }
 
@@ -122,7 +123,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
       pendingSeekTimeRef.current = Math.max(0, currentTime);
       el.currentTime = Math.max(0, currentTime);
     }
-  }, [currentTrack?.source, currentTime]);
+  }, [currentTrack?.source, currentTime, isActive]);
 
   useEffect(() => {
     const el = audioRef.current;
@@ -227,7 +228,7 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
       el.removeEventListener('ended', handleEnded);
       el.removeEventListener('error', handleError);
     };
-  }, [setPlaybackState]);
+  }, [currentTrackId, setPlaybackState]);
 
   useEffect(() => {
     const closeOnOutside = (event: MouseEvent) => {
@@ -326,7 +327,15 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
       el.load();
     }
     pendingSeekTimeRef.current = 0;
-    reset();
+    dismissSession(songId);
+  }
+
+  function handleOpenPlayer() {
+    setActive(true);
+    setPartitionOpen(false);
+    setSpeedOpen(false);
+    setDropdownPos(null);
+    setSpeedDropdownPos(null);
   }
 
   const getProgressValue = useCallback((clientX: number, rect: DOMRect) => {
@@ -436,13 +445,36 @@ export function FloatingMiniPlayer({ hasBottomNav }: FloatingMiniPlayerProps) {
     };
   }, [isDragging, duration, getProgressValue]);
 
-  if (!isActive || !currentTrack?.source) {
+  if (!currentTrack?.source) {
     return null;
   }
 
   const marqueeText = `${songTitle} - '${currentTrack.label}'`;
   const activeTime = dragTime ?? currentTime;
   const progress = duration > 0 ? Math.min(100, Math.max(0, (activeTime / duration) * 100)) : 0;
+  const bottomClass = shouldDockToBottom
+    ? 'bottom-[calc(0.75rem+env(safe-area-inset-bottom))]'
+    : 'bottom-[calc(6.95rem+env(safe-area-inset-bottom))]';
+
+  if (!isActive) {
+    if (!isOwnSongPage) {
+      return null;
+    }
+
+    return (
+      <div className={`fixed right-4 z-[1001] ${bottomClass}`}>
+        <button
+          type="button"
+          onClick={handleOpenPlayer}
+          className="grid h-[52px] w-[52px] place-items-center rounded-full border border-[var(--color-border-strong)] bg-[var(--color-player-bg)] text-[var(--color-accent)] shadow-[0_14px_34px_rgba(0,0,0,0.38)] backdrop-blur-xl transition-transform active:scale-95"
+          title="Müzik oynatıcıyı aç"
+          aria-label="Müzik oynatıcıyı aç"
+        >
+          <Play size={22} className="translate-x-[1px]" fill="currentColor" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <>

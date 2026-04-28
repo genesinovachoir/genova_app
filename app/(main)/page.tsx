@@ -3,6 +3,7 @@
 import type { ElementType } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from 'motion/react';
 import {
   ChevronRight,
@@ -195,6 +196,7 @@ export default function Dashboard() {
   const { member, isAdmin, isSectionLeader } = useAuth();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const router = useRouter();
   const dragX = useMotionValue(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const thumbRef = useRef<HTMLDivElement>(null);
@@ -306,24 +308,43 @@ export default function Dashboard() {
 
       const autoApprove = isAdmin() || isSectionLeader();
       const nextStatus: AttendanceState = autoApprove ? 'approved' : 'pending';
-      const payload: {
-        rehearsal_id: string;
-        member_id: string;
-        status: AttendanceState;
-        approved_by?: string;
-        approved_at?: string;
-      } = {
-        rehearsal_id: todayRehearsalQuery.data.rehearsal.id,
-        member_id: member.id,
-        status: nextStatus,
-      };
+      const rehearsalId = todayRehearsalQuery.data.rehearsal.id;
 
       if (autoApprove) {
-        payload.approved_by = member.id;
-        payload.approved_at = new Date().toISOString();
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError || !sessionData.session?.access_token) {
+          throw new Error('Oturum doğrulanamadı. Lütfen tekrar giriş yapın.');
+        }
+
+        const response = await fetch('/api/rehearsals/attendance/update', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${sessionData.session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            rehearsal_id: rehearsalId,
+            member_id: member.id,
+            status: 'approved',
+          }),
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || `Katılım kaydedilemedi (${response.status})`);
+        }
+
+        return nextStatus;
       }
 
-      const { error } = await supabase.from('attendance').upsert(payload, { onConflict: 'rehearsal_id,member_id' });
+      const { error } = await supabase.from('attendance').upsert(
+        {
+          rehearsal_id: rehearsalId,
+          member_id: member.id,
+          status: nextStatus,
+        },
+        { onConflict: 'rehearsal_id,member_id' },
+      );
 
       if (error) {
         throw error;
@@ -425,20 +446,29 @@ export default function Dashboard() {
           initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.08 }}
-          className="glass-panel p-6 sm:p-7"
+          onClick={() => router.push('/announcements')}
+          className="glass-panel cursor-pointer p-6 sm:p-7"
         >
           <div className="flex items-center justify-between gap-3">
             <span className="page-kicker">Duyurular</span>
             <div className="flex items-center gap-3">
               {(isAdmin() || isSectionLeader()) && (
                 <button
-                  onClick={() => setShowCreateModal(true)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setShowCreateModal(true);
+                  }}
+                  aria-label="Yeni duyuru oluştur"
                   className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-all hover:bg-[var(--color-accent)] hover:text-[var(--color-background)] active:scale-95"
                 >
                   <Plus size={14} />
                 </button>
               )}
-              <Link href="/announcements" className="text-xs uppercase tracking-widest text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-high)]">
+              <Link
+                href="/announcements"
+                onClick={(event) => event.stopPropagation()}
+                className="text-xs uppercase tracking-widest text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-high)]"
+              >
                 Tümü
               </Link>
             </div>
@@ -478,7 +508,12 @@ export default function Dashboard() {
                 }
 
                 return (
-                  <Link href={`/announcements/${announcement.id}`} key={announcement.id} className="block">
+                  <Link
+                    href={`/announcements/${announcement.id}`}
+                    key={announcement.id}
+                    onClick={(event) => event.stopPropagation()}
+                    className="block"
+                  >
                     <div className={`rounded-[4px] border ${borderStyles} p-3 transition-colors active:scale-[0.98] hover:bg-white/5`}>
                       <div className="flex items-center gap-3">
                         <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[4px] border ${iconStyles}`}>
@@ -503,7 +538,8 @@ export default function Dashboard() {
           initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.16 }}
-          className="glass-panel p-6 sm:p-7"
+          onClick={() => router.push('/devamsizlik')}
+          className="glass-panel cursor-pointer p-6 sm:p-7"
         >
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -512,6 +548,7 @@ export default function Dashboard() {
             </div>
             <Link
               href="/devamsizlik"
+              onClick={(event) => event.stopPropagation()}
               aria-label="Takvim"
               title="Takvim"
               className="mt-1 inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-accent)] active:scale-95"

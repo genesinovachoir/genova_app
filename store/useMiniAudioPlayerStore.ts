@@ -13,6 +13,7 @@ interface MiniAudioPlayerState {
   coverSource: string | null;
   tracks: MiniAudioTrack[];
   currentTrackId: string | null;
+  dismissedSongId: string | null;
   currentTime: number;
   duration: number;
   isPlaying: boolean;
@@ -31,6 +32,7 @@ interface MiniAudioPlayerState {
   setPlaybackState: (payload: Partial<Pick<MiniAudioPlayerState, 'currentTime' | 'duration' | 'isPlaying' | 'playbackRate'>>) => void;
   setCurrentTrackId: (id: string | null) => void;
   setActive: (value: boolean) => void;
+  dismissSession: (songId: string | null) => void;
   reset: () => void;
 }
 
@@ -41,6 +43,7 @@ const initialState = {
   coverSource: null,
   tracks: [] as MiniAudioTrack[],
   currentTrackId: null,
+  dismissedSongId: null,
   currentTime: 0,
   duration: 0,
   isPlaying: false,
@@ -50,9 +53,16 @@ const initialState = {
 export const useMiniAudioPlayerStore = create<MiniAudioPlayerState>((set) => ({
   ...initialState,
   setSession: (payload) =>
-    set({
-      ...payload,
-      isActive: true,
+    set((state) => {
+      const isDismissedSong = Boolean(payload.songId && state.dismissedSongId === payload.songId);
+      const isSameSong = Boolean(payload.songId && state.songId === payload.songId);
+      const shouldActivate = payload.isPlaying || (state.isActive && isSameSong && !isDismissedSong);
+
+      return {
+        ...payload,
+        dismissedSongId: isDismissedSong && !shouldActivate ? state.dismissedSongId : null,
+        isActive: shouldActivate,
+      };
     }),
   setPlaybackState: (payload) =>
     set((state) => ({
@@ -63,6 +73,18 @@ export const useMiniAudioPlayerStore = create<MiniAudioPlayerState>((set) => ({
       playbackRate: payload.playbackRate ?? state.playbackRate,
     })),
   setCurrentTrackId: (currentTrackId) => set({ currentTrackId }),
-  setActive: (isActive) => set({ isActive }),
+  setActive: (isActive) =>
+    set((state) => ({
+      isActive,
+      dismissedSongId: isActive ? null : state.dismissedSongId,
+    })),
+  dismissSession: (songId) =>
+    set((state) => ({
+      ...state,
+      isActive: false,
+      isPlaying: false,
+      currentTime: 0,
+      dismissedSongId: songId ?? state.songId,
+    })),
   reset: () => set(initialState),
 }));

@@ -7,6 +7,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { getRoleDisplayLabel } from '@/lib/role-labels';
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
+import { normalizeProfileChangeValue, type ProfileChangeValue } from '@/lib/profile-change-requests';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/components/ToastProvider';
 
@@ -45,6 +46,10 @@ interface FieldDef {
   type: 'text' | 'email' | 'tel' | 'date' | 'select';
   placeholder?: string;
   options?: { id: string; name: string }[];
+}
+
+interface SubmitProfileChangeResponse {
+  mode?: 'created' | 'updated' | 'unchanged';
 }
 
 const FIELDS: FieldDef[] = [
@@ -160,11 +165,15 @@ export default function ProfilDuzenle() {
       youtube_url: member.youtube_url || '', spotify_url: member.spotify_url || '',
       photo_url: member.photo_url || '',
     };
-    const changes: Record<string, string> = {};
+    const changes: Record<string, ProfileChangeValue> = {};
     (Object.keys(form) as FieldKey[]).forEach(k => {
-      if (form[k] !== original[k]) changes[k] = form[k];
+      const nextValue = normalizeProfileChangeValue(form[k]) ?? null;
+      const currentValue = normalizeProfileChangeValue(original[k]) ?? null;
+      if (nextValue !== currentValue) changes[k] = nextValue;
     });
-    if (photoUrl !== original.photo_url) changes.photo_url = photoUrl;
+    const nextPhotoUrl = normalizeProfileChangeValue(photoUrl) ?? null;
+    const currentPhotoUrl = normalizeProfileChangeValue(original.photo_url) ?? null;
+    if (nextPhotoUrl !== currentPhotoUrl) changes.photo_url = nextPhotoUrl;
 
     if (Object.keys(changes).length === 0) {
       router.push('/profil');
@@ -173,15 +182,33 @@ export default function ProfilDuzenle() {
 
     setStatus('saving');
     try {
-      const { error } = await supabase.from('profile_change_requests').insert({
-        member_id: member.id,
-        changes_json: changes,
-        note: note || null,
-        status: 'pending',
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error('Oturum bulunamadı. Lütfen tekrar giriş yapın.');
+
+      const response = await fetch('/api/profile-change-requests/submit', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ changes, note }),
       });
-      if (error) throw error;
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || 'Değişiklik talebi gönderilemedi.');
+      }
+
+      const payload = (await response.json()) as SubmitProfileChangeResponse;
       setStatus('sent');
-      toast.success('Değişiklik talebi şefe gönderildi.');
+      if (payload.mode === 'updated') {
+        toast.success('Bekleyen değişiklik talebin yeni bilgilerle güncellendi.');
+      } else if (payload.mode === 'unchanged') {
+        toast.info('Profilinde güncellenecek yeni bir değişiklik yok.', 'Değişiklik talebi');
+      } else {
+        toast.success('Değişiklik talebi şefe gönderildi.');
+      }
       setTimeout(() => router.push('/profil'), 1500);
     } catch (err: any) {
       toast.error(`Hata: ${err.message}`, 'Değişiklik talebi');
@@ -251,8 +278,8 @@ export default function ProfilDuzenle() {
   const initials = member?.first_name && member?.last_name
     ? `${member.first_name[0]}${member.last_name[0]}`.toUpperCase() : 'GY';
   const hasProfileChanges = !!member && (
-    (Object.keys(form) as FieldKey[]).some((k) => form[k] !== (member[k] || '')) ||
-    photoUrl !== (member.photo_url || '')
+    (Object.keys(form) as FieldKey[]).some((k) => (normalizeProfileChangeValue(form[k]) ?? null) !== (normalizeProfileChangeValue(member[k]) ?? null)) ||
+    (normalizeProfileChangeValue(photoUrl) ?? null) !== (normalizeProfileChangeValue(member.photo_url) ?? null)
   );
 
   return (

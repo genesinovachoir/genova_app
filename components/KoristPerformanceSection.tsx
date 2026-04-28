@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { motion } from 'motion/react';
 import { Loader2, Users } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -84,6 +85,7 @@ function VoiceGroupStatCard({
 export function KoristPerformanceSection() {
   const { member, isAdmin, isSectionLeader } = useAuth();
   const queryClient = useQueryClient();
+  const router = useRouter();
   const privileged = isAdmin() || isSectionLeader();
 
   const overviewQuery = useQuery({
@@ -164,7 +166,8 @@ export function KoristPerformanceSection() {
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.28 }}
-      className="glass-panel p-6 sm:p-7"
+      onClick={() => router.push('/koristler')}
+      className="glass-panel cursor-pointer p-6 sm:p-7"
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
@@ -178,6 +181,7 @@ export function KoristPerformanceSection() {
 
         <Link
           href="/koristler"
+          onClick={(event) => event.stopPropagation()}
           className="mt-1 text-xs uppercase tracking-widest text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-accent)]"
         >
           Genişlet

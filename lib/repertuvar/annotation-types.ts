@@ -3,7 +3,9 @@ export const VOICE_GROUPS = ['Soprano', 'Alto', 'Tenor', 'Bass'] as const;
 export type VoiceGroup = (typeof VOICE_GROUPS)[number];
 export type PreviewVoiceGroup = VoiceGroup | 'ALL';
 export type AnnotationTool = 'pen' | 'arrow' | 'rectangle' | 'text' | 'eraser' | null;
-export type AnnotationColor = 'black' | 'red' | 'white';
+export type LegacyAnnotationColor = 'black' | 'red' | 'white';
+export type HexAnnotationColor = `#${string}`;
+export type AnnotationColor = LegacyAnnotationColor | HexAnnotationColor;
 export type AnnotationLayerType = 'personal' | 'shared_voice_group' | 'shared_all';
 export type AnnotationLayerKey = 'personal' | 'shared_all' | `shared_voice_group:${VoiceGroup}`;
 export type AnnotationSaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -59,11 +61,46 @@ export interface LayerVisibility {
   shared: boolean;
 }
 
-export const ANNOTATION_COLOR_SWATCHES: Record<AnnotationColor, string> = {
+export const DEFAULT_ANNOTATION_COLOR: LegacyAnnotationColor = 'red';
+export const DEFAULT_ANNOTATION_STROKE_WIDTH_PX = 3;
+export const MIN_ANNOTATION_STROKE_WIDTH_PX = 1;
+export const MAX_ANNOTATION_STROKE_WIDTH_PX = 14;
+export const LEGACY_ANNOTATION_COLORS: LegacyAnnotationColor[] = ['black', 'red', 'white'];
+
+export const ANNOTATION_COLOR_SWATCHES: Record<LegacyAnnotationColor, string> = {
   black: '#111111',
   red: '#ef4444',
   white: '#f8fafc',
 };
+
+const HEX_ANNOTATION_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+
+export function isHexAnnotationColor(value: string): value is HexAnnotationColor {
+  return HEX_ANNOTATION_COLOR_PATTERN.test(value);
+}
+
+export function resolveAnnotationColor(color: AnnotationColor | string | null | undefined): string {
+  if (color === 'black' || color === 'red' || color === 'white') {
+    return ANNOTATION_COLOR_SWATCHES[color];
+  }
+
+  if (color && isHexAnnotationColor(color)) {
+    return color;
+  }
+
+  return ANNOTATION_COLOR_SWATCHES[DEFAULT_ANNOTATION_COLOR];
+}
+
+export function clampAnnotationStrokeWidthPx(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_ANNOTATION_STROKE_WIDTH_PX;
+  }
+
+  return Math.min(
+    MAX_ANNOTATION_STROKE_WIDTH_PX,
+    Math.max(MIN_ANNOTATION_STROKE_WIDTH_PX, Math.round(value)),
+  );
+}
 
 export function asVoiceGroup(value: string | null | undefined): VoiceGroup | null {
   if (!value) return null;
