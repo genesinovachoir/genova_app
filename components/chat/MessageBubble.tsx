@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useCallback, useMemo } from 'react';
+import { useRef, useCallback, useMemo, useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Check, CheckCheck, Clock } from 'lucide-react';
 import type { ChatMessage } from '@/lib/chat';
@@ -111,9 +111,31 @@ export function MessageBubble({
     return 'sent';
   }, [message.id, message.metadata_json]);
 
+  const [isHighlighted, setIsHighlighted] = useState(false);
+
+  useEffect(() => {
+    const handleScrollToMessage = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail === message.id) {
+        // Find the element and scroll
+        const element = document.getElementById(`message-${message.id}`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          
+          // Trigger highlight
+          setIsHighlighted(true);
+          setTimeout(() => setIsHighlighted(false), 2000);
+        }
+      }
+    };
+
+    window.addEventListener('scrollToMessage', handleScrollToMessage);
+    return () => window.removeEventListener('scrollToMessage', handleScrollToMessage);
+  }, [message.id]);
+
   if (message.is_deleted) {
     return (
-      <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'} px-4 py-0.5`}>
+      <div id={`message-${message.id}`} className={`flex ${isOwn ? 'justify-end' : 'justify-start'} px-4 py-0.5`}>
         <div className="rounded-2xl bg-[var(--color-surface)] px-4 py-2 opacity-50">
           <p className="text-xs italic text-[var(--color-text-low)]">
             🚫 Bu mesaj silindi
@@ -125,7 +147,7 @@ export function MessageBubble({
 
   if (message.message_type === 'system') {
     return (
-      <div className="flex justify-center px-4 py-2">
+      <div id={`message-${message.id}`} className="flex justify-center px-4 py-2">
         <div className="rounded-full bg-[var(--color-surface)] px-4 py-1.5">
           <p className="text-center text-xs text-[var(--color-text-low)]">
             {message.content}
@@ -137,6 +159,7 @@ export function MessageBubble({
 
   return (
     <motion.div
+      id={`message-${message.id}`}
       initial={{ opacity: 0, y: 10, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.2 }}
@@ -179,7 +202,9 @@ export function MessageBubble({
       <div className={`max-w-[75%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
         {/* Bubble */}
         <div
-          className={`relative ${
+          className={`relative transition-all duration-300 ${
+            isHighlighted ? 'ring-2 ring-[var(--color-accent)] ring-offset-2 ring-offset-[var(--color-background)] scale-[1.02]' : ''
+          } ${
             message.message_type === 'sticker'
               ? ''
               : `rounded-2xl px-3 py-2 ${
@@ -204,30 +229,41 @@ export function MessageBubble({
           )}
 
           {/* Reply preview */}
-          {message.reply_to && (
-            <div
-              className={`mb-1.5 rounded-lg border-l-2 px-2 py-1 ${
-                isOwn
-                  ? 'border-white/50 bg-white/15'
-                  : 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
-              }`}
-            >
-              <p
-                className={`truncate text-[0.65rem] font-medium ${
-                  isOwn ? 'text-white/80' : 'text-[var(--color-accent)]'
+          {(() => {
+            const replyData = Array.isArray(message.reply_to) ? message.reply_to[0] : message.reply_to;
+            if (!replyData || (!replyData.content && !replyData.choir_members)) return null;
+            
+            return (
+              <div
+                className={`mb-1.5 rounded-lg border-l-2 px-2 py-1 cursor-pointer transition-colors ${
+                  isOwn
+                    ? 'border-white/50 bg-white/15 hover:bg-white/25'
+                    : 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] hover:bg-[var(--color-accent)]/20'
                 }`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // Dispatch a custom event or call a prop to scroll to message
+                  const event = new CustomEvent('scrollToMessage', { detail: replyData.id });
+                  window.dispatchEvent(event);
+                }}
               >
-                {message.reply_to.choir_members?.first_name ?? 'Bilinmeyen'}
-              </p>
-              <p
-                className={`truncate text-[0.65rem] ${
-                  isOwn ? 'text-white/60' : 'text-[var(--color-text-low)]'
-                }`}
-              >
-                {message.reply_to.content ?? '📷 Medya'}
-              </p>
-            </div>
-          )}
+                <p
+                  className={`truncate text-[0.65rem] font-medium ${
+                    isOwn ? 'text-white/80' : 'text-[var(--color-accent)]'
+                  }`}
+                >
+                  {replyData.choir_members?.first_name ?? 'Bilinmeyen'}
+                </p>
+                <p
+                  className={`truncate text-[0.65rem] ${
+                    isOwn ? 'text-white/60' : 'text-[var(--color-text-low)]'
+                  }`}
+                >
+                  {replyData.content ?? '📷 Medya'}
+                </p>
+              </div>
+            );
+          })()}
 
           {/* Content */}
           {message.message_type === 'text' && (
