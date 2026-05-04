@@ -62,7 +62,21 @@ export function ChatRoom({ slug }: ChatRoomProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { member, isLoading: isAuthLoading } = useAuth();
-  const store = useChatStore();
+  const setActiveRoomId = useChatStore((state) => state.setActiveRoomId);
+  const setRoomInfoOpen = useChatStore((state) => state.setRoomInfoOpen);
+  
+  // Specific selectors to avoid full-store re-renders
+  const messagesByRoom = useChatStore((state) => state.messagesByRoom);
+  const rooms = useChatStore((state) => state.rooms);
+  const typingUsers = useChatStore((state) => state.typingUsers);
+  const onlineUsers = useChatStore((state) => state.onlineUsers);
+  const starredMessageIds = useChatStore((state) => state.starredMessageIds);
+  const contextMenuMessage = useChatStore((state) => state.contextMenuMessage);
+  const contextMenuPosition = useChatStore((state) => state.contextMenuPosition);
+  const editingMessage = useChatStore((state) => state.editingMessage);
+  const setEditingMessage = useChatStore((state) => state.setEditingMessage);
+  const setReplyingTo = useChatStore((state) => state.setReplyingTo);
+
   const [resolvedRoomId, setResolvedRoomId] = useState<string | null>(null);
   const [isResolvingRoom, setIsResolvingRoom] = useState(true);
   const [roomNotFound, setRoomNotFound] = useState(false);
@@ -84,18 +98,9 @@ export function ChatRoom({ slug }: ChatRoomProps) {
   const initialLoad = useRef(true);
 
   const roomId = resolvedRoomId;
-  const messages = roomId ? store.messagesByRoom[roomId] ?? [] : [];
-  const room = roomId ? store.rooms.find((r) => r.id === roomId) : undefined;
+  const messages = roomId ? messagesByRoom[roomId] ?? [] : [];
+  const room = roomId ? rooms.find((r) => r.id === roomId) : undefined;
   const { sendTyping } = useChatRealtime(member?.id ?? null, roomId);
-
-  // Context menu state from store
-  const {
-    contextMenuMessage,
-    contextMenuPosition,
-    editingMessage,
-    setEditingMessage,
-    setReplyingTo,
-  } = store;
 
   useEffect(() => {
     let cancelled = false;
@@ -202,9 +207,9 @@ export function ChatRoom({ slug }: ChatRoomProps) {
 
   useEffect(() => {
     if (!roomId) return;
-    store.setActiveRoomId(roomId);
-    return () => store.setActiveRoomId(null);
-  }, [roomId, store]);
+    setActiveRoomId(roomId);
+    return () => setActiveRoomId(null);
+  }, [roomId, setActiveRoomId]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -217,12 +222,12 @@ export function ChatRoom({ slug }: ChatRoomProps) {
 
   useEffect(() => {
     if (searchParams.get('info') !== '1') return;
-    store.setRoomInfoOpen(true);
+    setRoomInfoOpen(true);
     const nextParams = new URLSearchParams(searchParams.toString());
     nextParams.delete('info');
     const nextUrl = nextParams.toString() ? `${pathname}?${nextParams.toString()}` : pathname;
     router.replace(nextUrl);
-  }, [pathname, router, searchParams, store]);
+  }, [pathname, router, searchParams, setRoomInfoOpen]);
 
   // Load initial messages + reactions
   useEffect(() => {
@@ -247,12 +252,12 @@ export function ChatRoom({ slug }: ChatRoomProps) {
           reactions: reactionsMap[m.id] ?? [],
         }));
 
-        store.setMessages(roomId, msgsWithReactions);
-        store.setStarredMessageIds(starredData.map((m: any) => m.id));
+        useChatStore.getState().setMessages(roomId, msgsWithReactions);
+        useChatStore.getState().setStarredMessageIds(starredData.map((m: any) => m.id));
         setRoomMembers(members);
         setHasMore(msgs.length >= 40);
         await markRoomAsRead(roomId, member.id);
-        store.clearUnread(roomId);
+        useChatStore.getState().clearUnread(roomId);
 
         // Broadcast read receipt
         // (handled via realtime broadcast to notify other users)
@@ -303,7 +308,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
           .reverse()
           .map((m) => ({ ...m, reactions: reactionsMap[m.id] ?? [] }));
 
-        store.prependMessages(roomId, olderWithReactions);
+        useChatStore.getState().prependMessages(roomId, olderWithReactions);
         requestAnimationFrame(() => {
           if (scrollRef.current)
             scrollRef.current.scrollTop =
@@ -340,7 +345,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
         const msgId = editingMessage.id;
         try {
           await editMessage(msgId, content);
-          store.updateMessage(roomId, msgId, {
+          useChatStore.getState().updateMessage(roomId, msgId, {
             content,
             is_edited: true,
             updated_at: new Date().toISOString(),
@@ -388,8 +393,8 @@ export function ChatRoom({ slug }: ChatRoomProps) {
           photo_url: member.photo_url ?? null,
         },
       };
-      store.addMessage(roomId, opt);
-      store.setReplyingTo(null);
+      useChatStore.getState().addMessage(roomId, opt);
+      setReplyingTo(null);
       try {
         const real = await sendMessage(roomId, member.id, content, {
           replyToId: replyTo?.id ?? null,
@@ -455,8 +460,8 @@ export function ChatRoom({ slug }: ChatRoomProps) {
           photo_url: member.photo_url ?? null,
         },
       };
-      store.addMessage(roomId, opt);
-      store.setReplyingTo(null);
+      useChatStore.getState().addMessage(roomId, opt);
+      setReplyingTo(null);
       try {
         const real = await sendMultiImageMessage(roomId, member.id, files, {
           replyToId: replyTo?.id ?? null,
@@ -495,7 +500,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
       try {
         if (type === 'everyone') {
           await deleteMessage(msg.id);
-          store.updateMessage(roomId, msg.id, {
+          useChatStore.getState().updateMessage(roomId, msg.id, {
             is_deleted: true,
             content: null,
             metadata_json: {},
@@ -505,7 +510,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
           const currentMetadata = msg.metadata_json || {};
           const deletedFor = Array.isArray(currentMetadata.deleted_for) ? [...currentMetadata.deleted_for] : [];
           deletedFor.push(member.id);
-          store.updateMessage(roomId, msg.id, {
+          useChatStore.getState().updateMessage(roomId, msg.id, {
             metadata_json: {
               ...currentMetadata,
               deleted_for: deletedFor,
@@ -532,10 +537,10 @@ export function ChatRoom({ slug }: ChatRoomProps) {
       try {
         if (userReacted) {
           await removeReaction(messageId, member.id, emoji);
-          store.removeReactionFromMessage(roomId, messageId, msg.reactions?.find(r => r.member_id === member.id && r.emoji === emoji)?.id ?? '');
+          useChatStore.getState().removeReactionFromMessage(roomId, messageId, msg.reactions?.find(r => r.member_id === member.id && r.emoji === emoji)?.id ?? '');
         } else {
           await addReaction(messageId, member.id, emoji);
-          store.addReactionToMessage(roomId, messageId, {
+          useChatStore.getState().addReactionToMessage(roomId, messageId, {
             id: `temp-${Date.now()}`,
             message_id: messageId,
             member_id: member.id,
@@ -557,15 +562,15 @@ export function ChatRoom({ slug }: ChatRoomProps) {
 
   const handleToggleStar = useCallback(async (msg: ChatMessage) => {
     if (!member?.id) return;
-    const isStarred = store.starredMessageIds.includes(msg.id);
+    const isStarred = useChatStore.getState().starredMessageIds.includes(msg.id);
     if (isStarred) {
       await unstarMessage(msg.id, member.id);
-      store.removeStarredMessageId(msg.id);
+      useChatStore.getState().removeStarredMessageId(msg.id);
     } else {
       await starMessage(msg.id, member.id);
-      store.addStarredMessageId(msg.id);
+      useChatStore.getState().addStarredMessageId(msg.id);
     }
-  }, [member?.id, store]);
+  }, [member?.id]);
 
   const handleGoToMessage = useCallback((messageId: string) => {
     const event = new CustomEvent('scrollToMessage', { detail: messageId });
@@ -616,7 +621,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
     return g;
   }, [messages]);
 
-  const typingInRoom = roomId ? store.typingUsers[roomId] ?? [] : [];
+  const typingInRoom = roomId ? typingUsers[roomId] ?? [] : [];
   const typingText = useMemo(() => {
     if (typingInRoom.length === 0) return null;
     const names = typingInRoom
@@ -633,9 +638,9 @@ export function ChatRoom({ slug }: ChatRoomProps) {
   const onlineCount = useMemo(
     () =>
       roomMembers.filter((m) =>
-        store.onlineUsers.includes(m.member_id)
+        onlineUsers.includes(m.member_id)
       ).length,
-    [roomMembers, store.onlineUsers]
+    [roomMembers, onlineUsers]
   );
 
   const roomName = useMemo(() => {
@@ -682,7 +687,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
         </motion.button>
         <div
           className="min-w-0 flex-1 cursor-pointer"
-          onClick={() => store.setRoomInfoOpen(true)}
+          onClick={() => setRoomInfoOpen(true)}
         >
           <h1 className="truncate text-base font-bold text-[var(--color-text-high)]">
             {roomName}
@@ -699,7 +704,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
         </div>
         <motion.button
           whileTap={{ scale: 0.9 }}
-          onClick={() => store.setRoomInfoOpen(true)}
+          onClick={() => setRoomInfoOpen(true)}
           className="flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-[var(--color-text-medium)] hover:bg-[var(--color-surface)]"
         >
           <MoreVertical size={20} className="pointer-events-none" />
@@ -745,11 +750,11 @@ export function ChatRoom({ slug }: ChatRoomProps) {
                         !isOwn && prev?.sender_id !== msg.sender_id
                       }
                       currentMemberId={member?.id ?? ''}
-                      onLongPress={(m, pos) => store.openContextMenu(m, pos)}
+                      onLongPress={(m, pos) => useChatStore.getState().openContextMenu(m, pos)}
                       onReactionToggle={handleReactionToggle}
-                      onReply={(m) => store.setReplyingTo(m)}
+                      onReply={(m) => setReplyingTo(m)}
                       onImageClick={handleImageClick}
-                      isStarred={store.starredMessageIds.includes(msg.id)}
+                      isStarred={starredMessageIds.includes(msg.id)}
                     />
                   );
                 })}
@@ -819,11 +824,11 @@ export function ChatRoom({ slug }: ChatRoomProps) {
         message={contextMenuMessage}
         isOwn={contextMenuMessage?.sender_id === member?.id}
         position={contextMenuPosition}
-        isStarred={!!contextMenuMessage && store.starredMessageIds.includes(contextMenuMessage.id)}
-        onClose={store.closeContextMenu}
-        onReply={(m) => store.setReplyingTo(m)}
+        isStarred={!!contextMenuMessage && starredMessageIds.includes(contextMenuMessage.id)}
+        onClose={useChatStore.getState().closeContextMenu}
+        onReply={(m) => setReplyingTo(m)}
         onReact={(m, emoji) => void handleReactionToggle(m.id, emoji)}
-        onEdit={(m) => store.setEditingMessage(m)}
+        onEdit={(m) => setEditingMessage(m)}
         onDelete={handleDeleteMessage}
         onCopy={handleCopyMessage}
         onInfo={(m) => setInfoMessage(m)}
@@ -875,7 +880,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
                 isMultipleChoice: data.isMultipleChoice,
               }
             );
-            store.addMessage(roomId, message);
+            useChatStore.getState().addMessage(roomId, message);
           } catch (err) {
             console.error('Poll creation failed:', err);
           }
@@ -922,8 +927,8 @@ export function ChatRoom({ slug }: ChatRoomProps) {
               photo_url: member.photo_url ?? null,
             },
           };
-          store.addMessage(roomId, opt);
-          store.setReplyingTo(null);
+          useChatStore.getState().addMessage(roomId, opt);
+          setReplyingTo(null);
 
           try {
             const real = await sendMessage(roomId, member.id, emoji, {

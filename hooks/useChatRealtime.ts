@@ -16,17 +16,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 export function useChatRealtime(memberId: string | null, roomId: string | null) {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const typingTimeoutsRef = useRef<Record<string, NodeJS.Timeout>>({});
-  const {
-    addMessage,
-    updateMessage,
-    setTypingUsers,
-    typingUsers,
-    activeRoomId,
-    incrementUnread,
-    addReactionToMessage,
-    removeReactionFromMessage,
-    setMessageStatus,
-  } = useChatStore();
+  // Removed useChatStore subscription variables to prevent re-renders
 
   // Handle incoming new messages from Postgres Changes
   const handleNewMessage = useCallback(
@@ -83,22 +73,23 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
             newMessage.reply_to = replyRes.data as any;
           }
 
-          addMessage(msgRoomId, newMessage);
+          useChatStore.getState().addMessage(msgRoomId, newMessage);
         } catch (err) {
           console.error('Error fetching message details:', err);
           // Still add the message even if details fetch fails
-          addMessage(msgRoomId, newMessage);
+          useChatStore.getState().addMessage(msgRoomId, newMessage);
         }
       };
 
       void fetchDetails();
 
       // Increment unread if not the active room
-      if (msgRoomId !== activeRoomId) {
-        incrementUnread(msgRoomId);
+      const state = useChatStore.getState();
+      if (msgRoomId !== state.activeRoomId) {
+        state.incrementUnread(msgRoomId);
       }
     },
-    [memberId, addMessage, activeRoomId, incrementUnread]
+    [memberId]
   );
 
   // Handle message updates (edit/delete)
@@ -108,7 +99,7 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
       const msgRoomId = msg.room_id as string;
       const msgId = msg.id as string;
 
-      updateMessage(msgRoomId, msgId, {
+      useChatStore.getState().updateMessage(msgRoomId, msgId, {
         content: (msg.content as string) ?? null,
         is_edited: (msg.is_edited as boolean) ?? false,
         is_deleted: (msg.is_deleted as boolean) ?? false,
@@ -116,7 +107,7 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
         updated_at: msg.updated_at as string,
       });
     },
-    [updateMessage]
+    []
   );
 
   // Handle new reactions
@@ -150,13 +141,13 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
           const state = useChatStore.getState();
           for (const [rId, msgs] of Object.entries(state.messagesByRoom)) {
             if (msgs.some((m) => m.id === messageId)) {
-              addReactionToMessage(rId, messageId, reaction);
+              state.addReactionToMessage(rId, messageId, reaction);
               break;
             }
           }
         });
     },
-    [memberId, addReactionToMessage]
+    [memberId]
   );
 
   // Handle reaction deletions
@@ -173,12 +164,12 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
       const state = useChatStore.getState();
       for (const [rId, msgs] of Object.entries(state.messagesByRoom)) {
         if (msgs.some((m) => m.id === messageId)) {
-          removeReactionFromMessage(rId, messageId, reactionId);
+          state.removeReactionFromMessage(rId, messageId, reactionId);
           break;
         }
       }
     },
-    [memberId, removeReactionFromMessage]
+    [memberId]
   );
 
   // Subscribe to room channel
@@ -246,9 +237,10 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
       const typingMemberId = payload.payload?.member_id as string;
       if (!typingMemberId || typingMemberId === memberId) return;
 
-      const current = typingUsers[roomId] ?? [];
+      const state = useChatStore.getState();
+      const current = state.typingUsers[roomId] ?? [];
       if (!current.includes(typingMemberId)) {
-        setTypingUsers(roomId, [...current, typingMemberId]);
+        state.setTypingUsers(roomId, [...current, typingMemberId]);
       }
 
       // Clear typing after 3 seconds
@@ -256,10 +248,11 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
         clearTimeout(typingTimeoutsRef.current[typingMemberId]);
       }
       typingTimeoutsRef.current[typingMemberId] = setTimeout(() => {
+        const state = useChatStore.getState();
         const updated = (
-          useChatStore.getState().typingUsers[roomId] ?? []
+          state.typingUsers[roomId] ?? []
         ).filter((id) => id !== typingMemberId);
-        setTypingUsers(roomId, updated);
+        state.setTypingUsers(roomId, updated);
         delete typingTimeoutsRef.current[typingMemberId];
       }, 3000);
     });
@@ -274,7 +267,7 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
       const msgs = state.messagesByRoom[roomId] ?? [];
       for (const msg of msgs) {
         if (msg.sender_id === memberId) {
-          setMessageStatus(roomId, msg.id, 'read');
+          state.setMessageStatus(roomId, msg.id, 'read');
         }
       }
     });
@@ -313,7 +306,6 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
       Object.values(typingTimeoutsRef.current).forEach(clearTimeout);
       typingTimeoutsRef.current = {};
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [memberId, roomId, handleNewMessage, handleMessageUpdate, handleNewReaction, handleDeleteReaction]);
 
   // Send typing indicator
@@ -335,7 +327,6 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
  */
 export function useChatGlobalRealtime(memberId: string | null, roomIds: string[]) {
   const channelRef = useRef<RealtimeChannel | null>(null);
-  const { addMessage, incrementUnread, activeRoomId, updateRoom, updateRoomMembership, removeRoom } = useChatStore();
 
   useEffect(() => {
     if (!memberId || roomIds.length === 0) return;
@@ -388,9 +379,10 @@ export function useChatGlobalRealtime(memberId: string | null, roomIds: string[]
           .then(({ data }) => {
             if (data) newMessage.sender = data;
             // Only add to store if not on that room's page already
-            if (msgRoomId !== activeRoomId) {
-              addMessage(msgRoomId, newMessage);
-              incrementUnread(msgRoomId);
+            const state = useChatStore.getState();
+            if (msgRoomId !== state.activeRoomId) {
+              state.addMessage(msgRoomId, newMessage);
+              state.incrementUnread(msgRoomId);
             }
           });
       }
@@ -421,7 +413,7 @@ export function useChatGlobalRealtime(memberId: string | null, roomIds: string[]
           updates.slug = updatedRoom.slug;
         }
 
-        updateRoom(updatedRoomId, updates);
+        useChatStore.getState().updateRoom(updatedRoomId, updates);
       }
     );
 
@@ -438,7 +430,7 @@ export function useChatGlobalRealtime(memberId: string | null, roomIds: string[]
         const updatedRoomId = updatedMembership.room_id as string;
         if (!roomIds.includes(updatedRoomId)) return;
 
-        updateRoomMembership(updatedRoomId, {
+        useChatStore.getState().updateRoomMembership(updatedRoomId, {
           last_read_at: (updatedMembership.last_read_at as string | null) ?? null,
           notifications_enabled: (updatedMembership.notifications_enabled as boolean) ?? true,
           hidden_at: (updatedMembership.hidden_at as string | null) ?? null,
@@ -457,7 +449,7 @@ export function useChatGlobalRealtime(memberId: string | null, roomIds: string[]
       (payload) => {
         const removedRoomId = payload.old.room_id as string | undefined;
         if (!removedRoomId) return;
-        removeRoom(removedRoomId);
+        useChatStore.getState().removeRoom(removedRoomId);
       }
     );
 
