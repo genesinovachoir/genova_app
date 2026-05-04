@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion } from 'motion/react';
 import { BarChart3, Check, Users } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
+import { supabase } from '@/lib/supabase';
 import { fetchPollData, votePoll, removePollVote } from '@/lib/chat';
 import type { ChatPoll, ChatPollVote } from '@/lib/chat';
 
@@ -12,22 +13,78 @@ interface PollCardProps {
   isOwn: boolean;
 }
 
+type VoteWithMember = ChatPollVote & { choir_members?: { first_name: string; last_name: string } };
+
 export function PollCard({ messageId, isOwn }: PollCardProps) {
   const { member } = useAuth();
   const [poll, setPoll] = useState<ChatPoll | null>(null);
-  const [votes, setVotes] = useState<(ChatPollVote & { choir_members?: { first_name: string; last_name: string } })[]>([]);
+  const [votes, setVotes] = useState<VoteWithMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [voting, setVoting] = useState(false);
+  const pollIdRef = useRef<string | null>(null);
 
+  // Initial fetch
   useEffect(() => {
     void fetchPollData(messageId)
       .then(({ poll: p, votes: v }) => {
         setPoll(p);
+        pollIdRef.current = p?.id ?? null;
         setVotes(v);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [messageId]);
+
+  // Realtime subscription for poll votes
+  useEffect(() => {
+    if (!pollIdRef.current && !poll?.id) return;
+    const currentPollId = poll?.id ?? pollIdRef.current;
+    if (!currentPollId) return;
+
+    const channel = supabase
+      .channel(`poll-votes-${currentPollId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_poll_votes',
+          filter: `poll_id=eq.${currentPollId}`,
+        },
+        (payload) => {
+          const newVote = payload.new as VoteWithMember;
+          setVotes((prev) => {
+            // Avoid duplicates (optimistic update may already have it)
+            if (prev.some((v) => v.member_id === newVote.member_id && v.option_id === newVote.option_id)) {
+              return prev;
+            }
+            return [...prev, newVote];
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'chat_poll_votes',
+          filter: `poll_id=eq.${currentPollId}`,
+        },
+        (payload) => {
+          const deleted = payload.old as VoteWithMember;
+          setVotes((prev) =>
+            prev.filter(
+              (v) => !(v.member_id === deleted.member_id && v.option_id === deleted.option_id)
+            )
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [poll?.id]);
 
   const totalVotes = votes.length;
 
