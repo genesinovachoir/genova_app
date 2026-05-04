@@ -250,7 +250,7 @@ export function MessageBubble({
                 : 'rounded-tl-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[var(--color-text-high)] shadow-sm'
           } ${
             isHighlighted
-              ? 'bg-[var(--color-accent-soft)] ring-2 ring-[var(--color-accent)]/60 animate-[message-highlight-glow_1.5s_ease-out] scale-[1.015] transition-transform duration-300'
+              ? 'animate-[message-highlight-glow_1.5s_ease-out]'
               : ''
           }`}
         >
