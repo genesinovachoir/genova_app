@@ -43,6 +43,9 @@ const DRIVE_FILES_API = 'https://www.googleapis.com/drive/v3/files';
 const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3/files';
 const STORAGE_LINK_PREFIX = 'storage://';
 const ASSIGNMENT_STORAGE_BUCKET = 'assignment-submissions';
+const SONG_COMMENT_AUDIO_MAX_BYTES = 20 * 1024 * 1024;
+const SONG_COMMENT_FOLDER_NAME = 'Şef Notları';
+const VOICE_GROUPS = new Set(['Soprano', 'Alto', 'Tenor', 'Bass']);
 
 async function createFolder(token: string, name: string, parentId: string) {
   const res = await fetch(DRIVE_FILES_API + '?fields=id,webViewLink', {
@@ -89,6 +92,60 @@ async function setFilePublicReadable(token: string, fileId: string) {
 
 function sanitizeFolderName(name: string): string {
   return name.replace(/[/\\?%*:|"<>]/g, '_').replace(/\s+/g, '_').trim();
+}
+
+function sanitizeFileName(name: string): string {
+  const normalized = String(name ?? '')
+    .replace(/[/\\?%*:|"<>]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized || `ses-notu-${Date.now()}`;
+}
+
+function normalizeCommentTargetVoiceGroup(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (!VOICE_GROUPS.has(trimmed)) {
+    throw new Error('Geçersiz ses grubu.');
+  }
+  return trimmed;
+}
+
+function hasMeaningfulCommentContent(html: string) {
+  const raw = String(html ?? '');
+  const withoutTags = raw
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .trim();
+  return withoutTags.length > 0 || /<img\b/i.test(raw);
+}
+
+function parseBase64Bytes(input: string, invalidErrorMessage: string) {
+  try {
+    return Uint8Array.from(atob(input), (char) => char.charCodeAt(0));
+  } catch {
+    throw new Error(invalidErrorMessage);
+  }
+}
+
+function detectAudioMimeType(fileName: string) {
+  const ext = fileName.split('.').pop()?.toLowerCase();
+  const map: Record<string, string> = {
+    mp3: 'audio/mpeg',
+    m4a: 'audio/mp4',
+    mp4: 'audio/mp4',
+    wav: 'audio/wav',
+    ogg: 'audio/ogg',
+    webm: 'audio/webm',
+    aac: 'audio/aac',
+    flac: 'audio/flac',
+  };
+  return map[ext ?? ''] ?? 'application/octet-stream';
 }
 
 function normalizeRoleName(value: string): string {
@@ -387,6 +444,135 @@ Deno.serve(async (req) => {
         }).select().single();
         return new Response(JSON.stringify({ file: fileRecord }), { headers: jsonHeaders });
       }
+      case 'create_song_comment': {
+        if (!roleFlags.isChef && !roleFlags.isSectionLeader) {
+          throw new Error('Yetkisiz');
+        }
+
+        const {
+          song_id,
+          content_html,
+          target_voice_group,
+          audio_file_name,
+          audio_mime_type,
+          audio_data_base64,
+        } = body;
+        if (!song_id) {
+          throw new Error('song_id zorunlu');
+        }
+
+        const contentHtml = typeof content_html === 'string' ? content_html : '';
+        const targetVoiceGroup = normalizeCommentTargetVoiceGroup(target_voice_group);
+        if (!roleFlags.isChef) {
+          if (!member.voice_group) {
+            throw new Error('Partisyon şefi için ses grubu tanımlı değil.');
+          }
+          if (!targetVoiceGroup || targetVoiceGroup !== member.voice_group) {
+            throw new Error('Partisyon şefi yalnızca kendi ses grubuna not bırakabilir.');
+          }
+        }
+
+        const hasAudioPayload = typeof audio_data_base64 === 'string' && audio_data_base64.length > 0;
+        if (!hasMeaningfulCommentContent(contentHtml) && !hasAudioPayload) {
+          throw new Error('Not metni veya ses kaydı zorunlu.');
+        }
+
+        const { data: songRow, error: songRowError } = await supabaseAdmin
+          .from('repertoire')
+          .select('id, drive_folder_id')
+          .eq('id', song_id)
+          .maybeSingle();
+        if (songRowError) {
+          throw new Error(songRowError.message);
+        }
+        if (!songRow?.id) {
+          throw new Error('Şarkı bulunamadı');
+        }
+
+        let uploadedAudio: { id: string; size?: string; webViewLink?: string; webContentLink?: string } | null = null;
+        try {
+          const commentPayload: Record<string, unknown> = {
+            song_id,
+            content_html: contentHtml,
+            created_by: member.id,
+            target_voice_group: targetVoiceGroup,
+            audio_drive_file_id: null,
+            audio_file_name: null,
+            audio_mime_type: null,
+            audio_file_size_bytes: null,
+          };
+
+          if (hasAudioPayload) {
+            if (!songRow.drive_folder_id) {
+              throw new Error('Şarkı klasörü bulunamadı');
+            }
+            if (typeof audio_file_name !== 'string' || !audio_file_name.trim()) {
+              throw new Error('Ses dosyası adı zorunlu.');
+            }
+
+            const safeAudioFileName = sanitizeFileName(audio_file_name);
+            const resolvedMimeType =
+              typeof audio_mime_type === 'string' && audio_mime_type.trim().length > 0
+                ? audio_mime_type.trim()
+                : detectAudioMimeType(safeAudioFileName);
+            if (!resolvedMimeType.toLowerCase().startsWith('audio/')) {
+              throw new Error('Yalnızca audio/* dosyaları kabul edilir.');
+            }
+
+            const audioBytes = parseBase64Bytes(audio_data_base64, 'Ses dosyası verisi bozuk.');
+            if (!audioBytes.byteLength) {
+              throw new Error('Ses dosyası boş.');
+            }
+            if (audioBytes.byteLength > SONG_COMMENT_AUDIO_MAX_BYTES) {
+              throw new Error('Ses dosyası 20MB sınırını aşıyor.');
+            }
+
+            const commentsFolderId = await findOrCreateFolder(token, SONG_COMMENT_FOLDER_NAME, songRow.drive_folder_id);
+            uploadedAudio = await uploadFileMultipart(token, audioBytes, {
+              name: safeAudioFileName,
+              mimeType: resolvedMimeType,
+              parents: [commentsFolderId],
+            });
+            await setFilePublicReadable(token, uploadedAudio.id);
+
+            const uploadedSize = Number.parseInt(String(uploadedAudio.size ?? ''), 10);
+            commentPayload.audio_drive_file_id = uploadedAudio.id;
+            commentPayload.audio_file_name = safeAudioFileName;
+            commentPayload.audio_mime_type = resolvedMimeType;
+            commentPayload.audio_file_size_bytes = Number.isFinite(uploadedSize) ? uploadedSize : null;
+          }
+
+          const { data: insertedComment, error: insertError } = await supabaseAdmin
+            .from('repertoire_song_comments')
+            .insert(commentPayload)
+            .select(`
+              id,
+              song_id,
+              content_html,
+              target_voice_group,
+              audio_drive_file_id,
+              audio_file_name,
+              audio_mime_type,
+              audio_file_size_bytes,
+              created_at,
+              created_by
+            `)
+            .single();
+          if (insertError) {
+            throw new Error(insertError.message);
+          }
+
+          return new Response(JSON.stringify({ comment: insertedComment }), { headers: jsonHeaders });
+        } catch (error) {
+          if (uploadedAudio?.id) {
+            await fetch(`https://www.googleapis.com/drive/v3/files/${uploadedAudio.id}`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${token}` },
+            }).catch(() => {});
+          }
+          throw error;
+        }
+      }
       case 'init_assignment_folder': {
         if (!roleFlags.isChef && !roleFlags.isSectionLeader) throw new Error('Yetkisiz');
         const { assignment_id, assignment_title } = body;
@@ -573,6 +759,56 @@ Deno.serve(async (req) => {
         });
 
         return new Response(JSON.stringify({ submission: sub }), { headers: jsonHeaders });
+      }
+      case 'delete_song_comment': {
+        if (!roleFlags.isChef && !roleFlags.isSectionLeader) {
+          throw new Error('Yetkisiz');
+        }
+
+        const { comment_id } = body;
+        if (!comment_id) {
+          throw new Error('comment_id zorunlu');
+        }
+
+        const { data: commentRow, error: commentRowError } = await supabaseAdmin
+          .from('repertoire_song_comments')
+          .select('id, created_by, audio_drive_file_id')
+          .eq('id', comment_id)
+          .maybeSingle();
+        if (commentRowError) {
+          throw new Error(commentRowError.message);
+        }
+        if (!commentRow?.id) {
+          return new Response(JSON.stringify({ success: true }), { headers: jsonHeaders });
+        }
+
+        if (!roleFlags.isChef && commentRow.created_by !== member.id) {
+          throw new Error('Yetkisiz');
+        }
+
+        if (commentRow.audio_drive_file_id) {
+          const deleteResponse = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${commentRow.audio_drive_file_id}`,
+            {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${token}` },
+            },
+          );
+          if (!deleteResponse.ok && deleteResponse.status !== 404) {
+            const detail = await deleteResponse.text().catch(() => '');
+            throw new Error(detail || 'Ses dosyası Drive’dan silinemedi.');
+          }
+        }
+
+        const { error: deleteError } = await supabaseAdmin
+          .from('repertoire_song_comments')
+          .delete()
+          .eq('id', comment_id);
+        if (deleteError) {
+          throw new Error(deleteError.message);
+        }
+
+        return new Response(JSON.stringify({ success: true }), { headers: jsonHeaders });
       }
       case 'delete_file': {
         if (userRole !== 'Şef') throw new Error('Yetkisiz');

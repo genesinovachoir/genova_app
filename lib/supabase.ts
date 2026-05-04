@@ -181,6 +181,10 @@ export interface RepertoireSongComment {
   song_id: string;
   content_html: string;
   target_voice_group: string | null;
+  audio_drive_file_id: string | null;
+  audio_file_name: string | null;
+  audio_mime_type: string | null;
+  audio_file_size_bytes: number | null;
   created_by: string;
   created_at: string;
   updated_at: string;

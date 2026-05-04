@@ -164,6 +164,53 @@ export async function deleteDriveObject(driveFileId: string): Promise<void> {
   });
 }
 
+interface CreateSongCommentParams {
+  songId: string;
+  contentHtml: string;
+  targetVoiceGroup: string | null;
+  audioFile?: File | null;
+}
+
+interface SongCommentCreateResponse {
+  comment?: {
+    id: string;
+  };
+}
+
+/**
+ * Şef notu oluştur (opsiyonel ses ekiyle).
+ */
+export async function createSongComment({
+  songId,
+  contentHtml,
+  targetVoiceGroup,
+  audioFile,
+}: CreateSongCommentParams): Promise<string | null> {
+  const payload: Record<string, unknown> = {
+    song_id: songId,
+    content_html: contentHtml,
+    target_voice_group: targetVoiceGroup,
+  };
+
+  if (audioFile) {
+    payload.audio_file_name = audioFile.name;
+    payload.audio_mime_type = audioFile.type || detectMimeType(audioFile.name);
+    payload.audio_data_base64 = await fileToBase64(audioFile);
+  }
+
+  const response = await callDrive<SongCommentCreateResponse>('create_song_comment', payload);
+  return response.comment?.id ?? null;
+}
+
+/**
+ * Şef notunu ve varsa ses ekini sil.
+ */
+export async function deleteSongComment(commentId: string): Promise<void> {
+  await callDrive('delete_song_comment', {
+    comment_id: commentId,
+  });
+}
+
 // =============================================
 // ÖDEV FONKSİYONLAR
 // =============================================
@@ -238,6 +285,9 @@ export function detectMimeType(fileName: string): string {
     mp3: 'audio/mpeg',
     mp4: 'audio/mp4',
     m4a: 'audio/mp4',
+    webm: 'audio/webm',
+    aac: 'audio/aac',
+    flac: 'audio/flac',
     wav: 'audio/wav',
     ogg: 'audio/ogg',
     jpg: 'image/jpeg',

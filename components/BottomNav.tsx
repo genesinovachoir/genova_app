@@ -15,7 +15,7 @@ export function BottomNav() {
   const navItems = [
     { name: 'Anasayfa', path: '/', icon: Home, lottie: isLightTheme ? '/lottie/Home Icon light.json' : '/lottie/Home Icon.json' },
     { name: 'Repertuvar', path: '/repertuvar', icon: Music, lottie: isLightTheme ? '/lottie/player music.json' : '/lottie/player music dark.json' },
-    { name: 'Sohbet', path: '/chat', icon: MessageCircle, lottie: '' },
+    { name: 'Sohbet', path: '/chat', icon: MessageCircle, lottie: isLightTheme ? '/lottie/Chat light.json' : '/lottie/Chat dark.json' },
     { name: 'Ödevler', path: '/odevler', icon: ClipboardList, lottie: isLightTheme ? '/lottie/Tasks light.json' : '/lottie/Tasks.json' },
     { name: 'Profil', path: '/profil', icon: User, lottie: isLightTheme ? '/lottie/Profile Icon light.json' : '/lottie/Profile Icon.json' },
   ];
@@ -46,6 +46,9 @@ export function BottomNav() {
                 fallback={Icon}
                 size={20}
                 isActive={isActive}
+                interactive={true}
+                autoPlay={false}
+                loop={false}
                 className={`relative z-10 transition-colors duration-300 ${
                   item.name === 'Anasayfa' ? 'scale-[1.2]' : item.name === 'Repertuvar' ? 'scale-[1.35]' : 'scale-100'
                 } ${isActive ? 'text-[var(--color-accent)]' : 'text-[var(--color-nav-icon)]'}`}

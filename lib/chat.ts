@@ -618,6 +618,36 @@ export async function removePollVote(pollId: string, memberId: string, optionId:
   if (error) throw error;
 }
 
+/** Upload a photo to Storage and send it as an image message */
+export async function sendImageMessage(
+  roomId: string,
+  senderId: string,
+  file: File,
+  options?: { replyToId?: string | null }
+) {
+  // 1. Upload to Supabase Storage
+  const ext = file.name.split('.').pop() ?? 'jpg';
+  const path = `chat/${roomId}/${senderId}/${Date.now()}.${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('chat-images')
+    .upload(path, file, { contentType: file.type, upsert: false });
+
+  if (uploadError) throw uploadError;
+
+  // 2. Get public URL
+  const {
+    data: { publicUrl },
+  } = supabase.storage.from('chat-images').getPublicUrl(path);
+
+  // 3. Insert message record
+  return sendMessage(roomId, senderId, '', {
+    messageType: 'image',
+    replyToId: options?.replyToId ?? null,
+    metadataJson: { url: publicUrl, path },
+  });
+}
+
 /** Fetch poll data with votes */
 export async function fetchPollData(messageId: string) {
   const { data: poll, error: pollError } = await supabase
@@ -632,7 +662,7 @@ export async function fetchPollData(messageId: string) {
     .from('chat_poll_votes')
     .select(`
       id, poll_id, member_id, option_id, created_at,
-      choir_members (first_name, last_name)
+      choir_members (first_name, last_name, photo_url)
     `)
     .eq('poll_id', poll.id);
 
@@ -643,6 +673,6 @@ export async function fetchPollData(messageId: string) {
       ...poll,
       options_json: poll.options_json as { id: string; text: string }[],
     } as ChatPoll,
-    votes: (votes ?? []) as unknown as (ChatPollVote & { choir_members?: { first_name: string; last_name: string } })[],
+    votes: (votes ?? []) as unknown as (ChatPollVote & { choir_members?: { first_name: string; last_name: string; photo_url: string | null } })[],
   };
 }

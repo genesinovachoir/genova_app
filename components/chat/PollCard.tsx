@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { motion } from 'motion/react';
-import { BarChart3, Check, Users } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { BarChart3, Check, Users, X } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
 import { supabase } from '@/lib/supabase';
 import { fetchPollData, votePoll, removePollVote } from '@/lib/chat';
@@ -13,7 +13,7 @@ interface PollCardProps {
   isOwn: boolean;
 }
 
-type VoteWithMember = ChatPollVote & { choir_members?: { first_name: string; last_name: string } };
+type VoteWithMember = ChatPollVote & { choir_members?: { first_name: string; last_name: string; photo_url: string | null } };
 
 export function PollCard({ messageId, isOwn }: PollCardProps) {
   const { member } = useAuth();
@@ -21,6 +21,7 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
   const [votes, setVotes] = useState<VoteWithMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [voting, setVoting] = useState(false);
+  const [showVotersOptionId, setShowVotersOptionId] = useState<string | null>(null);
   const pollIdRef = useRef<string | null>(null);
 
   // Initial fetch
@@ -58,7 +59,9 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
             if (prev.some((v) => v.member_id === newVote.member_id && v.option_id === newVote.option_id)) {
               return prev;
             }
-            return [...prev, newVote];
+            // If not multiple choice, remove any other votes by this user
+            const filtered = poll?.is_multiple_choice ? prev : prev.filter((v) => v.member_id !== newVote.member_id);
+            return [...filtered, newVote];
           });
         }
       )
@@ -141,6 +144,7 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
               choir_members: {
                 first_name: member.first_name,
                 last_name: member.last_name,
+                photo_url: member.photo_url ?? null,
               },
             },
           ]);
@@ -168,8 +172,9 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
   if (!poll) return null;
 
   return (
-    <div className="min-w-[200px] py-1">
-      {/* Question */}
+    <>
+      <div className="min-w-[200px] py-1">
+        {/* Question */}
       <p
         className={`mb-2 text-sm font-semibold leading-snug ${
           isOwn ? 'text-white' : 'text-[var(--color-text-high)]'
@@ -181,7 +186,8 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
       {/* Options */}
       <div className="flex flex-col gap-1.5">
         {poll.options_json.map((opt) => {
-          const count = optionVoteCounts[opt.id] ?? 0;
+          const optionVotes = votes.filter((v) => v.option_id === opt.id);
+          const count = optionVotes.length;
           const percent = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
           const isSelected = myVotes.includes(opt.id);
 
@@ -201,7 +207,7 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
               }`}
             >
               {/* Progress bar background */}
-              {hasVoted && (
+              {totalVotes > 0 && (
                 <motion.div
                   initial={{ width: 0 }}
                   animate={{ width: `${percent}%` }}
@@ -236,17 +242,43 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
                     {opt.text}
                   </span>
                 </div>
-                {hasVoted && (
-                  <span
-                    className={`shrink-0 text-[0.65rem] font-bold ${
-                      isOwn
-                        ? 'text-white/70'
-                        : 'text-[var(--color-text-medium)]'
-                    }`}
-                  >
-                    {percent}%
-                  </span>
-                )}
+                
+                <div className="flex items-center gap-2">
+                  {/* Avatars */}
+                  {!poll.is_anonymous && optionVotes.length > 0 && (
+                    <div 
+                      className="flex -space-x-1.5 mr-1"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowVotersOptionId(opt.id);
+                      }}
+                    >
+                      {optionVotes.slice(0, 3).map((v) => (
+                        <div key={v.member_id} className={`h-4 w-4 rounded-full ring-1 ${isOwn ? 'ring-white/20' : 'ring-[var(--color-background)]'} overflow-hidden bg-[var(--color-surface-hover)] flex items-center justify-center`}>
+                          {v.choir_members?.photo_url ? (
+                            <img src={v.choir_members.photo_url} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <span className={`text-[0.45rem] font-bold ${isOwn ? 'text-white' : 'text-[var(--color-text-high)]'}`}>
+                              {v.choir_members?.first_name?.[0] || '?'}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {totalVotes > 0 && (
+                    <span
+                      className={`shrink-0 text-[0.65rem] font-bold ${
+                        isOwn
+                          ? 'text-white/70'
+                          : 'text-[var(--color-text-medium)]'
+                      }`}
+                    >
+                      {percent}%
+                    </span>
+                  )}
+                </div>
               </div>
             </button>
           );
@@ -267,5 +299,79 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
         </span>
       </div>
     </div>
+      
+      {/* Voter List Modal */}
+      <AnimatePresence>
+        {showVotersOptionId && (
+          <VoterListModal
+            optionText={poll.options_json.find(o => o.id === showVotersOptionId)?.text || ''}
+            votes={votes.filter(v => v.option_id === showVotersOptionId)}
+            onClose={() => setShowVotersOptionId(null)}
+          />
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+function VoterListModal({
+  optionText,
+  votes,
+  onClose
+}: {
+  optionText: string;
+  votes: VoteWithMember[];
+  onClose: () => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm rounded-2xl bg-[var(--color-background)] overflow-hidden shadow-xl"
+      >
+        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
+          <h3 className="font-semibold text-sm text-[var(--color-text-high)] truncate pr-4">
+            {optionText} ({votes.length})
+          </h3>
+          <button
+            onClick={onClose}
+            className="rounded-full p-1.5 hover:bg-[var(--color-surface)]"
+          >
+            <X size={16} className="text-[var(--color-text-medium)]" />
+          </button>
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto p-2">
+          {votes.length === 0 ? (
+            <p className="p-4 text-center text-sm text-[var(--color-text-low)]">Kimse oy vermemiş</p>
+          ) : (
+            votes.map((v) => (
+              <div key={v.member_id} className="flex items-center gap-3 rounded-xl p-2 transition-colors hover:bg-[var(--color-surface)]">
+                <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-[var(--color-accent-soft)] flex items-center justify-center">
+                  {v.choir_members?.photo_url ? (
+                    <img src={v.choir_members.photo_url} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="text-xs font-bold text-[var(--color-accent)]">
+                      {v.choir_members?.first_name?.[0] || '?'}
+                    </span>
+                  )}
+                </div>
+                <span className="text-sm font-medium text-[var(--color-text-high)]">
+                  {v.choir_members?.first_name} {v.choir_members?.last_name}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }

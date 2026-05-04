@@ -10,6 +10,7 @@ import { useChatRealtime } from '@/hooks/useChatRealtime';
 import {
   fetchMessages,
   sendMessage,
+  sendImageMessage,
   markRoomAsRead,
   fetchRoomMembers,
   fetchReactionsForMessages,
@@ -227,6 +228,53 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
       }
     },
     [member, roomId, editingMessage, setEditingMessage]
+  );
+
+  // Image upload handler
+  const handleImageSelect = useCallback(
+    async (file: File) => {
+      if (!member?.id) return;
+      const replyTo = useChatStore.getState().replyingTo;
+      const tempId = `temp-${Date.now()}`;
+      // Optimistic UI: show a placeholder bubble immediately
+      const opt: ChatMessage = {
+        id: tempId,
+        room_id: roomId,
+        sender_id: member.id,
+        content: null,
+        message_type: 'image',
+        reply_to_id: replyTo?.id ?? null,
+        metadata_json: { url: URL.createObjectURL(file) },
+        is_edited: false,
+        is_deleted: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        sender: {
+          id: member.id,
+          first_name: member.first_name,
+          last_name: member.last_name,
+          photo_url: member.photo_url ?? null,
+        },
+      };
+      store.addMessage(roomId, opt);
+      store.setReplyingTo(null);
+      try {
+        const real = await sendImageMessage(roomId, member.id, file, {
+          replyToId: replyTo?.id ?? null,
+        });
+        useChatStore.getState().updateMessage(roomId, tempId, {
+          id: real.id,
+          metadata_json: real.metadata_json,
+          created_at: real.created_at,
+        });
+      } catch (err) {
+        console.error('Image upload failed:', err);
+        useChatStore.getState().updateMessage(roomId, tempId, {
+          metadata_json: { _failed: true },
+        });
+      }
+    },
+    [member, roomId]
   );
 
   // Context menu handlers
@@ -482,6 +530,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         disabled={isLoading}
         editingMessage={editingMessage}
         onCancelEdit={() => setEditingMessage(null)}
+        onImageSelect={handleImageSelect}
         onPollCreate={() => setIsPollModalOpen(true)}
         onStickerOpen={() => setIsStickerOpen(true)}
       />
@@ -513,7 +562,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         onSubmit={async (data) => {
           if (!member?.id) return;
           try {
-            await createPollMessage(
+            const { message } = await createPollMessage(
               roomId,
               member.id,
               data.question,
@@ -523,6 +572,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
                 isMultipleChoice: data.isMultipleChoice,
               }
             );
+            store.addMessage(roomId, message);
           } catch (err) {
             console.error('Poll creation failed:', err);
           }

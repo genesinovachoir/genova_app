@@ -11,7 +11,7 @@ export interface AuthorizedDriveFile {
   driveFileId: string;
   fileName: string | null;
   mimeType: string | null;
-  kind: 'repertoire' | 'assignment_submission';
+  kind: 'repertoire' | 'repertoire_comment_audio' | 'assignment_submission';
   storageBucket?: string | null;
   storagePath?: string | null;
 }
@@ -176,11 +176,50 @@ async function authorizeAssignmentSubmission(driveFileId: string, memberContext:
   };
 }
 
+async function authorizeRepertoireCommentAudio(
+  driveFileId: string,
+  memberContext: MemberContext,
+): Promise<AuthorizedDriveFile | null> {
+  if (!memberContext.memberId) {
+    return null;
+  }
+
+  const serviceClient = createSupabaseServiceClient();
+  const { data: comment } = await serviceClient
+    .from('repertoire_song_comments')
+    .select('audio_drive_file_id, audio_file_name, audio_mime_type, target_voice_group')
+    .eq('audio_drive_file_id', driveFileId)
+    .maybeSingle();
+
+  if (!comment?.audio_drive_file_id) {
+    return null;
+  }
+
+  const canAccess =
+    memberContext.isChef ||
+    comment.target_voice_group === null ||
+    (Boolean(memberContext.voiceGroup) && comment.target_voice_group === memberContext.voiceGroup);
+  if (!canAccess) {
+    return null;
+  }
+
+  return {
+    driveFileId,
+    fileName: comment.audio_file_name ?? null,
+    mimeType: comment.audio_mime_type ?? null,
+    kind: 'repertoire_comment_audio',
+  };
+}
+
 export async function authorizeDriveFileAccess(authUserId: string, driveFileId: string): Promise<AuthorizedDriveFile | null> {
   const memberContext = await loadMemberContext(authUserId);
   if (!memberContext.memberId) {
     return null;
   }
 
-  return (await authorizeRepertoireFile(driveFileId, memberContext)) ?? (await authorizeAssignmentSubmission(driveFileId, memberContext));
+  return (
+    (await authorizeRepertoireFile(driveFileId, memberContext)) ??
+    (await authorizeRepertoireCommentAudio(driveFileId, memberContext)) ??
+    (await authorizeAssignmentSubmission(driveFileId, memberContext))
+  );
 }
