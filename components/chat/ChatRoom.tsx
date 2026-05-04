@@ -521,6 +521,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
                       currentMemberId={member?.id ?? ''}
                       onLongPress={handleLongPress}
                       onReactionToggle={handleReactionToggle}
+                      onReply={handleReply}
                     />
                   );
                 })}

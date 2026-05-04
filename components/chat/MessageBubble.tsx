@@ -14,6 +14,7 @@ interface MessageBubbleProps {
   currentMemberId: string;
   onLongPress?: (message: ChatMessage, position: { x: number; y: number }) => void;
   onReactionToggle?: (messageId: string, emoji: string) => void;
+  onReply?: (message: ChatMessage) => void;
 }
 
 function formatMessageTime(dateStr: string): string {
@@ -47,6 +48,7 @@ export function MessageBubble({
   currentMemberId,
   onLongPress,
   onReactionToggle,
+  onReply,
 }: MessageBubbleProps) {
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
@@ -144,6 +146,16 @@ export function MessageBubble({
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
       onContextMenu={handleContextMenu}
+      drag="x"
+      dragConstraints={{ left: 0, right: 0 }}
+      dragElastic={{ left: isOwn ? 0.2 : 0, right: isOwn ? 0 : 0.2 }}
+      onDragEnd={(e, info) => {
+        if (isOwn && info.offset.x < -30) {
+          onReply?.(message);
+        } else if (!isOwn && info.offset.x > 30) {
+          onReply?.(message);
+        }
+      }}
     >
       {/* Avatar for other users */}
       {!isOwn && showSender && (
