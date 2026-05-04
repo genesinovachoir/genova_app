@@ -20,6 +20,8 @@ import {
 import { getDriveImageUrl } from '@/lib/drive';
 import { RoomListContextMenu } from './RoomListContextMenu';
 
+const MAX_ONLINE_AVATARS = 4;
+
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr);
   const now = new Date();
@@ -77,6 +79,12 @@ function getRoomDisplayName(room: ChatRoom, memberId: string | undefined): strin
   return room.name;
 }
 
+function getInitial(value: string | null | undefined): string {
+  const trimmed = value?.trim();
+  if (!trimmed) return '?';
+  return trimmed[0].toLocaleUpperCase('tr-TR');
+}
+
 export function ChatRoomList() {
   const router = useRouter();
   const toast = useToast();
@@ -93,6 +101,7 @@ export function ChatRoomList() {
   const [menuRoomId, setMenuRoomId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const memberId = member?.id ?? null;
+  const onlineUserSet = useMemo(() => new Set(onlineUsers), [onlineUsers]);
 
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchStartRef = useRef<{ x: number; y: number; roomId: string } | null>(null);
@@ -332,13 +341,16 @@ export function ChatRoomList() {
                 ? formatRelativeTime(room.last_message.created_at)
                 : '';
               const hasUnread = (room.unread_count ?? 0) > 0;
-
-              // Check if any room member is online
-              const hasOnlineMember =
-                room.type !== 'general' &&
-                onlineUsers.some(
-                  (id) => id !== member?.id
-                );
+              const seenOnlineMemberIds = new Set<string>();
+              const onlineRoomMembers = (room.members_preview ?? []).filter((preview) => {
+                if (preview.member_id === memberId) return false;
+                if (!onlineUserSet.has(preview.member_id)) return false;
+                if (seenOnlineMemberIds.has(preview.member_id)) return false;
+                seenOnlineMemberIds.add(preview.member_id);
+                return true;
+              });
+              const visibleOnlineRoomMembers = onlineRoomMembers.slice(0, MAX_ONLINE_AVATARS);
+              const overflowOnlineCount = Math.max(0, onlineRoomMembers.length - visibleOnlineRoomMembers.length);
 
               return (
                 <motion.button
@@ -368,10 +380,6 @@ export function ChatRoomList() {
                         size={22}
                         className="text-[var(--color-accent)]"
                       />
-                    )}
-                    {/* Online indicator */}
-                    {hasOnlineMember && (
-                      <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-[var(--color-background)] bg-green-500" />
                     )}
                   </div>
 
@@ -407,11 +415,47 @@ export function ChatRoomList() {
                       >
                         {preview}
                       </p>
-                      {hasUnread && (
-                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--color-accent)] px-1.5 text-[0.65rem] font-bold text-white">
-                          {room.unread_count! > 99 ? '99+' : room.unread_count}
-                        </span>
-                      )}
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <div className="flex items-center -space-x-2">
+                          <AnimatePresence initial={false}>
+                            {visibleOnlineRoomMembers.map((onlineMember) => (
+                              <motion.div
+                                key={onlineMember.member_id}
+                                initial={{ opacity: 0, scale: 0.7 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.7 }}
+                                transition={{ duration: 0.18 }}
+                                title={onlineMember.first_name}
+                                className="flex h-5 w-5 items-center justify-center overflow-hidden rounded-full border-2 border-[var(--color-background)] bg-[var(--color-surface)] text-[0.52rem] font-semibold text-[var(--color-text-medium)]"
+                              >
+                                {onlineMember.photo_url ? (
+                                  <img src={onlineMember.photo_url} alt={onlineMember.first_name} className="h-full w-full object-cover" />
+                                ) : (
+                                  <span>{getInitial(onlineMember.first_name)}</span>
+                                )}
+                              </motion.div>
+                            ))}
+                            {overflowOnlineCount > 0 && (
+                              <motion.div
+                                key={`overflow-${room.id}`}
+                                initial={{ opacity: 0, scale: 0.7 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.7 }}
+                                transition={{ duration: 0.18 }}
+                                title={`${overflowOnlineCount} kişi daha çevrimiçi`}
+                                className="flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-[var(--color-background)] bg-[var(--color-surface-hover)] px-1 text-[0.5rem] font-semibold text-[var(--color-text-medium)]"
+                              >
+                                +{overflowOnlineCount}
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                        {hasUnread && (
+                          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--color-accent)] px-1.5 text-[0.65rem] font-bold text-white">
+                            {room.unread_count! > 99 ? '99+' : room.unread_count}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 

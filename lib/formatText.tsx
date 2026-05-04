@@ -5,7 +5,7 @@ import React from 'react';
  *   *bold*   → <strong>bold</strong>
  *   _italic_ → <em>italic</em>
  *   ~strike~ → <s>strike</s>
- *   URLs      → <a href="...">...</a>
+ *   URLs      → <a href="...">...</a> (http/https, www.*, plain domain)
  *   Lists     → - item, * item, • item, 1. item
  *   Newlines → <br />
  */
@@ -15,12 +15,20 @@ export function formatWhatsApp(
 ): React.ReactNode[] {
   const linkClassName = options?.linkClassName ?? 'underline';
   const listClassName = options?.listClassName ?? 'inline-flex items-start gap-1.5';
-  const pattern = /(https?:\/\/[^\s<>"'`]+)|(\*[^*]+\*)|(_[^_]+_)|(~[^~]+~)/g;
+  const pattern =
+    /((?:https?:\/\/|www\.)[^\s<>"'`]+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{2,5})?(?:[/?#][^\s<>"'`]*)?)|(\*[^*]+\*)|(_[^_]+_)|(~[^~]+~)/gi;
+  const domainRegex =
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{2,5})?(?:[/?#][^\s<>"'`]*)?$/i;
 
   const normalizeUrlToken = (rawUrl: string) => {
     const trimmedUrl = rawUrl.replace(/[),.;!?]+$/g, '');
     const trailing = rawUrl.slice(trimmedUrl.length);
-    return { url: trimmedUrl, trailing };
+    const href = /^https?:\/\//i.test(trimmedUrl)
+      ? trimmedUrl
+      : domainRegex.test(trimmedUrl)
+        ? `https://${trimmedUrl}`
+        : null;
+    return { display: trimmedUrl, href, trailing };
   };
 
   const parseInline = (line: string, keyPrefix: string): React.ReactNode[] => {
@@ -40,17 +48,22 @@ export function formatWhatsApp(
       const inner = raw.slice(1, -1);
       const key = `${keyPrefix}-${partIdx++}`;
 
-      if (raw.startsWith('http://') || raw.startsWith('https://')) {
-        const { url, trailing } = normalizeUrlToken(raw);
+      if (match[1]) {
+        const { display, href, trailing } = normalizeUrlToken(raw);
+        if (!href) {
+          parsed.push(raw);
+          lastIndex = match.index + raw.length;
+          continue;
+        }
         parsed.push(
           <a
             key={key}
-            href={url}
+            href={href}
             target="_blank"
             rel="noopener noreferrer"
             className={linkClassName}
           >
-            {url}
+            {display}
           </a>
         );
         if (trailing) parsed.push(trailing);

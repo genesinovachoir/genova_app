@@ -13,7 +13,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useChatStore } from '@/store/useChatStore';
-import { fetchLinkPreview, URL_REGEX } from '@/lib/chat';
+import { fetchLinkPreview, normalizeChatUrl, URL_REGEX } from '@/lib/chat';
 import type { ChatMessage, LinkPreviewData } from '@/lib/chat';
 import { LinkPreviewCard } from './LinkPreviewCard';
 
@@ -55,7 +55,11 @@ export function MessageInput({
     URL_REGEX.lastIndex = 0;
     const matches = value.match(URL_REGEX);
     if (!matches || matches.length === 0) return null;
-    return matches[0].trim().replace(/[),.;!?]+$/g, '');
+    for (const candidate of matches) {
+      const normalized = normalizeChatUrl(candidate);
+      if (normalized) return normalized;
+    }
+    return null;
   }, []);
 
   // When entering edit mode, populate the textarea with existing content

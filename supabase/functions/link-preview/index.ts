@@ -1,9 +1,10 @@
 // @ts-nocheck
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 
 const jsonHeaders = {
@@ -29,9 +30,28 @@ function getDomain(input: string): string {
 }
 
 function normalizeUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const candidate = /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : trimmed.startsWith("//")
+      ? `https:${trimmed}`
+      : `https://${trimmed}`;
+
   try {
-    const parsed = new URL(raw.trim());
+    const parsed = new URL(candidate);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    if (!parsed.hostname) {
+      return null;
+    }
+    if (
+      parsed.hostname !== "localhost" &&
+      !parsed.hostname.includes(".") &&
+      !parsed.hostname.includes(":")
+    ) {
       return null;
     }
     return parsed.toString();
@@ -133,7 +153,7 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Respons
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response("ok", { status: 200, headers: corsHeaders });
   }
 
   try {

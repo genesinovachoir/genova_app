@@ -9,6 +9,12 @@ export type ChatRoomType = 'general' | 'voice_group' | 'custom' | 'dm';
 export type ChatMessageType = 'text' | 'image' | 'sticker' | 'poll' | 'system' | 'file';
 export type ChatRoomMemberRole = 'admin' | 'member';
 
+export interface ChatRoomMemberPreview {
+  member_id: string;
+  first_name: string;
+  photo_url: string | null;
+}
+
 export interface ChatRoom {
   id: string;
   name: string;
@@ -22,6 +28,7 @@ export interface ChatRoom {
   updated_at: string;
   // Joined/computed
   member_count?: number;
+  members_preview?: ChatRoomMemberPreview[];
   last_message?: ChatMessage | null;
   unread_count?: number;
   my_membership?: ChatRoomMember | null;
@@ -158,7 +165,10 @@ export interface LinkPreviewData {
 // =============================================
 
 const MESSAGES_PER_PAGE = 40;
-export const URL_REGEX = /\bhttps?:\/\/[^\s<>"'`]+/gi;
+export const URL_REGEX =
+  /\b(?:https?:\/\/|www\.)[^\s<>"'`]+|\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{2,5})?(?:[/?#][^\s<>"'`]*)?/gi;
+const DOMAIN_URL_REGEX =
+  /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{2,5})?(?:[/?#][^\s<>"'`]*)?$/i;
 const FILE_EXTENSION_REGEX = /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|csv|txt|zip|rar|7z|mp3|wav|m4a|aac|ogg|flac|mp4|mov|avi|mkv)$/i;
 const MAX_CHAT_SLUG_LENGTH = 80;
 const TURKISH_CHAR_MAP: Record<string, string> = {
@@ -299,12 +309,28 @@ function normalizeReplyRelation(rawReply: unknown): ChatMessage['reply_to'] {
   return replyTo as ChatMessage['reply_to'];
 }
 
-function normalizeUrl(raw: string): string {
-  return raw.trim().replace(/[),.;!?]+$/g, '');
-}
+export function normalizeChatUrl(raw: string): string | null {
+  const trimmed = raw.trim().replace(/[),.;!?]+$/g, '');
+  if (!trimmed) return null;
 
-function isHttpUrl(value: string): boolean {
-  return /^https?:\/\//i.test(value);
+  const candidate = /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : DOMAIN_URL_REGEX.test(trimmed)
+      ? `https://${trimmed}`
+      : null;
+
+  if (!candidate) return null;
+
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    if (!parsed.hostname) return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
 }
 
 function extractUrlsFromText(text: string | null | undefined): string[] {
@@ -312,8 +338,8 @@ function extractUrlsFromText(text: string | null | undefined): string[] {
   const matches = text.match(URL_REGEX) ?? [];
   const urls = new Set<string>();
   for (const match of matches) {
-    const url = normalizeUrl(match);
-    if (isHttpUrl(url)) urls.add(url);
+    const url = normalizeChatUrl(match);
+    if (url) urls.add(url);
   }
   return Array.from(urls);
 }
@@ -322,8 +348,8 @@ function collectUrls(value: unknown, urls: Set<string>, depth = 0): void {
   if (value == null || depth > 4) return;
 
   if (typeof value === 'string') {
-    const url = normalizeUrl(value);
-    if (isHttpUrl(url)) urls.add(url);
+    const url = normalizeChatUrl(value);
+    if (url) urls.add(url);
     return;
   }
 
@@ -438,8 +464,8 @@ function collectFileCandidates(value: unknown, out: FileCandidate[], depth = 0):
   for (const key of keys) {
     const valueAtKey = record[key];
     if (typeof valueAtKey === 'string') {
-      const url = normalizeUrl(valueAtKey);
-      if (isHttpUrl(url)) urlCandidates.add(url);
+      const url = normalizeChatUrl(valueAtKey);
+      if (url) urlCandidates.add(url);
     }
   }
 
@@ -448,8 +474,8 @@ function collectFileCandidates(value: unknown, out: FileCandidate[], depth = 0):
     if (!Array.isArray(valueAtKey)) continue;
     for (const item of valueAtKey) {
       if (typeof item !== 'string') continue;
-      const url = normalizeUrl(item);
-      if (isHttpUrl(url)) urlCandidates.add(url);
+      const url = normalizeChatUrl(item);
+      if (url) urlCandidates.add(url);
     }
   }
 
@@ -492,6 +518,51 @@ export async function fetchChatRooms(memberId: string) {
     .order('joined_at', { ascending: true });
 
   if (membershipError) throw membershipError;
+
+  const roomIds = (memberships ?? [])
+    .map((m) => (typeof m.room_id === 'string' ? m.room_id : null))
+    .filter((roomId): roomId is string => roomId !== null);
+
+  const membersPreviewByRoom = new Map<string, ChatRoomMemberPreview[]>();
+  if (roomIds.length > 0) {
+    const { data: roomMembers, error: roomMembersError } = await supabase
+      .from('chat_room_members')
+      .select(`
+        room_id, member_id,
+        choir_members (first_name, photo_url)
+      `)
+      .in('room_id', roomIds)
+      .order('joined_at', { ascending: true });
+
+    if (roomMembersError) throw roomMembersError;
+
+    for (const row of roomMembers ?? []) {
+      const roomId = typeof row.room_id === 'string' ? row.room_id : null;
+      const memberIdFromRow = typeof row.member_id === 'string' ? row.member_id : null;
+      if (!roomId || !memberIdFromRow) continue;
+
+      const memberRelation = row.choir_members as
+        | { first_name?: string | null; photo_url?: string | null }
+        | Array<{ first_name?: string | null; photo_url?: string | null }>
+        | null;
+      const memberProfile = Array.isArray(memberRelation) ? memberRelation[0] : memberRelation;
+
+      const preview: ChatRoomMemberPreview = {
+        member_id: memberIdFromRow,
+        first_name: memberProfile?.first_name?.trim() || 'Üye',
+        photo_url: memberProfile?.photo_url ?? null,
+      };
+
+      const existing = membersPreviewByRoom.get(roomId);
+      if (!existing) {
+        membersPreviewByRoom.set(roomId, [preview]);
+        continue;
+      }
+      if (!existing.some((item) => item.member_id === preview.member_id)) {
+        existing.push(preview);
+      }
+    }
+  }
 
   const rooms: ChatRoom[] = [];
   for (const m of memberships ?? []) {
@@ -566,6 +637,7 @@ export async function fetchChatRooms(memberId: string) {
         : null,
       unread_count: unreadCount,
       member_count: memberCount ?? 0,
+      members_preview: membersPreviewByRoom.get(room.id) ?? [],
       my_membership: {
         id: m.id,
         room_id: room.id,
