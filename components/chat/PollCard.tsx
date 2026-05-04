@@ -192,7 +192,8 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
           const percent = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
           const isSelected = myVotes.includes(opt.id);
 
-          const handleTouchStart = () => {
+          const handleTouchStart = (e: React.TouchEvent) => {
+            e.stopPropagation(); // Prevent message context menu
             longPressTimerRef.current = setTimeout(() => {
               if (!poll.is_anonymous && optionVotes.length > 0) {
                 setShowVotersOptionId(opt.id);
@@ -200,7 +201,7 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
             }, 400); // 400ms long press
           };
 
-          const handleTouchEnd = () => {
+          const handleTouchEnd = (e: React.TouchEvent) => {
             if (longPressTimerRef.current) {
               clearTimeout(longPressTimerRef.current);
             }
@@ -209,9 +210,13 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
           return (
             <button
               key={opt.id}
-              onClick={() => void handleVote(opt.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleVote(opt.id);
+              }}
               onContextMenu={(e) => {
                 e.preventDefault();
+                e.stopPropagation(); // Prevent message context menu
                 if (!poll.is_anonymous && optionVotes.length > 0) {
                   setShowVotersOptionId(opt.id);
                 }
@@ -328,8 +333,10 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
       <AnimatePresence>
         {showVotersOptionId && (
           <VoterListModal
-            optionText={poll.options_json.find(o => o.id === showVotersOptionId)?.text || ''}
-            votes={votes.filter(v => v.option_id === showVotersOptionId)}
+            activeOptionId={showVotersOptionId}
+            onOptionChange={setShowVotersOptionId}
+            options={poll.options_json}
+            votes={votes}
             onClose={() => setShowVotersOptionId(null)}
           />
         )}
@@ -339,20 +346,26 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
 }
 
 function VoterListModal({
-  optionText,
+  activeOptionId,
+  onOptionChange,
+  options,
   votes,
   onClose
 }: {
-  optionText: string;
+  activeOptionId: string;
+  onOptionChange: (id: string) => void;
+  options: { id: string; text: string }[];
   votes: VoteWithMember[];
   onClose: () => void;
 }) {
+  const activeVotes = votes.filter(v => v.option_id === activeOptionId);
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <motion.div
@@ -360,39 +373,78 @@ function VoterListModal({
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-sm rounded-2xl bg-[var(--color-background)] overflow-hidden shadow-xl"
+        className="w-full max-w-sm rounded-2xl bg-[var(--color-background)] overflow-hidden shadow-2xl"
       >
-        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
-          <h3 className="font-semibold text-sm text-[var(--color-text-high)] truncate pr-4">
-            {optionText} ({votes.length})
-          </h3>
-          <button
-            onClick={onClose}
-            className="rounded-full p-1.5 hover:bg-[var(--color-surface)]"
-          >
-            <X size={16} className="text-[var(--color-text-medium)]" />
-          </button>
+        <div className="border-b border-[var(--color-border)]">
+          <div className="flex items-center justify-between px-4 py-3">
+            <h3 className="font-semibold text-sm text-[var(--color-text-high)]">
+              Anket Sonuçları
+            </h3>
+            <button
+              onClick={onClose}
+              className="rounded-full p-1.5 hover:bg-[var(--color-surface)] transition-colors"
+            >
+              <X size={18} className="text-[var(--color-text-medium)]" />
+            </button>
+          </div>
+          
+          {/* Tabs */}
+          <div className="flex gap-1 overflow-x-auto px-4 pb-2 no-scrollbar">
+            {options.map((opt) => {
+              const count = votes.filter(v => v.option_id === opt.id).length;
+              const isActive = activeOptionId === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  onClick={() => onOptionChange(opt.id)}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all ${
+                    isActive
+                      ? 'bg-[var(--color-accent)] text-white shadow-md'
+                      : 'bg-[var(--color-surface)] text-[var(--color-text-medium)] hover:bg-[var(--color-surface-hover)]'
+                  }`}
+                >
+                  <span className="truncate max-w-[80px]">{opt.text}</span>
+                  <span className={`rounded-full px-1.5 py-0.5 text-[0.6rem] ${
+                    isActive ? 'bg-white/20' : 'bg-[var(--color-border)]'
+                  }`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
-        <div className="max-h-[60vh] overflow-y-auto p-2">
-          {votes.length === 0 ? (
-            <p className="p-4 text-center text-sm text-[var(--color-text-low)]">Kimse oy vermemiş</p>
+
+        <div className="max-h-[50vh] overflow-y-auto p-2">
+          {activeVotes.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 opacity-50">
+              <Users size={32} className="mb-2 text-[var(--color-text-low)]" />
+              <p className="text-sm text-[var(--color-text-low)]">Henüz oy veren yok</p>
+            </div>
           ) : (
-            votes.map((v) => (
-              <div key={v.member_id} className="flex items-center gap-3 rounded-xl p-2 transition-colors hover:bg-[var(--color-surface)]">
-                <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-[var(--color-accent-soft)] flex items-center justify-center">
-                  {v.choir_members?.photo_url ? (
-                    <img src={v.choir_members.photo_url} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <span className="text-xs font-bold text-[var(--color-accent)]">
-                      {v.choir_members?.first_name?.[0] || '?'}
-                    </span>
-                  )}
+            <div className="flex flex-col gap-1">
+              {activeVotes.map((v) => (
+                <div key={v.member_id} className="flex items-center gap-3 rounded-xl p-2.5 transition-colors hover:bg-[var(--color-surface)]">
+                  <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-[var(--color-accent-soft)] flex items-center justify-center border border-[var(--color-border)]">
+                    {v.choir_members?.photo_url ? (
+                      <img src={v.choir_members.photo_url} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <span className="text-sm font-bold text-[var(--color-accent)]">
+                        {v.choir_members?.first_name?.[0] || '?'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-[var(--color-text-high)]">
+                      {v.choir_members?.first_name} {v.choir_members?.last_name}
+                    </p>
+                    <p className="text-[0.65rem] text-[var(--color-text-low)]">
+                      {new Date(v.created_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
                 </div>
-                <span className="text-sm font-medium text-[var(--color-text-high)]">
-                  {v.choir_members?.first_name} {v.choir_members?.last_name}
-                </span>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
       </motion.div>
