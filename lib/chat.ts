@@ -571,7 +571,7 @@ export async function createPollMessage(
   senderId: string,
   question: string,
   options: { id: string; text: string }[],
-  settings: { isAnonymous?: boolean; isMultipleChoice?: boolean; closesAt?: string | null }
+  settings: { isAnonymous?: boolean; isMultipleChoice?: boolean }
 ) {
   // First create the message
   const msg = await sendMessage(roomId, senderId, `📊 ${question}`, {
@@ -588,7 +588,6 @@ export async function createPollMessage(
       options_json: options,
       is_anonymous: settings.isAnonymous ?? false,
       is_multiple_choice: settings.isMultipleChoice ?? false,
-      closes_at: settings.closesAt ?? null,
     })
     .select()
     .single();

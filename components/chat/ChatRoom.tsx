@@ -536,7 +536,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         onSelect={async (emoji) => {
           if (!member?.id) return;
           try {
-            await sendMessage(roomId, member.id, '', {
+            await sendMessage(roomId, member.id, emoji, {
               messageType: 'sticker',
               metadataJson: { emoji },
             });
