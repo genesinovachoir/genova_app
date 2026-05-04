@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   X,
@@ -35,6 +35,7 @@ import { MemberActionSheet } from './MemberActionSheet';
 import { LinksPanel } from './LinksPanel';
 import { FilesPanel } from './FilesPanel';
 import { getDriveImageUrl } from '@/lib/drive';
+import { AddMemberModal } from './AddMemberModal';
 
 interface RoomInfoDrawerProps {
   roomId: string;
@@ -65,6 +66,7 @@ export function RoomInfoDrawer({
 
   const [activeTab, setActiveTab] = useState<'members' | 'media' | 'links' | 'starred' | 'files'>('members');
   const [selectedMember, setSelectedMember] = useState<ChatRoomMember | null>(null);
+  const [isAddMemberOpen, setIsAddMemberOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const myMembership = useMemo(
@@ -76,6 +78,23 @@ export function RoomInfoDrawer({
   const notificationsEnabled = notificationsOverride ?? myMembership?.notifications_enabled ?? true;
   const isAdmin = myMembership?.role === 'admin';
   const isDm = room?.type === 'dm';
+
+  useEffect(() => {
+    if (!isRoomInfoOpen) setIsAddMemberOpen(false);
+  }, [isRoomInfoOpen]);
+
+  const currentMemberIds = useMemo(
+    () => roomMembers.map((roomMember) => roomMember.member_id),
+    [roomMembers]
+  );
+
+  const handleMembersChange = useCallback(
+    (members: ChatRoomMember[]) => {
+      onMembersChange(members);
+      updateRoomInStore(roomId, { member_count: members.length });
+    },
+    [onMembersChange, roomId, updateRoomInStore]
+  );
 
   // Sort members: online first, then admins, then alphabetical
   const sortedMembers = useMemo(() => {
@@ -144,14 +163,12 @@ export function RoomInfoDrawer({
         return;
       try {
         await removeMember(roomId, memberId);
-        onMembersChange(
-          roomMembers.filter((m) => m.member_id !== memberId)
-        );
+        handleMembersChange(roomMembers.filter((m) => m.member_id !== memberId));
       } catch (err) {
         console.error('Failed to remove member:', err);
       }
     },
-    [roomId, roomMembers, onMembersChange]
+    [roomId, roomMembers, handleMembersChange]
   );
 
   const handleLeave = async () => {
@@ -431,7 +448,10 @@ export function RoomInfoDrawer({
 
                     {/* Add Member Button */}
                     {isAdmin && !isDm && (
-                      <button className="flex items-center gap-3 rounded-xl p-3 text-left transition-colors hover:bg-[var(--color-surface)]">
+                      <button
+                        onClick={() => setIsAddMemberOpen(true)}
+                        className="flex items-center gap-3 rounded-xl p-3 text-left transition-colors hover:bg-[var(--color-surface)]"
+                      >
                         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)]/10 text-[var(--color-accent)]">
                           <UserPlus size={20} />
                         </div>
@@ -545,7 +565,7 @@ export function RoomInfoDrawer({
           if (!member?.id) return;
           try {
             await updateMemberRole(roomId, selectedMember.member_id, 'admin');
-            onMembersChange(roomMembers.map(m => m.id === selectedMember.id ? { ...m, role: 'admin' } : m));
+            handleMembersChange(roomMembers.map(m => m.id === selectedMember.id ? { ...m, role: 'admin' } : m));
           } catch (err) {
             console.error('Failed to make admin:', err);
           }
@@ -554,7 +574,7 @@ export function RoomInfoDrawer({
           if (!member?.id) return;
           try {
             await updateMemberRole(roomId, selectedMember.member_id, 'member');
-            onMembersChange(roomMembers.map(m => m.id === selectedMember.id ? { ...m, role: 'member' } : m));
+            handleMembersChange(roomMembers.map(m => m.id === selectedMember.id ? { ...m, role: 'member' } : m));
           } catch (err) {
             console.error('Failed to remove admin:', err);
           }
@@ -562,6 +582,13 @@ export function RoomInfoDrawer({
         onRemoveMember={() => void handleRemoveMember(selectedMember.member_id)}
       />
     )}
+    <AddMemberModal
+      isOpen={isAddMemberOpen}
+      roomId={roomId}
+      currentMemberIds={currentMemberIds}
+      onClose={() => setIsAddMemberOpen(false)}
+      onMembersChange={handleMembersChange}
+    />
     </>
   );
 }
