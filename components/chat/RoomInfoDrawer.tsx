@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   X,
@@ -9,7 +9,6 @@ import {
   BellOff,
   LogOut,
   UserPlus,
-  Shield,
   Crown,
   Circle,
   Pencil,
@@ -22,7 +21,6 @@ import {
   updateRoom,
   removeMember,
   leaveRoom,
-  fetchRoomMembers,
   updateRoomAvatar,
   updateMemberRole,
 } from '@/lib/chat';
@@ -32,6 +30,8 @@ import { useRouter } from 'next/navigation';
 import { MediaGalleryGrid } from './MediaGalleryGrid';
 import { StarredMessagesPanel } from './StarredMessagesPanel';
 import { MemberActionSheet } from './MemberActionSheet';
+import { LinksPanel } from './LinksPanel';
+import { FilesPanel } from './FilesPanel';
 
 interface RoomInfoDrawerProps {
   roomId: string;
@@ -56,9 +56,9 @@ export function RoomInfoDrawer({
   const [editName, setEditName] = useState('');
   const [isEditingDesc, setIsEditingDesc] = useState(false);
   const [editDesc, setEditDesc] = useState('');
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [notificationsOverride, setNotificationsOverride] = useState<boolean | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'members' | 'media' | 'starred'>('members');
+  const [activeTab, setActiveTab] = useState<'members' | 'media' | 'links' | 'starred' | 'files'>('members');
   const [selectedMember, setSelectedMember] = useState<ChatRoomMember | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -67,15 +67,10 @@ export function RoomInfoDrawer({
     [roomMembers, member?.id]
   );
 
+  const memberId = member?.id ?? null;
+  const notificationsEnabled = notificationsOverride ?? myMembership?.notifications_enabled ?? true;
   const isAdmin = myMembership?.role === 'admin';
   const isDm = room?.type === 'dm';
-
-  // Initialize notification state from membership
-  useEffect(() => {
-    if (myMembership) {
-      setNotificationsEnabled(myMembership.notifications_enabled);
-    }
-  }, [myMembership]);
 
   // Sort members: online first, then admins, then alphabetical
   const sortedMembers = useMemo(() => {
@@ -116,20 +111,20 @@ export function RoomInfoDrawer({
     }
   }, [editDesc, roomId, updateRoomInStore]);
 
-  const handleToggleNotifications = useCallback(async () => {
+  const handleToggleNotifications = async () => {
     const newValue = !notificationsEnabled;
-    setNotificationsEnabled(newValue);
+    setNotificationsOverride(newValue);
     try {
       await supabase
         .from('chat_room_members')
         .update({ notifications_enabled: newValue })
         .eq('room_id', roomId)
-        .eq('member_id', member?.id);
+        .eq('member_id', memberId);
     } catch (err) {
-      setNotificationsEnabled(!newValue); // revert
+      setNotificationsOverride(null); // revert to membership value
       console.error('Failed to toggle notifications:', err);
     }
-  }, [notificationsEnabled, roomId, member?.id]);
+  };
 
   const handleRemoveMember = useCallback(
     async (memberId: string) => {
@@ -154,18 +149,18 @@ export function RoomInfoDrawer({
     [roomId, roomMembers, onMembersChange]
   );
 
-  const handleLeave = useCallback(async () => {
-    if (!member?.id) return;
+  const handleLeave = async () => {
+    if (!memberId) return;
     if (!window.confirm('Bu odadan ayrılmak istediğinize emin misiniz?'))
       return;
     try {
-      await leaveRoom(roomId, member.id);
+      await leaveRoom(roomId, memberId);
       setRoomInfoOpen(false);
       router.push('/chat');
     } catch (err) {
       console.error('Failed to leave room:', err);
     }
-  }, [roomId, member?.id, setRoomInfoOpen, router]);
+  };
 
   if (!room) return null;
 
@@ -341,45 +336,40 @@ export function RoomInfoDrawer({
               </div>
 
               {/* Tabs */}
-              <div className="flex border-b border-[var(--color-border)] px-4">
-                <button
-                  onClick={() => setActiveTab('members')}
-                  className={`flex-1 border-b-2 py-3 text-sm font-medium transition-colors ${
-                    activeTab === 'members'
-                      ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
-                      : 'border-transparent text-[var(--color-text-medium)] hover:text-[var(--color-text-high)]'
-                  }`}
-                >
-                  Üyeler ({roomMembers.length})
-                </button>
-                <button
-                  onClick={() => setActiveTab('media')}
-                  className={`flex-1 border-b-2 py-3 text-sm font-medium transition-colors ${
-                    activeTab === 'media'
-                      ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
-                      : 'border-transparent text-[var(--color-text-medium)] hover:text-[var(--color-text-high)]'
-                  }`}
-                >
-                  Medya
-                </button>
-                <button
-                  onClick={() => setActiveTab('starred')}
-                  className={`flex-1 border-b-2 py-3 text-sm font-medium transition-colors ${
-                    activeTab === 'starred'
-                      ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
-                      : 'border-transparent text-[var(--color-text-medium)] hover:text-[var(--color-text-high)]'
-                  }`}
-                >
-                  Yıldızlılar
-                </button>
+              <div className="border-b border-[var(--color-border)]">
+                <div className="flex gap-1 overflow-x-auto px-3 no-scrollbar">
+                  {([
+                    { id: 'members', label: `Üyeler (${roomMembers.length})` },
+                    { id: 'media', label: 'Medya' },
+                    { id: 'links', label: 'Bağlantılar' },
+                    { id: 'starred', label: 'Yıldızlılar' },
+                    { id: 'files', label: 'Dosyalar' },
+                  ] as const).map((section) => (
+                    <button
+                      key={section.id}
+                      onClick={() => setActiveTab(section.id)}
+                      className={`shrink-0 border-b-2 px-3 py-3 text-sm font-medium transition-colors ${
+                        activeTab === section.id
+                          ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
+                          : 'border-transparent text-[var(--color-text-medium)] hover:text-[var(--color-text-high)]'
+                      }`}
+                    >
+                      {section.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Tab Content */}
               <div className="flex-1 overflow-y-auto">
                 {activeTab === 'media' ? (
                   <MediaGalleryGrid roomId={roomId} onGoToMessage={onGoToMessage} />
+                ) : activeTab === 'links' ? (
+                  <LinksPanel roomId={roomId} onGoToMessage={onGoToMessage} />
                 ) : activeTab === 'starred' ? (
                   <StarredMessagesPanel roomId={roomId} onGoToMessage={onGoToMessage} />
+                ) : activeTab === 'files' ? (
+                  <FilesPanel roomId={roomId} onGoToMessage={onGoToMessage} />
                 ) : (
                   <div className="flex flex-col gap-1 p-2">
                     {/* Notifications Toggle */}

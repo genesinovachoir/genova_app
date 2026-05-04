@@ -6,7 +6,7 @@ import { uploadChatImage } from '@/lib/drive';
 // =============================================
 
 export type ChatRoomType = 'general' | 'voice_group' | 'custom' | 'dm';
-export type ChatMessageType = 'text' | 'image' | 'sticker' | 'poll' | 'system';
+export type ChatMessageType = 'text' | 'image' | 'sticker' | 'poll' | 'system' | 'file';
 export type ChatRoomMemberRole = 'admin' | 'member';
 
 export interface ChatRoom {
@@ -122,11 +122,196 @@ export interface ChatNotificationPreferences {
   updated_at: string;
 }
 
+export interface ChatRoomLink {
+  id: string;
+  message_id: string;
+  url: string;
+  domain: string;
+  created_at: string;
+  sender_name: string;
+}
+
+export interface ChatRoomFile {
+  id: string;
+  message_id: string;
+  name: string;
+  url: string;
+  size_bytes: number | null;
+  mime_type: string | null;
+  created_at: string;
+  sender_name: string;
+}
+
 // =============================================
 // Query Functions
 // =============================================
 
 const MESSAGES_PER_PAGE = 40;
+const URL_REGEX = /\bhttps?:\/\/[^\s<>"'`]+/gi;
+const FILE_EXTENSION_REGEX = /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|csv|txt|zip|rar|7z|mp3|wav|m4a|aac|ogg|flac|mp4|mov|avi|mkv)$/i;
+
+type FileCandidate = {
+  url: string;
+  name?: string | null;
+  size_bytes?: number | null;
+  mime_type?: string | null;
+};
+
+function normalizeReplyRelation(rawReply: unknown): ChatMessage['reply_to'] {
+  const replyTo = Array.isArray(rawReply) ? rawReply[0] : rawReply;
+  if (!replyTo || typeof replyTo !== 'object') return null;
+  return replyTo as ChatMessage['reply_to'];
+}
+
+function normalizeUrl(raw: string): string {
+  return raw.trim().replace(/[),.;!?]+$/g, '');
+}
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function extractUrlsFromText(text: string | null | undefined): string[] {
+  if (!text) return [];
+  const matches = text.match(URL_REGEX) ?? [];
+  const urls = new Set<string>();
+  for (const match of matches) {
+    const url = normalizeUrl(match);
+    if (isHttpUrl(url)) urls.add(url);
+  }
+  return Array.from(urls);
+}
+
+function collectUrls(value: unknown, urls: Set<string>, depth = 0): void {
+  if (value == null || depth > 4) return;
+
+  if (typeof value === 'string') {
+    const url = normalizeUrl(value);
+    if (isHttpUrl(url)) urls.add(url);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) collectUrls(item, urls, depth + 1);
+    return;
+  }
+
+  if (typeof value === 'object') {
+    for (const item of Object.values(value as Record<string, unknown>)) {
+      collectUrls(item, urls, depth + 1);
+    }
+  }
+}
+
+function extractUrlsFromMetadata(metadata: Record<string, unknown> | null | undefined): string[] {
+  if (!metadata) return [];
+  const urls = new Set<string>();
+  collectUrls(metadata, urls);
+  return Array.from(urls);
+}
+
+function getSenderName(row: { choir_members?: { first_name?: string | null; last_name?: string | null } | null }): string {
+  const first = row.choir_members?.first_name?.trim() ?? '';
+  const last = row.choir_members?.last_name?.trim() ?? '';
+  return `${first} ${last}`.trim() || 'Bilinmeyen';
+}
+
+function getDomain(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, '');
+  } catch {
+    return 'bilinmiyor';
+  }
+}
+
+function parseNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const num = Number(value);
+    if (Number.isFinite(num)) return num;
+  }
+  return null;
+}
+
+function inferFileName(url: string): string {
+  try {
+    const pathname = new URL(url).pathname;
+    const raw = decodeURIComponent(pathname.split('/').filter(Boolean).pop() ?? '');
+    return raw || 'Dosya';
+  } catch {
+    return 'Dosya';
+  }
+}
+
+function isLikelyFileUrl(url: string): boolean {
+  try {
+    const pathname = new URL(url).pathname;
+    return FILE_EXTENSION_REGEX.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+function collectFileCandidates(value: unknown, out: FileCandidate[], depth = 0): void {
+  if (value == null || depth > 4) return;
+
+  if (Array.isArray(value)) {
+    for (const item of value) collectFileCandidates(item, out, depth + 1);
+    return;
+  }
+
+  if (typeof value !== 'object') return;
+
+  const record = value as Record<string, unknown>;
+  const keys = [
+    'file_url',
+    'url',
+    'download_url',
+    'web_view_link',
+    'web_content_link',
+  ];
+
+  const urlCandidates = new Set<string>();
+  for (const key of keys) {
+    const valueAtKey = record[key];
+    if (typeof valueAtKey === 'string') {
+      const url = normalizeUrl(valueAtKey);
+      if (isHttpUrl(url)) urlCandidates.add(url);
+    }
+  }
+
+  for (const key of ['file_urls', 'urls', 'web_view_links', 'web_content_links']) {
+    const valueAtKey = record[key];
+    if (!Array.isArray(valueAtKey)) continue;
+    for (const item of valueAtKey) {
+      if (typeof item !== 'string') continue;
+      const url = normalizeUrl(item);
+      if (isHttpUrl(url)) urlCandidates.add(url);
+    }
+  }
+
+  const hasFileMetadata =
+    typeof record.file_name === 'string' ||
+    typeof record.filename === 'string' ||
+    typeof record.mime_type === 'string' ||
+    typeof record.file_mime_type === 'string' ||
+    record.file_size != null ||
+    record.size != null;
+
+  for (const url of urlCandidates) {
+    if (!hasFileMetadata && !isLikelyFileUrl(url)) continue;
+    out.push({
+      url,
+      name: (record.file_name as string | undefined) ?? (record.filename as string | undefined) ?? (record.name as string | undefined) ?? null,
+      size_bytes: parseNumber(record.file_size ?? record.size),
+      mime_type: (record.file_mime_type as string | undefined) ?? (record.mime_type as string | undefined) ?? null,
+    });
+  }
+
+  for (const item of Object.values(record)) {
+    collectFileCandidates(item, out, depth + 1);
+  }
+}
 
 /** Fetch rooms the current member belongs to, with last message */
 export async function fetchChatRooms(memberId: string) {
@@ -266,7 +451,7 @@ export async function fetchMessages(
   return (data ?? []).map((msg) => ({
     ...msg,
     sender: (msg.choir_members as unknown as ChatMessage['sender']),
-    reply_to: (msg.reply_to as unknown as ChatMessage['reply_to']),
+    reply_to: normalizeReplyRelation(msg.reply_to),
     metadata_json: (msg.metadata_json ?? {}) as Record<string, unknown>,
     message_type: msg.message_type as ChatMessageType,
   })) as ChatMessage[];
@@ -313,6 +498,10 @@ export async function sendMessage(
       metadata_json, is_edited, is_deleted, created_at, updated_at,
       choir_members!chat_messages_sender_id_fkey (
         id, first_name, last_name, photo_url
+      ),
+      reply_to:chat_messages!reply_to_id (
+        id, content, sender_id,
+        choir_members!chat_messages_sender_id_fkey (first_name, last_name)
       )
     `)
     .single();
@@ -321,6 +510,7 @@ export async function sendMessage(
   return {
     ...data,
     sender: (data.choir_members as unknown as ChatMessage['sender']),
+    reply_to: normalizeReplyRelation((data as { reply_to?: unknown }).reply_to),
     metadata_json: (data.metadata_json ?? {}) as Record<string, unknown>,
     message_type: data.message_type as ChatMessageType,
   } as ChatMessage;
@@ -793,6 +983,103 @@ export async function fetchRoomMedia(roomId: string) {
 
   if (error) throw error;
   return data as unknown as ChatMessage[];
+}
+
+export async function fetchRoomLinks(roomId: string) {
+  const { data, error } = await supabase
+    .from('chat_messages')
+    .select(`
+      id, room_id, content, message_type, metadata_json, created_at,
+      choir_members!chat_messages_sender_id_fkey (first_name, last_name)
+    `)
+    .eq('room_id', roomId)
+    .eq('is_deleted', false)
+    .order('created_at', { ascending: false })
+    .limit(400);
+
+  if (error) throw error;
+
+  const links: ChatRoomLink[] = [];
+  const seen = new Set<string>();
+
+  for (const row of data ?? []) {
+    const textUrls = extractUrlsFromText(row.content as string | null);
+    const metadataUrls =
+      row.message_type === 'image'
+        ? []
+        : extractUrlsFromMetadata((row.metadata_json ?? {}) as Record<string, unknown>);
+    const allUrls = Array.from(new Set([...textUrls, ...metadataUrls]));
+
+    for (const url of allUrls) {
+      const dedupeKey = `${row.id}::${url}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      links.push({
+        id: dedupeKey,
+        message_id: row.id as string,
+        url,
+        domain: getDomain(url),
+        created_at: row.created_at as string,
+        sender_name: getSenderName(row as { choir_members?: { first_name?: string | null; last_name?: string | null } | null }),
+      });
+    }
+  }
+
+  return links;
+}
+
+export async function fetchRoomFiles(roomId: string) {
+  const { data, error } = await supabase
+    .from('chat_messages')
+    .select(`
+      id, room_id, content, message_type, metadata_json, created_at,
+      choir_members!chat_messages_sender_id_fkey (first_name, last_name)
+    `)
+    .eq('room_id', roomId)
+    .eq('is_deleted', false)
+    .order('created_at', { ascending: false })
+    .limit(400);
+
+  if (error) throw error;
+
+  const files: ChatRoomFile[] = [];
+  const seen = new Set<string>();
+
+  for (const row of data ?? []) {
+    const messageType = row.message_type as ChatMessageType;
+    if (messageType === 'image' || messageType === 'sticker' || messageType === 'poll' || messageType === 'system') {
+      continue;
+    }
+
+    const fromMetadata: FileCandidate[] = [];
+    collectFileCandidates((row.metadata_json ?? {}) as Record<string, unknown>, fromMetadata);
+
+    const fromText = extractUrlsFromText(row.content as string | null)
+      .filter((url) => isLikelyFileUrl(url))
+      .map((url) => ({ url, name: null, size_bytes: null, mime_type: null }) satisfies FileCandidate);
+
+    const candidates = [...fromMetadata, ...fromText];
+
+    for (const candidate of candidates) {
+      if (!candidate.url) continue;
+      const dedupeKey = `${row.id}::${candidate.url}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+
+      files.push({
+        id: dedupeKey,
+        message_id: row.id as string,
+        name: (candidate.name && candidate.name.trim()) || inferFileName(candidate.url),
+        url: candidate.url,
+        size_bytes: candidate.size_bytes ?? null,
+        mime_type: candidate.mime_type ?? null,
+        created_at: row.created_at as string,
+        sender_name: getSenderName(row as { choir_members?: { first_name?: string | null; last_name?: string | null } | null }),
+      });
+    }
+  }
+
+  return files;
 }
 
 /** Fetch poll data with votes */

@@ -417,6 +417,18 @@ body.song-edit-open .fade-overlay {
   }
 }
 
+@keyframes message-highlight-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(192, 178, 131, 0.62);
+  }
+  50% {
+    box-shadow: 0 0 20px 4px rgba(192, 178, 131, 0.34);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(192, 178, 131, 0);
+  }
+}
+
 .mini-player-marquee-track {
   animation: mini-player-marquee-track 11s linear infinite;
   will-change: transform;

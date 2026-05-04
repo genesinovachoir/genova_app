@@ -67,8 +67,6 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
   const {
     contextMenuMessage,
     contextMenuPosition,
-    openContextMenu,
-    closeContextMenu,
     editingMessage,
     setEditingMessage,
     setReplyingTo,
@@ -253,6 +251,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
           .updateMessage(roomId, tempId, {
             id: real.id,
             created_at: real.created_at,
+            reply_to: real.reply_to ?? opt.reply_to,
           });
       } catch {
         useChatStore
@@ -501,13 +500,13 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
   return (
     <div className="flex h-[100dvh] flex-col bg-[var(--color-background)]">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-background)] px-3 py-3 pt-[calc(env(safe-area-inset-top,0px)+12px)]">
+      <div className="relative z-50 flex items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-background)] px-3 py-3 pt-[calc(env(safe-area-inset-top,0px)+12px)]">
         <motion.button
           whileTap={{ scale: 0.9 }}
           onClick={() => router.push('/chat')}
-          className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--color-text-high)] hover:bg-[var(--color-surface)]"
+          className="flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-[var(--color-text-high)] hover:bg-[var(--color-surface)]"
         >
-          <ArrowLeft size={22} />
+          <ArrowLeft size={22} className="pointer-events-none" />
         </motion.button>
         <div
           className="min-w-0 flex-1 cursor-pointer"
@@ -529,9 +528,9 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         <motion.button
           whileTap={{ scale: 0.9 }}
           onClick={() => store.setRoomInfoOpen(true)}
-          className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--color-text-medium)] hover:bg-[var(--color-surface)]"
+          className="flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-[var(--color-text-medium)] hover:bg-[var(--color-surface)]"
         >
-          <MoreVertical size={20} />
+          <MoreVertical size={20} className="pointer-events-none" />
         </motion.button>
       </div>
 
@@ -578,6 +577,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
                       onReactionToggle={handleReactionToggle}
                       onReply={(m) => store.setReplyingTo(m)}
                       onImageClick={handleImageClick}
+                      isStarred={store.starredMessageIds.includes(msg.id)}
                     />
                   );
                 })}
@@ -674,16 +674,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
           images={galleryImages}
           initialIndex={galleryIndex}
           onClose={() => setIsGalleryOpen(false)}
-          onGoToMessage={(messageId) => {
-            const el = document.getElementById(`message-${messageId}`);
-            if (el) {
-              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              el.classList.add('ring-4', 'ring-[var(--color-accent)]', 'bg-[var(--color-accent-soft)]', 'transition-all', 'duration-500');
-              setTimeout(() => {
-                el.classList.remove('ring-4', 'ring-[var(--color-accent)]', 'bg-[var(--color-accent-soft)]');
-              }, 2000);
-            }
-          }}
+          onGoToMessage={handleGoToMessage}
         />
       )}
 

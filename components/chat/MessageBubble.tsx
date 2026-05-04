@@ -2,7 +2,7 @@
 
 import { useRef, useCallback, useMemo, useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Check, CheckCheck, Clock, Trash2 } from 'lucide-react';
+import { Check, CheckCheck, Clock, Star, Trash2 } from 'lucide-react';
 import type { ChatMessage } from '@/lib/chat';
 import { ReactionBar } from './ReactionBar';
 import { PollCard } from './PollCard';
@@ -16,6 +16,7 @@ interface MessageBubbleProps {
   onReactionToggle?: (messageId: string, emoji: string) => void;
   onReply?: (message: ChatMessage) => void;
   onImageClick?: (message: ChatMessage, imageIndex: number) => void;
+  isStarred?: boolean;
 }
 
 function formatMessageTime(dateStr: string): string {
@@ -51,6 +52,7 @@ export function MessageBubble({
   onReactionToggle,
   onReply,
   onImageClick,
+  isStarred = false,
 }: MessageBubbleProps) {
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
@@ -126,7 +128,7 @@ export function MessageBubble({
           
           // Trigger highlight
           setIsHighlighted(true);
-          setTimeout(() => setIsHighlighted(false), 2000);
+          setTimeout(() => setIsHighlighted(false), 1800);
         }
       }
     };
@@ -135,22 +137,19 @@ export function MessageBubble({
     return () => window.removeEventListener('scrollToMessage', handleScrollToMessage);
   }, [message.id]);
 
-  const [isRevealed, setIsRevealed] = useState(false);
-  useEffect(() => {
-    if (message.message_type === 'image') {
-      const revealed = localStorage.getItem(`revealed-${message.id}`);
-      if (revealed === 'true') {
-        setIsRevealed(true);
-      }
+  const [isRevealed, setIsRevealed] = useState(() => {
+    if (typeof window === 'undefined' || message.message_type !== 'image') {
+      return false;
     }
-  }, [message.id, message.message_type]);
+    return localStorage.getItem(`revealed-${message.id}`) === 'true';
+  });
 
   const handleImageClick = async (index: number, url: string) => {
     if (!isRevealed) {
       localStorage.setItem(`revealed-${message.id}`, 'true');
       setIsRevealed(true);
-      
-      // Trigger download on first reveal
+
+      // Keep the original reveal/download behavior for media messages.
       try {
         const response = await fetch(url);
         const blob = await response.blob();
@@ -166,7 +165,7 @@ export function MessageBubble({
         console.error('Auto download failed', err);
       }
     }
-    
+
     // Defer the image click to allow state to settle
     setTimeout(() => {
       onImageClick?.(message, index);
@@ -204,7 +203,7 @@ export function MessageBubble({
       initial={{ opacity: 0, y: 10, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.2 }}
-      className={`flex ${isOwn ? 'justify-end' : 'justify-start'} px-3 py-[2px]`}
+      className={`flex ${isOwn ? 'justify-end' : 'justify-start'} px-3 py-1`}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
@@ -240,32 +239,37 @@ export function MessageBubble({
       {!isOwn && !showSender && <div className="mr-2 w-7 shrink-0" />}
 
       {/* Bubble + Reactions wrapper */}
-      <div className={`max-w-[75%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
+      <div className={`max-w-[80%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
         {/* Bubble */}
         <div
-          className={`relative max-w-[85%] rounded-3xl ${
+          className={`relative rounded-3xl ${
             message.message_type === 'image' || message.message_type === 'sticker'
               ? 'bg-transparent shadow-none'
               : isOwn
-                ? 'rounded-tr-sm bg-gradient-to-br from-[var(--color-accent)] to-[var(--color-accent-dark)] text-white shadow-md'
-                : 'rounded-tl-sm border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-high)] shadow-sm'
-          } ${isHighlighted ? 'ring-4 ring-[var(--color-accent)] scale-[1.02] transition-all duration-300' : ''}`}
+                ? 'rounded-tr-sm bg-gradient-to-br from-[var(--color-accent)] to-[var(--color-accent-dark)] px-3 py-2 text-white shadow-md'
+                : 'rounded-tl-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[var(--color-text-high)] shadow-sm'
+          } ${
+            isHighlighted
+              ? 'bg-[var(--color-accent-soft)] ring-2 ring-[var(--color-accent)]/60 animate-[message-highlight-glow_1.5s_ease-out] scale-[1.015] transition-transform duration-300'
+              : ''
+          }`}
         >
           {/* Sender name (group chats) */}
           {!isOwn && showSender && (
-            <p className="mb-0.5 text-[0.7rem] font-semibold text-[var(--color-accent)]">
+            <p className="mb-1 text-[0.7rem] font-semibold text-[var(--color-accent)]">
               {senderName}
             </p>
           )}
 
           {/* Reply preview */}
           {(() => {
-            const replyData = Array.isArray(message.reply_to) ? message.reply_to[0] : message.reply_to;
+            const replyRaw = message.reply_to as ChatMessage['reply_to'] | ChatMessage['reply_to'][] | null | undefined;
+            const replyData = Array.isArray(replyRaw) ? replyRaw[0] : replyRaw;
             if (!replyData || (!replyData.content && !replyData.choir_members)) return null;
             
             return (
               <div
-                className={`mb-1.5 rounded-lg border-l-2 px-2 py-1 cursor-pointer transition-colors ${
+                className={`mb-2 rounded-lg border-l-2 px-2 py-1 cursor-pointer transition-colors ${
                   isOwn
                     ? 'border-white/50 bg-white/15 hover:bg-white/25'
                     : 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] hover:bg-[var(--color-accent)]/20'
@@ -396,6 +400,12 @@ export function MessageBubble({
             </span>
             <MessageStatusIcon status={messageStatus} isOwn={isOwn} />
           </div>
+
+          {isStarred && (
+            <div className="mt-0.5 flex justify-end">
+              <Star size={10} className="fill-amber-400 text-amber-400" />
+            </div>
+          )}
         </div>
 
         {/* Reaction Bar */}
