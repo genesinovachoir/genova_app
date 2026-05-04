@@ -23,6 +23,7 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
   const [voting, setVoting] = useState(false);
   const [showVotersOptionId, setShowVotersOptionId] = useState<string | null>(null);
   const pollIdRef = useRef<string | null>(null);
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initial fetch
   useEffect(() => {
@@ -191,10 +192,33 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
           const percent = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
           const isSelected = myVotes.includes(opt.id);
 
+          const handleTouchStart = () => {
+            longPressTimerRef.current = setTimeout(() => {
+              if (!poll.is_anonymous && optionVotes.length > 0) {
+                setShowVotersOptionId(opt.id);
+              }
+            }, 400); // 400ms long press
+          };
+
+          const handleTouchEnd = () => {
+            if (longPressTimerRef.current) {
+              clearTimeout(longPressTimerRef.current);
+            }
+          };
+
           return (
             <button
               key={opt.id}
               onClick={() => void handleVote(opt.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                if (!poll.is_anonymous && optionVotes.length > 0) {
+                  setShowVotersOptionId(opt.id);
+                }
+              }}
+              onTouchStart={handleTouchStart}
+              onTouchEnd={handleTouchEnd}
+              onTouchMove={handleTouchEnd}
               disabled={voting}
               className={`relative overflow-hidden rounded-lg border px-3 py-2 text-left text-xs font-medium transition-all ${
                 isOwn

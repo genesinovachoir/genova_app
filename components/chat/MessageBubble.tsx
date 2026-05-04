@@ -167,15 +167,21 @@ export function MessageBubble({
       <div className={`max-w-[75%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
         {/* Bubble */}
         <div
-          className={`relative rounded-2xl px-3 py-2 ${
-            isOwn
-              ? 'rounded-br-md bg-[var(--color-accent)] text-white'
-              : 'rounded-bl-md bg-[var(--color-surface)] text-[var(--color-text-high)]'
+          className={`relative ${
+            message.message_type === 'sticker'
+              ? ''
+              : `rounded-2xl px-3 py-2 ${
+                  isOwn
+                    ? 'rounded-br-md bg-[var(--color-accent)] text-white'
+                    : 'rounded-bl-md bg-[var(--color-surface)] text-[var(--color-text-high)]'
+                }`
           }`}
           style={{
-            boxShadow: isOwn
-              ? '0 1px 3px rgba(0,0,0,0.15)'
-              : '0 1px 2px rgba(0,0,0,0.06)',
+            boxShadow: message.message_type === 'sticker'
+              ? 'none'
+              : isOwn
+                ? '0 1px 3px rgba(0,0,0,0.15)'
+                : '0 1px 2px rgba(0,0,0,0.06)',
           }}
         >
           {/* Sender name (group chats) */}

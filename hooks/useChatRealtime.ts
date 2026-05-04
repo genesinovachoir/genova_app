@@ -107,7 +107,7 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
       // Fetch member name for the reaction
       void supabase
         .from('choir_members')
-        .select('first_name, last_name')
+        .select('first_name, last_name, photo_url')
         .eq('id', rMemberId)
         .single()
         .then(({ data }) => {

@@ -105,13 +105,15 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
   }, [roomId, member?.id]);
 
   // Scroll to bottom
+  const lastMessageId = messages[messages.length - 1]?.id;
+  const lastMessageSenderId = messages[messages.length - 1]?.sender_id;
+
   useEffect(() => {
-    if (initialLoad.current && messages.length > 0) {
+    if (initialLoad.current && lastMessageId) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
       initialLoad.current = false;
-    } else if (messages.length > 0) {
-      const last = messages[messages.length - 1];
-      if (last?.sender_id === member?.id) {
+    } else if (lastMessageId) {
+      if (lastMessageSenderId === member?.id) {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       } else {
         const c = scrollRef.current;
@@ -119,7 +121,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }
     }
-  }, [messages, member?.id]);
+  }, [lastMessageId, lastMessageSenderId, member?.id]);
 
   // Load more handler
   const handleLoadMore = useCallback(async () => {
@@ -344,6 +346,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
             choir_members: {
               first_name: member.first_name,
               last_name: member.last_name,
+              photo_url: member.photo_url ?? null,
             },
           });
         }
@@ -585,13 +588,45 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         onClose={() => setIsStickerOpen(false)}
         onSelect={async (emoji) => {
           if (!member?.id) return;
+          const tempId = `temp-${Date.now()}`;
+          const replyTo = useChatStore.getState().replyingTo;
+          const opt: ChatMessage = {
+            id: tempId,
+            room_id: roomId,
+            sender_id: member.id,
+            content: emoji,
+            message_type: 'sticker',
+            reply_to_id: replyTo?.id ?? null,
+            metadata_json: { emoji },
+            is_edited: false,
+            is_deleted: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            sender: {
+              id: member.id,
+              first_name: member.first_name,
+              last_name: member.last_name,
+              photo_url: member.photo_url ?? null,
+            },
+          };
+          store.addMessage(roomId, opt);
+          store.setReplyingTo(null);
+
           try {
-            await sendMessage(roomId, member.id, emoji, {
+            const real = await sendMessage(roomId, member.id, emoji, {
               messageType: 'sticker',
               metadataJson: { emoji },
+              replyToId: replyTo?.id ?? null,
+            });
+            useChatStore.getState().updateMessage(roomId, tempId, {
+              id: real.id,
+              created_at: real.created_at,
             });
           } catch (err) {
             console.error('Sticker send failed:', err);
+            useChatStore.getState().updateMessage(roomId, tempId, {
+              metadata_json: { _failed: true },
+            });
           }
         }}
       />

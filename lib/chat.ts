@@ -86,7 +86,7 @@ export interface ChatReaction {
   member_id: string;
   emoji: string;
   created_at: string;
-  choir_members?: { first_name: string; last_name: string } | null;
+  choir_members?: { first_name: string; last_name: string; photo_url: string | null } | null;
 }
 
 export interface ChatPoll {
@@ -448,7 +448,7 @@ export async function fetchReactionsForMessages(messageIds: string[]) {
     .from('chat_reactions')
     .select(`
       id, message_id, member_id, emoji, created_at,
-      choir_members (first_name, last_name)
+      choir_members (first_name, last_name, photo_url)
     `)
     .in('message_id', messageIds);
 
