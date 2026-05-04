@@ -39,11 +39,29 @@ interface ChatRoomProps {
   slug: string;
 }
 
+type RoomReferenceRow = {
+  id: string;
+  slug: string | null;
+};
+
+type RoomMembershipRow = {
+  room_id: string;
+  chat_rooms: RoomReferenceRow | RoomReferenceRow[] | null;
+};
+
+function extractRoomReference(row: RoomMembershipRow | null): RoomReferenceRow | null {
+  if (!row) return null;
+  if (Array.isArray(row.chat_rooms)) {
+    return row.chat_rooms[0] ?? null;
+  }
+  return row.chat_rooms ?? null;
+}
+
 export function ChatRoom({ slug }: ChatRoomProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { member } = useAuth();
+  const { member, isLoading: isAuthLoading } = useAuth();
   const store = useChatStore();
   const [resolvedRoomId, setResolvedRoomId] = useState<string | null>(null);
   const [isResolvingRoom, setIsResolvingRoom] = useState(true);
@@ -85,40 +103,72 @@ export function ChatRoom({ slug }: ChatRoomProps) {
     const resolveRoomId = async () => {
       setIsResolvingRoom(true);
       setRoomNotFound(false);
+      setResolvedRoomId(null);
 
-      const fromStore = useChatStore.getState().rooms.find((r) => r.slug === slug || r.id === slug);
+      const fromStore = useChatStore
+        .getState()
+        .rooms.find((r) => r.slug === slug || r.id === slug);
       if (fromStore) {
         if (!cancelled) {
           setResolvedRoomId(fromStore.id);
+          if (fromStore.slug && fromStore.slug !== slug) {
+            router.replace(`/chat/${fromStore.slug}`);
+          }
+          setIsResolvingRoom(false);
+        }
+        return;
+      }
+
+      if (isAuthLoading) return;
+
+      if (!member?.id) {
+        if (!cancelled) {
+          setRoomNotFound(true);
           setIsResolvingRoom(false);
         }
         return;
       }
 
       try {
-        const { data: roomBySlug, error: slugError } = await supabase
-          .from('chat_rooms')
-          .select('id, slug')
-          .eq('slug', slug)
+        const membershipSelect = 'room_id, chat_rooms!inner(id, slug)';
+
+        const { data: membershipBySlug, error: slugError } = await supabase
+          .from('chat_room_members')
+          .select(membershipSelect)
+          .eq('member_id', member.id)
+          .eq('chat_rooms.slug', slug)
           .maybeSingle();
 
-        if (slugError) throw slugError;
+        if (slugError && slugError.code !== 'PGRST116') throw slugError;
+
+        const roomBySlug = extractRoomReference(
+          (membershipBySlug as RoomMembershipRow | null) ?? null
+        );
+
         if (roomBySlug?.id) {
           if (!cancelled) {
             setResolvedRoomId(roomBySlug.id as string);
+            const canonicalSlug = roomBySlug.slug as string | null;
+            if (canonicalSlug && canonicalSlug !== slug) {
+              router.replace(`/chat/${canonicalSlug}`);
+            }
             setIsResolvingRoom(false);
           }
           return;
         }
 
-        // Backward compatibility for old UUID links.
-        const { data: roomById, error: idError } = await supabase
-          .from('chat_rooms')
-          .select('id, slug')
-          .eq('id', slug)
+        const { data: membershipById, error: idError } = await supabase
+          .from('chat_room_members')
+          .select(membershipSelect)
+          .eq('member_id', member.id)
+          .eq('room_id', slug)
           .maybeSingle();
 
-        if (idError) throw idError;
+        if (idError && idError.code !== 'PGRST116') throw idError;
+
+        const roomById = extractRoomReference(
+          (membershipById as RoomMembershipRow | null) ?? null
+        );
 
         if (!cancelled) {
           if (roomById?.id) {
@@ -148,7 +198,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
     return () => {
       cancelled = true;
     };
-  }, [slug, router]);
+  }, [slug, router, member?.id, isAuthLoading]);
 
   useEffect(() => {
     if (!roomId) return;
