@@ -215,20 +215,14 @@ export async function resolveUniqueSlug(
   let suffix = 2;
 
   while (true) {
-    let query = supabase
-      .from('chat_rooms')
-      .select('id')
-      .eq('slug', slug)
-      .limit(1);
+    const { data: isAvailable, error } = await supabase.rpc('check_slug_available', {
+      p_slug: slug,
+      p_exclude_room_id: options?.excludeRoomId ?? null,
+    });
 
-    if (options?.excludeRoomId) {
-      query = query.neq('id', options.excludeRoomId);
-    }
-
-    const { data, error } = await query;
     if (error) throw error;
 
-    if (!data || data.length === 0) {
+    if (isAvailable) {
       return slug;
     }
 

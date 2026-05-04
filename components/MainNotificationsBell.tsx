@@ -51,6 +51,7 @@ interface RehearsalRow {
   date: string;
   start_time: string;
   location: string;
+  created_at: string;
 }
 
 interface RepertoireSongRow {
@@ -102,9 +103,7 @@ function toUnreadComparableTimestamp(value: string) {
   if (!parsed) {
     return 0;
   }
-  // Guard against future-dated records (e.g. rehearsal date as notification time)
-  // so unread badge can still be cleared when user opens the panel.
-  return Math.min(parsed, Date.now());
+  return parsed;
 }
 
 function formatRelativeTime(value: string) {
@@ -152,13 +151,6 @@ function formatDateLabel(value: string | null) {
     day: '2-digit',
     month: 'short',
   });
-}
-
-function toIsoFromRehearsal(date: string, startTime: string) {
-  const timeSegment = startTime?.slice(0, 5) || '20:00';
-  const composed = `${date}T${timeSegment}:00`;
-  const parsed = toDateSafe(composed);
-  return parsed ? parsed.toISOString() : new Date().toISOString();
 }
 
 async function fetchSubmissionNotifications(params: {
@@ -312,7 +304,7 @@ async function fetchMainNotifications(params: {
     rehearsalIds.length > 0
       ? supabase
           .from('rehearsals')
-          .select('id, title, date, start_time, location')
+          .select('id, title, date, start_time, location, created_at')
           .in('id', rehearsalIds)
       : Promise.resolve({ data: [], error: null }),
     repertoireSongIds.length > 0
@@ -397,7 +389,7 @@ async function fetchMainNotifications(params: {
       title: 'Prova daveti',
       description: `${rehearsal.title} · ${rehearsal.location}`,
       href: `/devamsizlik?date=${encodeURIComponent(rehearsal.date)}`,
-      createdAt: toIsoFromRehearsal(rehearsal.date, rehearsal.start_time),
+      createdAt: rehearsal.created_at,
     });
   }
 
