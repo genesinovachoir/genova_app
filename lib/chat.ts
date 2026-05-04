@@ -245,7 +245,7 @@ export async function fetchMessages(
       choir_members!chat_messages_sender_id_fkey (
         id, first_name, last_name, photo_url
       ),
-      reply_to:chat_messages!chat_messages_reply_to_id_fkey (
+      reply_to:chat_messages!reply_to_id (
         id, content, sender_id,
         choir_members!chat_messages_sender_id_fkey (first_name, last_name)
       )

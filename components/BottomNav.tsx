@@ -50,7 +50,7 @@ export function BottomNav() {
                 autoPlay={false}
                 loop={false}
                 className={`relative z-10 transition-colors duration-300 ${
-                  item.name === 'Anasayfa' ? 'scale-[1.2]' : item.name === 'Repertuvar' ? 'scale-[1.35]' : item.name === 'Sohbet' ? 'scale-[1.2]' : 'scale-100'
+                  item.name === 'Anasayfa' ? 'scale-[1.2]' : item.name === 'Repertuvar' ? 'scale-[1.35]' : item.name === 'Sohbet' ? 'scale-[1.4]' : 'scale-100'
                 } ${isActive ? 'text-[var(--color-accent)]' : 'text-[var(--color-nav-icon)]'}`}
               />
               <span
