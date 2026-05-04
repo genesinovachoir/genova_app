@@ -15,7 +15,7 @@ interface MessageContextMenuProps {
   onReply: (message: ChatMessage) => void;
   onReact: (message: ChatMessage, emoji: string) => void;
   onEdit: (message: ChatMessage) => void;
-  onDelete: (message: ChatMessage) => void;
+  onDelete: (message: ChatMessage, type: 'me' | 'everyone') => void;
   onCopy: (message: ChatMessage) => void;
   onInfo: (message: ChatMessage) => void;
 }
@@ -76,7 +76,7 @@ export function MessageContextMenu({
   );
 
   const handleAction = useCallback(
-    (action: 'reply' | 'copy' | 'edit' | 'delete' | 'info') => {
+    (action: 'reply' | 'copy' | 'edit' | 'delete_me' | 'delete_everyone' | 'info') => {
       if (!message) return;
       switch (action) {
         case 'reply':
@@ -88,8 +88,11 @@ export function MessageContextMenu({
         case 'edit':
           onEdit(message);
           break;
-        case 'delete':
-          onDelete(message);
+        case 'delete_me':
+          onDelete(message, 'me');
+          break;
+        case 'delete_everyone':
+          onDelete(message, 'everyone');
           break;
         case 'info':
           onInfo(message);
@@ -99,6 +102,8 @@ export function MessageContextMenu({
     },
     [message, onReply, onCopy, onEdit, onDelete, onClose]
   );
+
+  const isUnderOneHour = message ? (new Date().getTime() - new Date(message.created_at).getTime() < 60 * 60 * 1000) : false;
 
   // Calculate position so menu doesn't overflow screen
   const getMenuStyle = () => {
@@ -177,18 +182,26 @@ export function MessageContextMenu({
                   onClick={() => handleAction('copy')}
                 />
               )}
-              {isOwn && message?.message_type === 'text' && !message?.is_deleted && (
+              {isOwn && message?.message_type === 'text' && !message?.is_deleted && isUnderOneHour && (
                 <ContextMenuItem
                   icon={Pencil}
                   label="Düzenle"
                   onClick={() => handleAction('edit')}
                 />
               )}
-              {isOwn && !message?.is_deleted && (
+              {isOwn && !message?.is_deleted && isUnderOneHour && (
                 <ContextMenuItem
                   icon={Trash2}
-                  label="Sil"
-                  onClick={() => handleAction('delete')}
+                  label="Herkesten Sil"
+                  onClick={() => handleAction('delete_everyone')}
+                  destructive
+                />
+              )}
+              {!message?.is_deleted && (
+                <ContextMenuItem
+                  icon={Trash2}
+                  label="Benden Sil"
+                  onClick={() => handleAction('delete_me')}
                   destructive
                 />
               )}

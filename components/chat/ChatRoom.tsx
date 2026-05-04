@@ -18,6 +18,7 @@ import {
   removeReaction,
   editMessage,
   deleteMessage,
+  deleteMessageForMe,
   createPollMessage,
 } from '@/lib/chat';
 import type { ChatMessage, ChatRoomMember } from '@/lib/chat';
@@ -340,20 +341,39 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
   );
 
   const handleDelete = useCallback(
-    async (msg: ChatMessage) => {
-      if (!window.confirm('Bu mesajı silmek istediğinize emin misiniz?')) return;
+    async (msg: ChatMessage, type: 'me' | 'everyone') => {
+      const confirmText = type === 'me' 
+        ? 'Bu mesajı kendinizden silmek istediğinize emin misiniz?' 
+        : 'Bu mesajı herkesten silmek istediğinize emin misiniz?';
+        
+      if (!window.confirm(confirmText)) return;
+      
       try {
-        await deleteMessage(msg.id);
-        store.updateMessage(roomId, msg.id, {
-          is_deleted: true,
-          content: null,
-          metadata_json: {},
-        });
+        if (type === 'everyone') {
+          await deleteMessage(msg.id);
+          store.updateMessage(roomId, msg.id, {
+            is_deleted: true,
+            content: null,
+            metadata_json: {},
+          });
+        } else if (type === 'me' && member?.id) {
+          await deleteMessageForMe(msg.id, member.id);
+          // Add to local state metadata so it hides immediately
+          const currentMetadata = msg.metadata_json || {};
+          const deletedFor = Array.isArray(currentMetadata.deleted_for) ? [...currentMetadata.deleted_for] : [];
+          deletedFor.push(member.id);
+          store.updateMessage(roomId, msg.id, {
+            metadata_json: {
+              ...currentMetadata,
+              deleted_for: deletedFor,
+            }
+          });
+        }
       } catch (err) {
         console.error('Delete failed:', err);
       }
     },
-    [roomId]
+    [roomId, member?.id]
   );
 
   const handleReact = useCallback(
@@ -443,6 +463,16 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
     }
     return room?.name ?? 'Sohbet';
   }, [room, roomMembers, member?.id]);
+
+  const visibleMessages = useMemo(() => {
+    return messages.filter(msg => {
+      const deletedFor = msg.metadata_json?.deleted_for;
+      if (Array.isArray(deletedFor) && member?.id && deletedFor.includes(member.id)) {
+        return false;
+      }
+      return true;
+    });
+  }, [messages, member?.id]);
 
   return (
     <div className="flex h-[100dvh] flex-col bg-[var(--color-background)]">

@@ -2,7 +2,7 @@
 
 import { useRef, useCallback, useMemo, useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Check, CheckCheck, Clock } from 'lucide-react';
+import { Check, CheckCheck, Clock, Trash2 } from 'lucide-react';
 import type { ChatMessage } from '@/lib/chat';
 import { ReactionBar } from './ReactionBar';
 import { PollCard } from './PollCard';
@@ -135,10 +135,11 @@ export function MessageBubble({
 
   if (message.is_deleted) {
     return (
-      <div id={`message-${message.id}`} className={`flex ${isOwn ? 'justify-end' : 'justify-start'} px-4 py-0.5`}>
-        <div className="rounded-2xl bg-[var(--color-surface)] px-4 py-2 opacity-50">
-          <p className="text-xs italic text-[var(--color-text-low)]">
-            🚫 Bu mesaj silindi
+      <div id={`message-${message.id}`} className={`flex ${isOwn ? 'justify-end' : 'justify-start'} px-3 py-1 opacity-60`}>
+        <div className="flex items-center gap-1.5 rounded-2xl bg-[var(--color-surface)] px-3 py-1.5 border border-[var(--color-border)]">
+          <Trash2 size={14} className="text-[var(--color-text-low)]" />
+          <p className="text-[0.8rem] font-semibold italic text-[var(--color-text-low)]">
+            Bu mesaj silindi
           </p>
         </div>
       </div>

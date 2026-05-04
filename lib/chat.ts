@@ -536,6 +536,36 @@ export async function deleteMessage(messageId: string) {
   if (error) throw error;
 }
 
+/** Soft-delete a message for current user only */
+export async function deleteMessageForMe(messageId: string, memberId: string) {
+  const { data, error: fetchErr } = await supabase
+    .from('chat_messages')
+    .select('metadata_json')
+    .eq('id', messageId)
+    .single();
+    
+  if (fetchErr) throw fetchErr;
+  
+  const currentMetadata = (data.metadata_json as Record<string, any>) || {};
+  const deletedFor = Array.isArray(currentMetadata.deleted_for) ? currentMetadata.deleted_for : [];
+  
+  if (!deletedFor.includes(memberId)) {
+    deletedFor.push(memberId);
+  }
+  
+  const { error: updateErr } = await supabase
+    .from('chat_messages')
+    .update({
+      metadata_json: {
+        ...currentMetadata,
+        deleted_for: deletedFor
+      }
+    })
+    .eq('id', messageId);
+    
+  if (updateErr) throw updateErr;
+}
+
 // =============================================
 // Phase 2: Room Management
 // =============================================
