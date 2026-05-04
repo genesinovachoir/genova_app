@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ChatMessage, ChatRoom } from '@/lib/chat';
+import type { ChatMessage, ChatReaction, ChatRoom } from '@/lib/chat';
 
 interface ChatState {
   // Active state
@@ -13,6 +13,9 @@ interface ChatState {
 
   // UI state
   replyingTo: ChatMessage | null;
+  editingMessage: ChatMessage | null;
+  contextMenuMessage: ChatMessage | null;
+  contextMenuPosition: { x: number; y: number } | null;
   isRoomInfoOpen: boolean;
   isCreateRoomOpen: boolean;
 
@@ -31,8 +34,18 @@ interface ChatState {
   setOnlineUsers: (userIds: string[]) => void;
 
   setReplyingTo: (message: ChatMessage | null) => void;
+  setEditingMessage: (message: ChatMessage | null) => void;
+  openContextMenu: (message: ChatMessage, position: { x: number; y: number }) => void;
+  closeContextMenu: () => void;
   setRoomInfoOpen: (open: boolean) => void;
   setCreateRoomOpen: (open: boolean) => void;
+
+  // Reaction actions
+  addReactionToMessage: (roomId: string, messageId: string, reaction: ChatReaction) => void;
+  removeReactionFromMessage: (roomId: string, messageId: string, reactionId: string) => void;
+
+  // Message status
+  setMessageStatus: (roomId: string, messageId: string, status: 'pending' | 'sent' | 'read') => void;
 
   decrementUnread: (roomId: string) => void;
   clearUnread: (roomId: string) => void;
@@ -48,6 +61,9 @@ const initialState = {
   typingUsers: {},
   onlineUsers: [],
   replyingTo: null,
+  editingMessage: null,
+  contextMenuMessage: null,
+  contextMenuPosition: null,
   isRoomInfoOpen: false,
   isCreateRoomOpen: false,
 };
@@ -136,8 +152,52 @@ export const useChatStore = create<ChatState>((set) => ({
   setOnlineUsers: (onlineUsers) => set({ onlineUsers }),
 
   setReplyingTo: (replyingTo) => set({ replyingTo }),
+  setEditingMessage: (editingMessage) => set({ editingMessage }),
+  openContextMenu: (message, position) =>
+    set({ contextMenuMessage: message, contextMenuPosition: position }),
+  closeContextMenu: () =>
+    set({ contextMenuMessage: null, contextMenuPosition: null }),
   setRoomInfoOpen: (isRoomInfoOpen) => set({ isRoomInfoOpen }),
   setCreateRoomOpen: (isCreateRoomOpen) => set({ isCreateRoomOpen }),
+
+  addReactionToMessage: (roomId, messageId, reaction) =>
+    set((state) => ({
+      messagesByRoom: {
+        ...state.messagesByRoom,
+        [roomId]: (state.messagesByRoom[roomId] ?? []).map((m) =>
+          m.id === messageId
+            ? { ...m, reactions: [...(m.reactions ?? []), reaction] }
+            : m
+        ),
+      },
+    })),
+
+  removeReactionFromMessage: (roomId, messageId, reactionId) =>
+    set((state) => ({
+      messagesByRoom: {
+        ...state.messagesByRoom,
+        [roomId]: (state.messagesByRoom[roomId] ?? []).map((m) =>
+          m.id === messageId
+            ? {
+                ...m,
+                reactions: (m.reactions ?? []).filter((r) => r.id !== reactionId),
+              }
+            : m
+        ),
+      },
+    })),
+
+  setMessageStatus: (roomId, messageId, status) =>
+    set((state) => ({
+      messagesByRoom: {
+        ...state.messagesByRoom,
+        [roomId]: (state.messagesByRoom[roomId] ?? []).map((m) =>
+          m.id === messageId
+            ? { ...m, metadata_json: { ...m.metadata_json, _status: status } }
+            : m
+        ),
+      },
+    })),
 
   decrementUnread: (roomId) =>
     set((state) => ({

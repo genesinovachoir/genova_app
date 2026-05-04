@@ -479,3 +479,171 @@ export async function getOrCreateDm(
     { type: 'dm' }
   );
 }
+
+// =============================================
+// Phase 2: Message Edit / Delete
+// =============================================
+
+/** Edit a message (only own messages, text only) */
+export async function editMessage(messageId: string, newContent: string) {
+  const { error } = await supabase
+    .from('chat_messages')
+    .update({
+      content: newContent,
+      is_edited: true,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', messageId);
+
+  if (error) throw error;
+}
+
+/** Soft-delete a message (only own messages) */
+export async function deleteMessage(messageId: string) {
+  const { error } = await supabase
+    .from('chat_messages')
+    .update({
+      is_deleted: true,
+      content: null,
+      metadata_json: {},
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', messageId);
+
+  if (error) throw error;
+}
+
+// =============================================
+// Phase 2: Room Management
+// =============================================
+
+/** Update room details (admin only) */
+export async function updateRoom(
+  roomId: string,
+  updates: { name?: string; description?: string; avatar_url?: string }
+) {
+  const { error } = await supabase
+    .from('chat_rooms')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', roomId);
+
+  if (error) throw error;
+}
+
+/** Remove a member from a room */
+export async function removeMember(roomId: string, memberId: string) {
+  const { error } = await supabase
+    .from('chat_room_members')
+    .delete()
+    .eq('room_id', roomId)
+    .eq('member_id', memberId);
+
+  if (error) throw error;
+}
+
+/** Leave a room (current user) */
+export async function leaveRoom(roomId: string, memberId: string) {
+  return removeMember(roomId, memberId);
+}
+
+/** Add members to an existing room */
+export async function addMembersToRoom(roomId: string, memberIds: string[]) {
+  const rows = memberIds.map((id) => ({
+    room_id: roomId,
+    member_id: id,
+    role: 'member' as const,
+  }));
+
+  const { error } = await supabase
+    .from('chat_room_members')
+    .insert(rows);
+
+  if (error) throw error;
+}
+
+// =============================================
+// Phase 2: Poll Functions
+// =============================================
+
+/** Create a poll attached to a message */
+export async function createPollMessage(
+  roomId: string,
+  senderId: string,
+  question: string,
+  options: { id: string; text: string }[],
+  settings: { isAnonymous?: boolean; isMultipleChoice?: boolean; closesAt?: string | null }
+) {
+  // First create the message
+  const msg = await sendMessage(roomId, senderId, `📊 ${question}`, {
+    messageType: 'poll',
+    metadataJson: { question },
+  });
+
+  // Then create the poll
+  const { data: poll, error } = await supabase
+    .from('chat_polls')
+    .insert({
+      message_id: msg.id,
+      question,
+      options_json: options,
+      is_anonymous: settings.isAnonymous ?? false,
+      is_multiple_choice: settings.isMultipleChoice ?? false,
+      closes_at: settings.closesAt ?? null,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return { message: msg, poll };
+}
+
+/** Vote on a poll option */
+export async function votePoll(pollId: string, memberId: string, optionId: string) {
+  const { error } = await supabase
+    .from('chat_poll_votes')
+    .upsert(
+      { poll_id: pollId, member_id: memberId, option_id: optionId },
+      { onConflict: 'poll_id,member_id,option_id' }
+    );
+  if (error) throw error;
+}
+
+/** Remove a vote from a poll */
+export async function removePollVote(pollId: string, memberId: string, optionId: string) {
+  const { error } = await supabase
+    .from('chat_poll_votes')
+    .delete()
+    .eq('poll_id', pollId)
+    .eq('member_id', memberId)
+    .eq('option_id', optionId);
+  if (error) throw error;
+}
+
+/** Fetch poll data with votes */
+export async function fetchPollData(messageId: string) {
+  const { data: poll, error: pollError } = await supabase
+    .from('chat_polls')
+    .select('*')
+    .eq('message_id', messageId)
+    .single();
+
+  if (pollError) throw pollError;
+
+  const { data: votes, error: votesError } = await supabase
+    .from('chat_poll_votes')
+    .select(`
+      id, poll_id, member_id, option_id, created_at,
+      choir_members (first_name, last_name)
+    `)
+    .eq('poll_id', poll.id);
+
+  if (votesError) throw votesError;
+
+  return {
+    poll: {
+      ...poll,
+      options_json: poll.options_json as { id: string; text: string }[],
+    } as ChatPoll,
+    votes: (votes ?? []) as unknown as (ChatPollVote & { choir_members?: { first_name: string; last_name: string } })[],
+  };
+}

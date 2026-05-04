@@ -3,13 +3,14 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useChatStore } from '@/store/useChatStore';
-import type { ChatMessage, ChatMessageType } from '@/lib/chat';
+import type { ChatMessage, ChatMessageType, ChatReaction } from '@/lib/chat';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 /**
  * Manages Supabase Realtime subscriptions for chat:
- * - Postgres Changes on chat_messages → new messages
- * - Broadcast → typing indicators
+ * - Postgres Changes on chat_messages → new/updated messages
+ * - Postgres Changes on chat_reactions → reaction add/remove
+ * - Broadcast → typing indicators + read receipts
  * - Presence → online users in room
  */
 export function useChatRealtime(memberId: string | null, roomId: string | null) {
@@ -17,10 +18,14 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
   const typingTimeoutsRef = useRef<Record<string, NodeJS.Timeout>>({});
   const {
     addMessage,
+    updateMessage,
     setTypingUsers,
     typingUsers,
     activeRoomId,
     incrementUnread,
+    addReactionToMessage,
+    removeReactionFromMessage,
+    setMessageStatus,
   } = useChatStore();
 
   // Handle incoming new messages from Postgres Changes
@@ -46,8 +51,8 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
         is_deleted: (msg.is_deleted as boolean) ?? false,
         created_at: msg.created_at as string,
         updated_at: msg.updated_at as string,
-        // Sender info will be fetched asynchronously
         sender: null,
+        reactions: [],
       };
 
       // Fetch sender info
@@ -71,7 +76,87 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
     [memberId, addMessage, activeRoomId, incrementUnread]
   );
 
-  // Subscribe to room channel for Postgres Changes + Broadcast + Presence
+  // Handle message updates (edit/delete)
+  const handleMessageUpdate = useCallback(
+    (payload: { new: Record<string, unknown> }) => {
+      const msg = payload.new;
+      const msgRoomId = msg.room_id as string;
+      const msgId = msg.id as string;
+
+      updateMessage(msgRoomId, msgId, {
+        content: (msg.content as string) ?? null,
+        is_edited: (msg.is_edited as boolean) ?? false,
+        is_deleted: (msg.is_deleted as boolean) ?? false,
+        metadata_json: (msg.metadata_json as Record<string, unknown>) ?? {},
+        updated_at: msg.updated_at as string,
+      });
+    },
+    [updateMessage]
+  );
+
+  // Handle new reactions
+  const handleNewReaction = useCallback(
+    (payload: { new: Record<string, unknown> }) => {
+      const r = payload.new;
+      const messageId = r.message_id as string;
+      const rMemberId = r.member_id as string;
+
+      // Skip own reactions (already optimistically added)
+      if (rMemberId === memberId) return;
+
+      // Fetch member name for the reaction
+      void supabase
+        .from('choir_members')
+        .select('first_name, last_name')
+        .eq('id', rMemberId)
+        .single()
+        .then(({ data }) => {
+          const reaction: ChatReaction = {
+            id: r.id as string,
+            message_id: messageId,
+            member_id: rMemberId,
+            emoji: r.emoji as string,
+            created_at: r.created_at as string,
+            choir_members: data ?? null,
+          };
+
+          // We need to figure out the roomId for this message
+          // Check all rooms in the store
+          const state = useChatStore.getState();
+          for (const [rId, msgs] of Object.entries(state.messagesByRoom)) {
+            if (msgs.some((m) => m.id === messageId)) {
+              addReactionToMessage(rId, messageId, reaction);
+              break;
+            }
+          }
+        });
+    },
+    [memberId, addReactionToMessage]
+  );
+
+  // Handle reaction deletions
+  const handleDeleteReaction = useCallback(
+    (payload: { old: Record<string, unknown> }) => {
+      const r = payload.old;
+      const reactionId = r.id as string;
+      const messageId = r.message_id as string;
+      const rMemberId = r.member_id as string;
+
+      // Skip own reactions (already optimistically removed)
+      if (rMemberId === memberId) return;
+
+      const state = useChatStore.getState();
+      for (const [rId, msgs] of Object.entries(state.messagesByRoom)) {
+        if (msgs.some((m) => m.id === messageId)) {
+          removeReactionFromMessage(rId, messageId, reactionId);
+          break;
+        }
+      }
+    },
+    [memberId, removeReactionFromMessage]
+  );
+
+  // Subscribe to room channel
   useEffect(() => {
     if (!memberId || !roomId) return;
 
@@ -97,7 +182,41 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
       handleNewMessage
     );
 
-    // 2. Broadcast — typing indicators
+    // 2. Postgres Changes — message updates (edit/delete)
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'chat_messages',
+        filter: `room_id=eq.${roomId}`,
+      },
+      handleMessageUpdate
+    );
+
+    // 3. Postgres Changes — new reactions
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'chat_reactions',
+      },
+      handleNewReaction
+    );
+
+    // 4. Postgres Changes — deleted reactions
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'chat_reactions',
+      },
+      handleDeleteReaction
+    );
+
+    // 5. Broadcast — typing indicators
     channel.on('broadcast', { event: 'typing' }, (payload) => {
       const typingMemberId = payload.payload?.member_id as string;
       if (!typingMemberId || typingMemberId === memberId) return;
@@ -112,15 +231,30 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
         clearTimeout(typingTimeoutsRef.current[typingMemberId]);
       }
       typingTimeoutsRef.current[typingMemberId] = setTimeout(() => {
-        const updated = (useChatStore.getState().typingUsers[roomId] ?? []).filter(
-          (id) => id !== typingMemberId
-        );
+        const updated = (
+          useChatStore.getState().typingUsers[roomId] ?? []
+        ).filter((id) => id !== typingMemberId);
         setTypingUsers(roomId, updated);
         delete typingTimeoutsRef.current[typingMemberId];
       }, 3000);
     });
 
-    // 3. Presence — track online users
+    // 6. Broadcast — read receipts
+    channel.on('broadcast', { event: 'read_receipt' }, (payload) => {
+      const readerMemberId = payload.payload?.member_id as string;
+      if (!readerMemberId || readerMemberId === memberId) return;
+
+      // Mark all own messages in this room as 'read'
+      const state = useChatStore.getState();
+      const msgs = state.messagesByRoom[roomId] ?? [];
+      for (const msg of msgs) {
+        if (msg.sender_id === memberId) {
+          setMessageStatus(roomId, msg.id, 'read');
+        }
+      }
+    });
+
+    // 7. Presence — track online users
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState();
       const onlineIds = Object.keys(state);
@@ -129,7 +263,17 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
 
     channel.subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
-        await channel.track({ member_id: memberId, online_at: new Date().toISOString() });
+        await channel.track({
+          member_id: memberId,
+          online_at: new Date().toISOString(),
+        });
+
+        // Broadcast read receipt when entering room
+        channel.send({
+          type: 'broadcast',
+          event: 'read_receipt',
+          payload: { member_id: memberId },
+        });
       }
     });
 
@@ -145,7 +289,7 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
       typingTimeoutsRef.current = {};
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [memberId, roomId, handleNewMessage]);
+  }, [memberId, roomId, handleNewMessage, handleMessageUpdate, handleNewReaction, handleDeleteReaction]);
 
   // Send typing indicator
   const sendTyping = useCallback(() => {
@@ -208,6 +352,7 @@ export function useChatGlobalRealtime(memberId: string | null, roomIds: string[]
           created_at: msg.created_at as string,
           updated_at: msg.updated_at as string,
           sender: null,
+          reactions: [],
         };
 
         void supabase
