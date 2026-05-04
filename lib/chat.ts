@@ -12,6 +12,7 @@ export type ChatRoomMemberRole = 'admin' | 'member';
 export interface ChatRoom {
   id: string;
   name: string;
+  slug: string;
   description: string | null;
   type: ChatRoomType;
   created_by: string | null;
@@ -35,6 +36,7 @@ export interface ChatRoomMember {
   joined_at: string;
   last_read_at: string | null;
   notifications_enabled: boolean;
+  hidden_at: string | null;
   // Joined
   choir_members?: {
     id: string;
@@ -142,13 +144,37 @@ export interface ChatRoomFile {
   sender_name: string;
 }
 
+export interface LinkPreviewData {
+  url: string;
+  title: string | null;
+  description: string | null;
+  image: string | null;
+  favicon: string | null;
+  domain: string;
+}
+
 // =============================================
 // Query Functions
 // =============================================
 
 const MESSAGES_PER_PAGE = 40;
-const URL_REGEX = /\bhttps?:\/\/[^\s<>"'`]+/gi;
+export const URL_REGEX = /\bhttps?:\/\/[^\s<>"'`]+/gi;
 const FILE_EXTENSION_REGEX = /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|csv|txt|zip|rar|7z|mp3|wav|m4a|aac|ogg|flac|mp4|mov|avi|mkv)$/i;
+const MAX_CHAT_SLUG_LENGTH = 80;
+const TURKISH_CHAR_MAP: Record<string, string> = {
+  ş: 's',
+  Ş: 'S',
+  ç: 'c',
+  Ç: 'C',
+  ğ: 'g',
+  Ğ: 'G',
+  ü: 'u',
+  Ü: 'U',
+  ö: 'o',
+  Ö: 'O',
+  ı: 'i',
+  İ: 'I',
+};
 
 type FileCandidate = {
   url: string;
@@ -156,6 +182,122 @@ type FileCandidate = {
   size_bytes?: number | null;
   mime_type?: string | null;
 };
+
+function applySlugSuffix(baseSlug: string, suffix: number): string {
+  const suffixText = `-${suffix}`;
+  const maxBaseLength = Math.max(1, MAX_CHAT_SLUG_LENGTH - suffixText.length);
+  return `${baseSlug.slice(0, maxBaseLength)}${suffixText}`;
+}
+
+export function generateSlug(name: string): string {
+  const transliterated = name
+    .split('')
+    .map((char) => TURKISH_CHAR_MAP[char] ?? char)
+    .join('');
+
+  const slug = transliterated
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, MAX_CHAT_SLUG_LENGTH);
+
+  return slug || 'oda';
+}
+
+export async function resolveUniqueSlug(
+  baseSlug: string,
+  options?: { excludeRoomId?: string }
+): Promise<string> {
+  const normalizedBase = generateSlug(baseSlug);
+  let slug = normalizedBase;
+  let suffix = 2;
+
+  while (true) {
+    let query = supabase
+      .from('chat_rooms')
+      .select('id')
+      .eq('slug', slug)
+      .limit(1);
+
+    if (options?.excludeRoomId) {
+      query = query.neq('id', options.excludeRoomId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      return slug;
+    }
+
+    slug = applySlugSuffix(normalizedBase, suffix);
+    suffix += 1;
+  }
+}
+
+type DmNameRow = {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+};
+
+function sortDmMembers(a: DmNameRow, b: DmNameRow): number {
+  const aName = `${a.first_name ?? ''} ${a.last_name ?? ''}`.trim();
+  const bName = `${b.first_name ?? ''} ${b.last_name ?? ''}`.trim();
+  return aName.localeCompare(bName, 'tr');
+}
+
+function buildDmSlugPart(member: DmNameRow, includeLastName: boolean, fallbackIndex: number): string {
+  const first = generateSlug(member.first_name ?? '');
+  const last = includeLastName ? generateSlug(member.last_name ?? '') : '';
+  const parts = [first, last].filter(Boolean);
+  if (parts.length > 0) return parts.join('-');
+  return `uye${fallbackIndex}`;
+}
+
+async function generateDmSlug(createdBy: string, otherMemberId: string): Promise<string> {
+  const { data, error } = await supabase
+    .from('choir_members')
+    .select('id, first_name, last_name')
+    .in('id', [createdBy, otherMemberId]);
+
+  if (error) throw error;
+
+  const rows = (data ?? []) as DmNameRow[];
+  const rowById = new Map(rows.map((row) => [row.id, row]));
+  const members = [createdBy, otherMemberId]
+    .map((id) => rowById.get(id))
+    .filter((row): row is DmNameRow => Boolean(row))
+    .sort(sortDmMembers);
+
+  if (members.length !== 2) {
+    return resolveUniqueSlug('dm-sohbet');
+  }
+
+  const firstNameBase = generateSlug(
+    `dm-${members
+      .map((member, index) => buildDmSlugPart(member, false, index + 1))
+      .join('-')}`
+  );
+  const firstNameCandidate = await resolveUniqueSlug(firstNameBase);
+  if (firstNameCandidate === firstNameBase) {
+    return firstNameCandidate;
+  }
+
+  const fullNameBase = generateSlug(
+    `dm-${members
+      .map((member, index) => buildDmSlugPart(member, true, index + 1))
+      .join('-')}`
+  );
+
+  if (fullNameBase === firstNameBase) {
+    return firstNameCandidate;
+  }
+
+  return resolveUniqueSlug(fullNameBase);
+}
 
 function normalizeReplyRelation(rawReply: unknown): ChatMessage['reply_to'] {
   const replyTo = Array.isArray(rawReply) ? rawReply[0] : rawReply;
@@ -243,6 +385,33 @@ function inferFileName(url: string): string {
   }
 }
 
+/**
+ * Fetch Open Graph link preview data from Edge Function
+ */
+export async function fetchLinkPreview(url: string): Promise<LinkPreviewData> {
+  const { data, error } = await supabase.functions.invoke('link-preview', {
+    body: { url },
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const preview = (data ?? {}) as Partial<LinkPreviewData>;
+  if (!preview.url || !preview.domain) {
+    throw new Error('Link preview verisi eksik');
+  }
+
+  return {
+    url: preview.url,
+    title: preview.title ?? null,
+    description: preview.description ?? null,
+    image: preview.image ?? null,
+    favicon: preview.favicon ?? null,
+    domain: preview.domain,
+  };
+}
+
 function isLikelyFileUrl(url: string): boolean {
   try {
     const pathname = new URL(url).pathname;
@@ -319,9 +488,9 @@ export async function fetchChatRooms(memberId: string) {
   const { data: memberships, error: membershipError } = await supabase
     .from('chat_room_members')
     .select(`
-      id, room_id, nickname, role, last_read_at, notifications_enabled,
+      id, room_id, nickname, role, last_read_at, notifications_enabled, hidden_at,
       chat_rooms (
-        id, name, description, type, created_by, avatar_url,
+        id, name, slug, description, type, created_by, avatar_url,
         is_archived, created_at, updated_at
       )
     `)
@@ -332,8 +501,17 @@ export async function fetchChatRooms(memberId: string) {
 
   const rooms: ChatRoom[] = [];
   for (const m of memberships ?? []) {
-    const room = m.chat_rooms as unknown as ChatRoom;
-    if (!room || room.is_archived) continue;
+    const roomRelation = m.chat_rooms as
+      | (Omit<ChatRoom, 'slug'> & { slug: string | null })
+      | Array<Omit<ChatRoom, 'slug'> & { slug: string | null }>
+      | null;
+    const roomRow = Array.isArray(roomRelation) ? roomRelation[0] : roomRelation;
+    if (!roomRow || roomRow.is_archived) continue;
+
+    const room: ChatRoom = {
+      ...roomRow,
+      slug: roomRow.slug ?? generateSlug(roomRow.name),
+    };
 
     // Get last message for this room
     const { data: lastMsgArr } = await supabase
@@ -403,6 +581,7 @@ export async function fetchChatRooms(memberId: string) {
         joined_at: '',
         last_read_at: m.last_read_at,
         notifications_enabled: m.notifications_enabled,
+        hidden_at: m.hidden_at,
       },
     });
   }
@@ -462,7 +641,7 @@ export async function fetchRoomMembers(roomId: string) {
   const { data, error } = await supabase
     .from('chat_room_members')
     .select(`
-      id, room_id, member_id, nickname, role, joined_at, last_read_at, notifications_enabled,
+      id, room_id, member_id, nickname, role, joined_at, last_read_at, notifications_enabled, hidden_at,
       choir_members (id, first_name, last_name, photo_url, voice_group)
     `)
     .eq('room_id', roomId)
@@ -526,7 +705,7 @@ export async function createRoom(
     type?: ChatRoomType;
     avatarUrl?: string;
   }
-) {
+): Promise<{ id: string; slug: string }> {
   const type = options?.type ?? 'custom';
 
   // For DM rooms, check if one already exists between these two members
@@ -551,25 +730,36 @@ export async function createRoom(
       for (const dm of existingDms) {
         const { data: room } = await supabase
           .from('chat_rooms')
-          .select('id, type')
+          .select('id, type, slug')
           .eq('id', dm.room_id)
           .eq('type', 'dm')
           .maybeSingle();
-        if (room) return room.id;
+        if (room) {
+          return {
+            id: room.id as string,
+            slug: (room.slug as string | null) ?? generateSlug(name),
+          };
+        }
       }
     }
   }
+
+  const slug =
+    type === 'dm' && memberIds.length === 1
+      ? await generateDmSlug(createdBy, memberIds[0])
+      : await resolveUniqueSlug(generateSlug(name));
 
   const { data: room, error: roomError } = await supabase
     .from('chat_rooms')
     .insert({
       name,
+      slug,
       description: options?.description ?? null,
       type,
       created_by: createdBy,
       avatar_url: options?.avatarUrl ?? null,
     })
-    .select()
+    .select('id, slug')
     .single();
 
   if (roomError) throw roomError;
@@ -592,7 +782,10 @@ export async function createRoom(
 
   if (membersError) throw membersError;
 
-  return room.id as string;
+  return {
+    id: room.id as string,
+    slug: room.slug as string,
+  };
 }
 
 /** Update last_read_at for the current member in a room */
@@ -764,11 +957,27 @@ export async function deleteMessageForMe(messageId: string, memberId: string) {
 /** Update room details (admin only) */
 export async function updateRoom(
   roomId: string,
-  updates: { name?: string; description?: string; avatar_url?: string }
+  updates: { name?: string; description?: string; avatar_url?: string; is_archived?: boolean }
 ) {
+  const payload: {
+    name?: string;
+    description?: string;
+    avatar_url?: string;
+    is_archived?: boolean;
+    slug?: string;
+    updated_at: string;
+  } = {
+    ...updates,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (typeof updates.name === 'string' && updates.name.trim().length > 0) {
+    payload.slug = await resolveUniqueSlug(generateSlug(updates.name), { excludeRoomId: roomId });
+  }
+
   const { error } = await supabase
     .from('chat_rooms')
-    .update({ ...updates, updated_at: new Date().toISOString() })
+    .update(payload)
     .eq('id', roomId);
 
   if (error) throw error;
@@ -785,9 +994,36 @@ export async function removeMember(roomId: string, memberId: string) {
   if (error) throw error;
 }
 
+/** Toggle notification preference for current member in a room */
+export async function setRoomNotifications(roomId: string, memberId: string, enabled: boolean) {
+  const { error } = await supabase
+    .from('chat_room_members')
+    .update({ notifications_enabled: enabled })
+    .eq('room_id', roomId)
+    .eq('member_id', memberId);
+
+  if (error) throw error;
+}
+
+/** Hide room from current member until a newer message arrives */
+export async function hideRoomForMe(roomId: string, memberId: string) {
+  const { error } = await supabase
+    .from('chat_room_members')
+    .update({ hidden_at: new Date().toISOString() })
+    .eq('room_id', roomId)
+    .eq('member_id', memberId);
+
+  if (error) throw error;
+}
+
 /** Leave a room (current user) */
 export async function leaveRoom(roomId: string, memberId: string) {
   return removeMember(roomId, memberId);
+}
+
+/** Archive room for everyone (admin-only flow on UI) */
+export async function archiveRoomForEveryone(roomId: string) {
+  await updateRoom(roomId, { is_archived: true });
 }
 
 /** Update a member's role (admin only) */

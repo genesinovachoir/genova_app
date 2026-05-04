@@ -24,6 +24,8 @@ interface ChatState {
   setActiveRoomId: (id: string | null) => void;
   setRooms: (rooms: ChatRoom[]) => void;
   updateRoom: (roomId: string, updates: Partial<ChatRoom>) => void;
+  updateRoomMembership: (roomId: string, updates: Partial<NonNullable<ChatRoom['my_membership']>>) => void;
+  removeRoom: (roomId: string) => void;
 
   setMessages: (roomId: string, messages: ChatMessage[]) => void;
   prependMessages: (roomId: string, messages: ChatMessage[]) => void;
@@ -85,6 +87,25 @@ export const useChatStore = create<ChatState>((set) => ({
       rooms: state.rooms.map((r) =>
         r.id === roomId ? { ...r, ...updates } : r
       ),
+    })),
+
+  updateRoomMembership: (roomId, updates) =>
+    set((state) => ({
+      rooms: state.rooms.map((r) => {
+        if (r.id !== roomId || !r.my_membership) return r;
+        return {
+          ...r,
+          my_membership: {
+            ...r.my_membership,
+            ...updates,
+          },
+        };
+      }),
+    })),
+
+  removeRoom: (roomId) =>
+    set((state) => ({
+      rooms: state.rooms.filter((r) => r.id !== roomId),
     })),
 
   setMessages: (roomId, messages) =>

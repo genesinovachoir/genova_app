@@ -3,7 +3,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useChatStore } from '@/store/useChatStore';
-import type { ChatMessage, ChatMessageType, ChatReaction } from '@/lib/chat';
+import type { ChatMessage, ChatMessageType, ChatReaction, ChatRoom } from '@/lib/chat';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 /**
@@ -335,7 +335,7 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
  */
 export function useChatGlobalRealtime(memberId: string | null, roomIds: string[]) {
   const channelRef = useRef<RealtimeChannel | null>(null);
-  const { addMessage, incrementUnread, activeRoomId } = useChatStore();
+  const { addMessage, incrementUnread, activeRoomId, updateRoom, updateRoomMembership, removeRoom } = useChatStore();
 
   useEffect(() => {
     if (!memberId || roomIds.length === 0) return;
@@ -393,6 +393,71 @@ export function useChatGlobalRealtime(memberId: string | null, roomIds: string[]
               incrementUnread(msgRoomId);
             }
           });
+      }
+    );
+
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'chat_rooms',
+      },
+      (payload) => {
+        const updatedRoom = payload.new;
+        const updatedRoomId = updatedRoom.id as string;
+        if (!roomIds.includes(updatedRoomId)) return;
+
+        const updates: Partial<ChatRoom> = {
+          name: (updatedRoom.name as string) ?? '',
+          description: (updatedRoom.description as string | null) ?? null,
+          type: (updatedRoom.type as 'general' | 'voice_group' | 'custom' | 'dm') ?? 'custom',
+          avatar_url: (updatedRoom.avatar_url as string | null) ?? null,
+          is_archived: (updatedRoom.is_archived as boolean) ?? false,
+          updated_at: (updatedRoom.updated_at as string) ?? new Date().toISOString(),
+        };
+
+        if (typeof updatedRoom.slug === 'string') {
+          updates.slug = updatedRoom.slug;
+        }
+
+        updateRoom(updatedRoomId, updates);
+      }
+    );
+
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'chat_room_members',
+        filter: `member_id=eq.${memberId}`,
+      },
+      (payload) => {
+        const updatedMembership = payload.new;
+        const updatedRoomId = updatedMembership.room_id as string;
+        if (!roomIds.includes(updatedRoomId)) return;
+
+        updateRoomMembership(updatedRoomId, {
+          last_read_at: (updatedMembership.last_read_at as string | null) ?? null,
+          notifications_enabled: (updatedMembership.notifications_enabled as boolean) ?? true,
+          hidden_at: (updatedMembership.hidden_at as string | null) ?? null,
+        });
+      }
+    );
+
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'chat_room_members',
+        filter: `member_id=eq.${memberId}`,
+      },
+      (payload) => {
+        const removedRoomId = payload.old.room_id as string | undefined;
+        if (!removedRoomId) return;
+        removeRoom(removedRoomId);
       }
     );
 

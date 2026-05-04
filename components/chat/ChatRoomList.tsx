@@ -1,15 +1,23 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Search, Plus, Users, MessageCircle, Hash,
   ChevronRight, User,
 } from 'lucide-react';
+import { useToast } from '@/components/ToastProvider';
 import { useChatStore } from '@/store/useChatStore';
 import { useAuth } from '@/components/AuthProvider';
-import type { ChatRoom } from '@/lib/chat';
+import {
+  archiveRoomForEveryone,
+  hideRoomForMe,
+  leaveRoom,
+  setRoomNotifications,
+  type ChatRoom,
+} from '@/lib/chat';
+import { RoomListContextMenu } from './RoomListContextMenu';
 
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr);
@@ -70,23 +78,205 @@ function getRoomDisplayName(room: ChatRoom, memberId: string | undefined): strin
 
 export function ChatRoomList() {
   const router = useRouter();
+  const toast = useToast();
   const { member } = useAuth();
-  const { rooms, setCreateRoomOpen, onlineUsers } = useChatStore();
+  const {
+    rooms,
+    setCreateRoomOpen,
+    onlineUsers,
+    updateRoomMembership,
+    updateRoom,
+    removeRoom,
+  } = useChatStore();
   const [searchQuery, setSearchQuery] = useState('');
+  const [menuRoomId, setMenuRoomId] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const memberId = member?.id ?? null;
+
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const touchStartRef = useRef<{ x: number; y: number; roomId: string } | null>(null);
+  const suppressClickRoomIdRef = useRef<string | null>(null);
+
+  const visibleRooms = useMemo(() => {
+    return rooms.filter((room) => {
+      if (room.is_archived) return false;
+      const hiddenAt = room.my_membership?.hidden_at;
+      if (!hiddenAt) return true;
+
+      const hiddenAtMs = new Date(hiddenAt).getTime();
+      if (Number.isNaN(hiddenAtMs)) return true;
+
+      const lastActivity = room.last_message?.created_at ?? room.created_at;
+      const lastActivityMs = new Date(lastActivity).getTime();
+      if (Number.isNaN(lastActivityMs)) return false;
+      return lastActivityMs > hiddenAtMs;
+    });
+  }, [rooms]);
 
   const filteredRooms = useMemo(() => {
-    if (!searchQuery.trim()) return rooms;
+    if (!searchQuery.trim()) return visibleRooms;
     const q = searchQuery.toLowerCase();
-    return rooms.filter(
+    return visibleRooms.filter(
       (r) =>
         r.name.toLowerCase().includes(q) ||
         r.description?.toLowerCase().includes(q)
     );
-  }, [rooms, searchQuery]);
+  }, [searchQuery, visibleRooms]);
 
-  const handleRoomClick = (roomId: string) => {
-    router.push(`/chat/${roomId}`);
+  const selectedRoom = useMemo(
+    () => filteredRooms.find((room) => room.id === menuRoomId) ?? null,
+    [filteredRooms, menuRoomId]
+  );
+
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => clearLongPressTimer();
+  }, [clearLongPressTimer]);
+
+  const handleRoomClick = (room: ChatRoom) => {
+    if (suppressClickRoomIdRef.current === room.id) {
+      suppressClickRoomIdRef.current = null;
+      return;
+    }
+    router.push(`/chat/${room.slug || room.id}`);
   };
+
+  const openRoomMenu = useCallback((room: ChatRoom, position: { x: number; y: number }) => {
+    setMenuRoomId(room.id);
+    setMenuPosition(position);
+  }, []);
+
+  const closeRoomMenu = useCallback(() => {
+    setMenuRoomId(null);
+    setMenuPosition(null);
+  }, []);
+
+  const handleRoomTouchStart = useCallback(
+    (room: ChatRoom, event: React.TouchEvent<HTMLButtonElement>) => {
+      if (event.touches.length === 0) return;
+      clearLongPressTimer();
+      const touch = event.touches[0];
+      const point = { x: touch.clientX, y: touch.clientY };
+      touchStartRef.current = { ...point, roomId: room.id };
+      longPressTimerRef.current = setTimeout(() => {
+        suppressClickRoomIdRef.current = room.id;
+        openRoomMenu(room, point);
+        longPressTimerRef.current = null;
+      }, 420);
+    },
+    [clearLongPressTimer, openRoomMenu]
+  );
+
+  const handleRoomTouchMove = useCallback(
+    (event: React.TouchEvent<HTMLButtonElement>) => {
+      if (!touchStartRef.current || event.touches.length === 0) return;
+      const touch = event.touches[0];
+      const dx = Math.abs(touch.clientX - touchStartRef.current.x);
+      const dy = Math.abs(touch.clientY - touchStartRef.current.y);
+      if (dx > 10 || dy > 10) {
+        clearLongPressTimer();
+      }
+    },
+    [clearLongPressTimer]
+  );
+
+  const handleRoomTouchEnd = useCallback(() => {
+    clearLongPressTimer();
+    touchStartRef.current = null;
+  }, [clearLongPressTimer]);
+
+  const handleRoomContextMenu = useCallback(
+    (room: ChatRoom, event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      suppressClickRoomIdRef.current = room.id;
+      openRoomMenu(room, { x: event.clientX, y: event.clientY });
+    },
+    [openRoomMenu]
+  );
+
+  const handleRoomInfo = useCallback(
+    (room: ChatRoom) => {
+      router.push(`/chat/${room.slug || room.id}?info=1`);
+    },
+    [router]
+  );
+
+  const handleToggleNotifications = useCallback(
+    async (room: ChatRoom) => {
+      if (!memberId) return;
+      const current = room.my_membership?.notifications_enabled ?? true;
+      const nextValue = !current;
+      updateRoomMembership(room.id, { notifications_enabled: nextValue });
+      try {
+        await setRoomNotifications(room.id, memberId, nextValue);
+        toast.success(nextValue ? 'Bildirimler açıldı.' : 'Sohbet sessize alındı.');
+      } catch (err) {
+        updateRoomMembership(room.id, { notifications_enabled: current });
+        const message = err instanceof Error ? err.message : 'Bildirim ayarı güncellenemedi.';
+        toast.error(message, 'Sohbet');
+      }
+    },
+    [memberId, toast, updateRoomMembership]
+  );
+
+  const handleHideForMe = useCallback(
+    async (room: ChatRoom) => {
+      if (!memberId) return;
+      const previousHiddenAt = room.my_membership?.hidden_at ?? null;
+      const nextHiddenAt = new Date().toISOString();
+      updateRoomMembership(room.id, { hidden_at: nextHiddenAt });
+      try {
+        await hideRoomForMe(room.id, memberId);
+        toast.success('Sohbet, yeni mesaj gelene kadar gizlendi.');
+      } catch (err) {
+        updateRoomMembership(room.id, { hidden_at: previousHiddenAt });
+        const message = err instanceof Error ? err.message : 'Sohbet gizlenemedi.';
+        toast.error(message, 'Sohbet');
+      }
+    },
+    [memberId, toast, updateRoomMembership]
+  );
+
+  const handleLeaveRoom = useCallback(
+    async (room: ChatRoom) => {
+      if (!memberId) return;
+      if (!window.confirm(`${room.name} odasından ayrılmak istediğinize emin misiniz?`)) return;
+      try {
+        await leaveRoom(room.id, memberId);
+        removeRoom(room.id);
+        toast.success('Odadan ayrıldınız.');
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Odadan ayrılamadı.';
+        toast.error(message, 'Sohbet');
+      }
+    },
+    [memberId, removeRoom, toast]
+  );
+
+  const handleArchiveRoom = useCallback(
+    async (room: ChatRoom) => {
+      const isAllowed = room.type === 'custom' && room.my_membership?.role === 'admin';
+      if (!isAllowed) return;
+      if (!window.confirm(`"${room.name}" grubunu herkes için silmek istediğinize emin misiniz?`)) return;
+
+      updateRoom(room.id, { is_archived: true, updated_at: new Date().toISOString() });
+      try {
+        await archiveRoomForEveryone(room.id);
+        toast.success('Grup silindi.');
+      } catch (err) {
+        updateRoom(room.id, { is_archived: false });
+        const message = err instanceof Error ? err.message : 'Grup silinemedi.';
+        toast.error(message, 'Sohbet');
+      }
+    },
+    [toast, updateRoom]
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -156,7 +346,12 @@ export function ChatRoomList() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
                   transition={{ delay: index * 0.03 }}
-                  onClick={() => handleRoomClick(room.id)}
+                  onClick={() => handleRoomClick(room)}
+                  onContextMenu={(event) => handleRoomContextMenu(room, event)}
+                  onTouchStart={(event) => handleRoomTouchStart(room, event)}
+                  onTouchMove={handleRoomTouchMove}
+                  onTouchEnd={handleRoomTouchEnd}
+                  onTouchCancel={handleRoomTouchEnd}
                   className="group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)] active:scale-[0.98]"
                 >
                   {/* Avatar */}
@@ -229,6 +424,16 @@ export function ChatRoomList() {
           )}
         </AnimatePresence>
       </div>
+      <RoomListContextMenu
+        room={selectedRoom}
+        position={menuPosition}
+        onClose={closeRoomMenu}
+        onOpenInfo={handleRoomInfo}
+        onToggleNotifications={handleToggleNotifications}
+        onHideForMe={handleHideForMe}
+        onLeaveRoom={handleLeaveRoom}
+        onArchiveRoom={handleArchiveRoom}
+      />
     </div>
   );
 }

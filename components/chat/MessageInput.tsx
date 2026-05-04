@@ -10,12 +10,15 @@ import {
   BarChart3,
   Image as ImageIcon,
   Pencil,
+  Loader2,
 } from 'lucide-react';
 import { useChatStore } from '@/store/useChatStore';
-import type { ChatMessage } from '@/lib/chat';
+import { fetchLinkPreview, URL_REGEX } from '@/lib/chat';
+import type { ChatMessage, LinkPreviewData } from '@/lib/chat';
+import { LinkPreviewCard } from './LinkPreviewCard';
 
 interface MessageInputProps {
-  onSend: (content: string) => void;
+  onSend: (content: string, linkPreview?: LinkPreviewData | null) => void;
   onTyping?: () => void;
   disabled?: boolean;
   editingMessage?: ChatMessage | null;
@@ -37,10 +40,23 @@ export function MessageInput({
 }: MessageInputProps) {
   const [text, setText] = useState('');
   const [showExtras, setShowExtras] = useState(false);
+  const [linkPreview, setLinkPreview] = useState<LinkPreviewData | null>(null);
+  const [isPreviewDismissed, setIsPreviewDismissed] = useState(false);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingThrottleRef = useRef<NodeJS.Timeout | null>(null);
+  const previewDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const lastDetectedUrl = useRef<string | null>(null);
+  const dismissedUrlRef = useRef<string | null>(null);
   const { replyingTo, setReplyingTo } = useChatStore();
+
+  const extractFirstUrl = useCallback((value: string): string | null => {
+    URL_REGEX.lastIndex = 0;
+    const matches = value.match(URL_REGEX);
+    if (!matches || matches.length === 0) return null;
+    return matches[0].trim().replace(/[),.;!?]+$/g, '');
+  }, []);
 
   // When entering edit mode, populate the textarea with existing content
   useEffect(() => {
@@ -65,6 +81,70 @@ export function MessageInput({
     ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
   }, [text]);
 
+  useEffect(() => {
+    if (previewDebounceRef.current) {
+      clearTimeout(previewDebounceRef.current);
+      previewDebounceRef.current = null;
+    }
+
+    if (editingMessage) {
+      setLinkPreview(null);
+      setIsPreviewLoading(false);
+      return;
+    }
+
+    const detectedUrl = extractFirstUrl(text);
+    if (!detectedUrl) {
+      setLinkPreview(null);
+      setIsPreviewLoading(false);
+      setIsPreviewDismissed(false);
+      dismissedUrlRef.current = null;
+      lastDetectedUrl.current = null;
+      return;
+    }
+
+    if (dismissedUrlRef.current && dismissedUrlRef.current !== detectedUrl) {
+      setIsPreviewDismissed(false);
+      dismissedUrlRef.current = null;
+      lastDetectedUrl.current = null;
+    }
+
+    if (dismissedUrlRef.current === detectedUrl || isPreviewDismissed) {
+      return;
+    }
+
+    if (lastDetectedUrl.current === detectedUrl) {
+      return;
+    }
+
+    let isCancelled = false;
+    setIsPreviewLoading(true);
+    previewDebounceRef.current = setTimeout(() => {
+      void fetchLinkPreview(detectedUrl)
+        .then((preview) => {
+          if (isCancelled) return;
+          setLinkPreview(preview);
+        })
+        .catch(() => {
+          if (isCancelled) return;
+          setLinkPreview(null);
+        })
+        .finally(() => {
+          if (isCancelled) return;
+          setIsPreviewLoading(false);
+          lastDetectedUrl.current = detectedUrl;
+        });
+    }, 500);
+
+    return () => {
+      isCancelled = true;
+      if (previewDebounceRef.current) {
+        clearTimeout(previewDebounceRef.current);
+        previewDebounceRef.current = null;
+      }
+    };
+  }, [text, editingMessage, extractFirstUrl, isPreviewDismissed]);
+
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value);
 
@@ -81,9 +161,14 @@ export function MessageInput({
     const trimmed = text.trim();
     if (!trimmed || disabled) return;
 
-    onSend(trimmed);
+    onSend(trimmed, isPreviewDismissed ? null : linkPreview);
     setText('');
     setShowExtras(false);
+    setLinkPreview(null);
+    setIsPreviewLoading(false);
+    setIsPreviewDismissed(false);
+    lastDetectedUrl.current = null;
+    dismissedUrlRef.current = null;
 
     if (!editingMessage) {
       setReplyingTo(null);
@@ -93,7 +178,15 @@ export function MessageInput({
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [text, disabled, onSend, setReplyingTo, editingMessage]);
+  }, [
+    text,
+    disabled,
+    onSend,
+    setReplyingTo,
+    editingMessage,
+    linkPreview,
+    isPreviewDismissed,
+  ]);
 
   const handleCancelEdit = useCallback(() => {
     setText('');
@@ -190,6 +283,38 @@ export function MessageInput({
                 <X size={16} />
               </button>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Link preview */}
+      <AnimatePresence>
+        {!isEditing && (isPreviewLoading || linkPreview) && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            {isPreviewLoading ? (
+              <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-xs text-[var(--color-text-low)]">
+                <Loader2 size={14} className="animate-spin" />
+                <span>Bağlantı önizlemesi yükleniyor...</span>
+              </div>
+            ) : linkPreview ? (
+              <LinkPreviewCard
+                preview={linkPreview}
+                variant="input"
+                onDismiss={() => {
+                  const detectedUrl = extractFirstUrl(text);
+                  const urlToDismiss = linkPreview.url || detectedUrl;
+                  if (urlToDismiss) dismissedUrlRef.current = urlToDismiss;
+                  setIsPreviewDismissed(true);
+                  setLinkPreview(null);
+                  setIsPreviewLoading(false);
+                }}
+              />
+            ) : null}
           </motion.div>
         )}
       </AnimatePresence>

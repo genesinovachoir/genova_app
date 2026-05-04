@@ -3,9 +3,11 @@
 import { useRef, useCallback, useMemo, useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Check, CheckCheck, Clock, Star, Trash2 } from 'lucide-react';
-import type { ChatMessage } from '@/lib/chat';
+import type { ChatMessage, LinkPreviewData } from '@/lib/chat';
 import { ReactionBar } from './ReactionBar';
 import { PollCard } from './PollCard';
+import { LinkPreviewCard } from './LinkPreviewCard';
+import { formatWhatsApp } from '@/lib/formatText';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -41,6 +43,22 @@ function MessageStatusIcon({ status, isOwn }: { status: MessageStatus; isOwn: bo
     default:
       return <Check size={13} className="text-white/60" />;
   }
+}
+
+function parseLinkPreview(value: unknown): LinkPreviewData | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.url !== 'string' || typeof record.domain !== 'string') {
+    return null;
+  }
+  return {
+    url: record.url,
+    domain: record.domain,
+    title: typeof record.title === 'string' ? record.title : null,
+    description: typeof record.description === 'string' ? record.description : null,
+    image: typeof record.image === 'string' ? record.image : null,
+    favicon: typeof record.favicon === 'string' ? record.favicon : null,
+  };
 }
 
 export function MessageBubble({
@@ -114,6 +132,10 @@ export function MessageBubble({
     if (meta?._failed) return 'pending';
     return 'sent';
   }, [message.id, message.metadata_json]);
+  const linkPreview = useMemo(
+    () => parseLinkPreview((message.metadata_json as Record<string, unknown> | null)?.link_preview),
+    [message.metadata_json]
+  );
 
   const [isHighlighted, setIsHighlighted] = useState(false);
 
@@ -301,9 +323,18 @@ export function MessageBubble({
 
           {/* Content */}
           {message.message_type === 'text' && (
-            <p className="whitespace-pre-wrap break-words text-[0.88rem] leading-snug">
-              {message.content}
-            </p>
+            <>
+              <p className="whitespace-pre-wrap break-words text-[0.88rem] leading-snug">
+                {formatWhatsApp(message.content ?? '', {
+                  linkClassName: isOwn
+                    ? 'text-white underline underline-offset-2'
+                    : 'text-[var(--color-accent)] underline underline-offset-2',
+                })}
+              </p>
+              {linkPreview && (
+                <LinkPreviewCard preview={linkPreview} variant="bubble" isOwn={isOwn} />
+              )}
+            </>
           )}
 
           {message.message_type === 'image' && (() => {

@@ -48,11 +48,11 @@ export function CreateRoomModal() {
       const roomName = roomType === 'dm'
         ? members.find(m => m.id === selected[0])?.first_name ?? 'DM'
         : name.trim() || 'Yeni Oda';
-      const roomId = await createRoom(roomName, member.id, selected, {
+      const room = await createRoom(roomName, member.id, selected, {
         type: roomType, description: desc.trim() || undefined,
       });
       setCreateRoomOpen(false);
-      router.push(`/chat/${roomId}`);
+      router.push(`/chat/${room.slug}`);
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
   };

@@ -3,10 +3,11 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, MoreVertical, Loader2, ChevronDown } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 import { useChatStore } from '@/store/useChatStore';
 import { useChatRealtime } from '@/hooks/useChatRealtime';
+import { supabase } from '@/lib/supabase';
 import {
   fetchMessages,
   sendMessage,
@@ -24,7 +25,7 @@ import {
   unstarMessage,
   fetchStarredMessages,
 } from '@/lib/chat';
-import type { ChatMessage, ChatRoomMember } from '@/lib/chat';
+import type { ChatMessage, ChatRoomMember, LinkPreviewData } from '@/lib/chat';
 import { MessageBubble } from './MessageBubble';
 import { MessageInput } from './MessageInput';
 import { MessageContextMenu } from './MessageContextMenu';
@@ -35,13 +36,18 @@ import { ImageGalleryViewer } from './ImageGalleryViewer';
 import { MessageInfoModal } from './MessageInfoModal';
 
 interface ChatRoomProps {
-  roomId: string;
+  slug: string;
 }
 
-export function ChatRoom({ roomId }: ChatRoomProps) {
+export function ChatRoom({ slug }: ChatRoomProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { member } = useAuth();
   const store = useChatStore();
+  const [resolvedRoomId, setResolvedRoomId] = useState<string | null>(null);
+  const [isResolvingRoom, setIsResolvingRoom] = useState(true);
+  const [roomNotFound, setRoomNotFound] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -59,8 +65,9 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialLoad = useRef(true);
 
-  const messages = store.messagesByRoom[roomId] ?? [];
-  const room = store.rooms.find((r) => r.id === roomId);
+  const roomId = resolvedRoomId;
+  const messages = roomId ? store.messagesByRoom[roomId] ?? [] : [];
+  const room = roomId ? store.rooms.find((r) => r.id === roomId) : undefined;
   const { sendTyping } = useChatRealtime(member?.id ?? null, roomId);
 
   // Context menu state from store
@@ -73,9 +80,81 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
   } = store;
 
   useEffect(() => {
+    let cancelled = false;
+
+    const resolveRoomId = async () => {
+      setIsResolvingRoom(true);
+      setRoomNotFound(false);
+
+      const fromStore = useChatStore.getState().rooms.find((r) => r.slug === slug || r.id === slug);
+      if (fromStore) {
+        if (!cancelled) {
+          setResolvedRoomId(fromStore.id);
+          setIsResolvingRoom(false);
+        }
+        return;
+      }
+
+      try {
+        const { data: roomBySlug, error: slugError } = await supabase
+          .from('chat_rooms')
+          .select('id, slug')
+          .eq('slug', slug)
+          .maybeSingle();
+
+        if (slugError) throw slugError;
+        if (roomBySlug?.id) {
+          if (!cancelled) {
+            setResolvedRoomId(roomBySlug.id as string);
+            setIsResolvingRoom(false);
+          }
+          return;
+        }
+
+        // Backward compatibility for old UUID links.
+        const { data: roomById, error: idError } = await supabase
+          .from('chat_rooms')
+          .select('id, slug')
+          .eq('id', slug)
+          .maybeSingle();
+
+        if (idError) throw idError;
+
+        if (!cancelled) {
+          if (roomById?.id) {
+            setResolvedRoomId(roomById.id as string);
+            const canonicalSlug = roomById.slug as string | null;
+            if (canonicalSlug && canonicalSlug !== slug) {
+              router.replace(`/chat/${canonicalSlug}`);
+            }
+          } else {
+            setResolvedRoomId(null);
+            setRoomNotFound(true);
+          }
+          setIsResolvingRoom(false);
+        }
+      } catch (err) {
+        console.error('Failed to resolve room slug:', err);
+        if (!cancelled) {
+          setResolvedRoomId(null);
+          setRoomNotFound(true);
+          setIsResolvingRoom(false);
+        }
+      }
+    };
+
+    void resolveRoomId();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, router]);
+
+  useEffect(() => {
+    if (!roomId) return;
     store.setActiveRoomId(roomId);
     return () => store.setActiveRoomId(null);
-  }, [roomId]);
+  }, [roomId, store]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -86,9 +165,18 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
     };
   }, []);
 
+  useEffect(() => {
+    if (searchParams.get('info') !== '1') return;
+    store.setRoomInfoOpen(true);
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.delete('info');
+    const nextUrl = nextParams.toString() ? `${pathname}?${nextParams.toString()}` : pathname;
+    router.replace(nextUrl);
+  }, [pathname, router, searchParams, store]);
+
   // Load initial messages + reactions
   useEffect(() => {
-    if (!member?.id) return;
+    if (!member?.id || !roomId) return;
     const load = async () => {
       setIsLoading(true);
       try {
@@ -149,7 +237,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
 
   // Load more handler
   const handleLoadMore = useCallback(async () => {
-    if (isLoadingMore || !hasMore || messages.length === 0) return;
+    if (!roomId || isLoadingMore || !hasMore || messages.length === 0) return;
     setIsLoadingMore(true);
     const prevH = scrollRef.current?.scrollHeight ?? 0;
     try {
@@ -194,8 +282,8 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
 
   // Send message (or update if editing)
   const handleSend = useCallback(
-    async (content: string) => {
-      if (!member?.id) return;
+    async (content: string, linkPreview?: LinkPreviewData | null) => {
+      if (!member?.id || !roomId) return;
 
       // If editing, update the existing message
       if (editingMessage) {
@@ -216,6 +304,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
 
       // Normal send with optimistic UI
       const replyTo = useChatStore.getState().replyingTo;
+      const metadataJson = linkPreview ? { link_preview: linkPreview } : {};
       const tempId = `temp-${Date.now()}`;
       const opt: ChatMessage = {
         id: tempId,
@@ -237,7 +326,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
                 : null,
             }
           : null,
-        metadata_json: {},
+        metadata_json: metadataJson,
         is_edited: false,
         is_deleted: false,
         created_at: new Date().toISOString(),
@@ -254,6 +343,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
       try {
         const real = await sendMessage(roomId, member.id, content, {
           replyToId: replyTo?.id ?? null,
+          metadataJson,
         });
         useChatStore
           .getState()
@@ -276,7 +366,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
   // Image upload handler
   const handleImageSelect = useCallback(
     async (files: File[]) => {
-      if (!member?.id || files.length === 0) return;
+      if (!member?.id || !roomId || files.length === 0) return;
       const replyTo = useChatStore.getState().replyingTo;
       const tempId = `temp-${Date.now()}`;
       
@@ -345,6 +435,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
 
   const handleDeleteMessage = useCallback(
     async (msg: ChatMessage, type: 'me' | 'everyone') => {
+      if (!roomId) return;
       const confirmText = type === 'me' 
         ? 'Bu mesajı kendinizden silmek istediğinize emin misiniz?' 
         : 'Bu mesajı herkesten silmek istediğinize emin misiniz?';
@@ -380,7 +471,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
 
   const handleReactionToggle = useCallback(
     async (messageId: string, emoji: string) => {
-      if (!member?.id) return;
+      if (!member?.id || !roomId) return;
       const msg = messages.find((m) => m.id === messageId);
       if (!msg) return;
 
@@ -475,7 +566,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
     return g;
   }, [messages]);
 
-  const typingInRoom = store.typingUsers[roomId] ?? [];
+  const typingInRoom = roomId ? store.typingUsers[roomId] ?? [] : [];
   const typingText = useMemo(() => {
     if (typingInRoom.length === 0) return null;
     const names = typingInRoom
@@ -505,6 +596,28 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
     }
     return room?.name ?? 'Sohbet';
   }, [room, roomMembers, member?.id]);
+
+  if (isResolvingRoom) {
+    return (
+      <div className="fixed inset-0 z-40 flex h-[100dvh] items-center justify-center bg-[var(--color-background)]">
+        <Loader2 className="animate-spin text-[var(--color-accent)]" size={28} />
+      </div>
+    );
+  }
+
+  if (!roomId || roomNotFound) {
+    return (
+      <div className="fixed inset-0 z-40 flex h-[100dvh] flex-col items-center justify-center gap-4 bg-[var(--color-background)] px-6 text-center">
+        <p className="text-sm text-[var(--color-text-medium)]">Sohbet bulunamadı.</p>
+        <button
+          onClick={() => router.push('/chat')}
+          className="rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white"
+        >
+          Sohbet listesine dön
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-40 flex h-[100dvh] flex-col bg-[var(--color-background)]">
@@ -700,7 +813,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         isOpen={isPollModalOpen}
         onClose={() => setIsPollModalOpen(false)}
         onSubmit={async (data) => {
-          if (!member?.id) return;
+          if (!member?.id || !roomId) return;
           try {
             const { message } = await createPollMessage(
               roomId,
@@ -724,7 +837,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         isOpen={isStickerOpen}
         onClose={() => setIsStickerOpen(false)}
         onSelect={async (emoji) => {
-          if (!member?.id) return;
+          if (!member?.id || !roomId) return;
           const tempId = `temp-${Date.now()}`;
           const replyTo = useChatStore.getState().replyingTo;
           const opt: ChatMessage = {

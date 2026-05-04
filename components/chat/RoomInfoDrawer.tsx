@@ -14,8 +14,10 @@ import {
   Pencil,
   Check,
   Trash2,
+  Loader2,
 } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
+import { useToast } from '@/components/ToastProvider';
 import { useChatStore } from '@/store/useChatStore';
 import {
   updateRoom,
@@ -48,6 +50,7 @@ export function RoomInfoDrawer({
 }: RoomInfoDrawerProps) {
   const router = useRouter();
   const { member } = useAuth();
+  const toast = useToast();
   const { isRoomInfoOpen, setRoomInfoOpen, rooms, updateRoom: updateRoomInStore, onlineUsers } =
     useChatStore();
   const room = rooms.find((r) => r.id === roomId);
@@ -57,6 +60,7 @@ export function RoomInfoDrawer({
   const [isEditingDesc, setIsEditingDesc] = useState(false);
   const [editDesc, setEditDesc] = useState('');
   const [notificationsOverride, setNotificationsOverride] = useState<boolean | null>(null);
+  const [isAvatarUploading, setIsAvatarUploading] = useState(false);
 
   const [activeTab, setActiveTab] = useState<'members' | 'media' | 'links' | 'starred' | 'files'>('members');
   const [selectedMember, setSelectedMember] = useState<ChatRoomMember | null>(null);
@@ -162,6 +166,38 @@ export function RoomInfoDrawer({
     }
   };
 
+  const handleAvatarChange = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const input = event.target;
+      const file = input.files?.[0];
+      input.value = '';
+
+      if (!file || !member?.id || !isAdmin) return;
+
+      if (!file.type.startsWith('image/')) {
+        toast.error('Lütfen geçerli bir görsel dosyası seçin.', 'Oda fotoğrafı');
+        return;
+      }
+
+      setIsAvatarUploading(true);
+      try {
+        const publicUrl = await updateRoomAvatar(roomId, file);
+        updateRoomInStore(roomId, {
+          avatar_url: publicUrl,
+          updated_at: new Date().toISOString(),
+        });
+        toast.success('Oda fotoğrafı güncellendi.');
+      } catch (err) {
+        console.error('Failed to update avatar', err);
+        const message = err instanceof Error ? err.message : 'Fotoğraf güncellenemedi.';
+        toast.error(message, 'Oda fotoğrafı');
+      } finally {
+        setIsAvatarUploading(false);
+      }
+    },
+    [isAdmin, member?.id, roomId, toast, updateRoomInStore]
+  );
+
   if (!room) return null;
 
   return (
@@ -203,9 +239,11 @@ export function RoomInfoDrawer({
             <div className="flex-1 flex flex-col overflow-hidden">
               <div className="flex flex-col items-center border-b border-[var(--color-border)] px-4 py-6">
                 <div 
-                  className="relative mx-auto mb-4 flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--color-surface)] shadow-md group"
+                  className={`relative mx-auto mb-4 flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--color-surface)] shadow-md group ${
+                    isAvatarUploading ? 'cursor-wait' : ''
+                  }`}
                   onClick={() => {
-                    if (isAdmin && !isDm) {
+                    if (!isAvatarUploading && isAdmin && !isDm) {
                       fileInputRef.current?.click();
                     }
                   }}
@@ -215,17 +253,7 @@ export function RoomInfoDrawer({
                     accept="image/*" 
                     className="hidden" 
                     ref={fileInputRef} 
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (file && member?.id && isAdmin) {
-                        try {
-                          await updateRoomAvatar(roomId, file);
-                        } catch (err) {
-                          console.error('Failed to update avatar', err);
-                        }
-                      }
-                      if (e.target) e.target.value = '';
-                    }} 
+                    onChange={handleAvatarChange}
                   />
                   {room.avatar_url ? (
                     <img
@@ -240,8 +268,12 @@ export function RoomInfoDrawer({
                     />
                   )}
                   {isAdmin && !isDm && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Pencil size={20} className="text-white" />
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/35 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+                      {isAvatarUploading ? (
+                        <Loader2 size={20} className="animate-spin text-white" />
+                      ) : (
+                        <Pencil size={20} className="text-white" />
+                      )}
                     </div>
                   )}
                 </div>
