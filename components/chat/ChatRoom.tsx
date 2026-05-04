@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, MoreVertical, Loader2 } from 'lucide-react';
+import { ArrowLeft, MoreVertical, Loader2, ChevronDown } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 import { useChatStore } from '@/store/useChatStore';
@@ -49,6 +49,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
   const [isPollModalOpen, setIsPollModalOpen] = useState(false);
   const [isStickerOpen, setIsStickerOpen] = useState(false);
   const [infoMessage, setInfoMessage] = useState<ChatMessage | null>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
   // Gallery state
   const [galleryImages, setGalleryImages] = useState<ChatMessage[]>([]);
@@ -176,6 +177,9 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
     if (!c) return;
     const onScroll = () => {
       if (c.scrollTop < 100) void handleLoadMore();
+      
+      const distanceFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
+      setShowScrollButton(distanceFromBottom > 200);
     };
     c.addEventListener('scroll', onScroll, { passive: true });
     return () => c.removeEventListener('scroll', onScroll);
@@ -527,8 +531,9 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        {isLoading ? (
+      <div className="relative flex-1 overflow-hidden">
+        <div ref={scrollRef} className="h-full w-full overflow-y-auto">
+          {isLoading ? (
           <div className="flex h-full items-center justify-center">
             <Loader2
               className="animate-spin text-[var(--color-accent)]"
@@ -604,6 +609,21 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
             <div ref={messagesEndRef} />
           </div>
         )}
+        </div>
+        
+        <AnimatePresence>
+          {showScrollButton && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.8, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 10 }}
+              onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })}
+              className="absolute bottom-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-[var(--color-background)] shadow-md border border-[var(--color-border)] text-[var(--color-text-high)] hover:bg-[var(--color-surface)]"
+            >
+              <ChevronDown size={20} />
+            </motion.button>
+          )}
+        </AnimatePresence>
       </div>
 
       <MessageInput
