@@ -97,6 +97,16 @@ function toDateSafe(value: string | null | undefined) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function toUnreadComparableTimestamp(value: string) {
+  const parsed = toDateSafe(value)?.getTime();
+  if (!parsed) {
+    return 0;
+  }
+  // Guard against future-dated records (e.g. rehearsal date as notification time)
+  // so unread badge can still be cleared when user opens the panel.
+  return Math.min(parsed, Date.now());
+}
+
 function formatRelativeTime(value: string) {
   const then = toDateSafe(value);
   if (!then) {
@@ -631,7 +641,7 @@ export function MainNotificationsBell() {
       return items.length;
     }
     return items.filter((item) => {
-      const time = toDateSafe(item.createdAt)?.getTime() ?? 0;
+      const time = toUnreadComparableTimestamp(item.createdAt);
       return time > lastSeenAt;
     }).length;
   }, [items, lastSeenAt]);
@@ -701,7 +711,7 @@ export function MainNotificationsBell() {
                 <div className="no-scrollbar max-h-[24rem] overflow-y-auto px-2 py-2">
                   {items.map((item) => {
                     const Icon = getItemIcon(item.kind);
-                    const isUnread = (toDateSafe(item.createdAt)?.getTime() ?? 0) > lastSeenAt;
+                    const isUnread = toUnreadComparableTimestamp(item.createdAt) > lastSeenAt;
                     return (
                       <Link
                         key={item.id}

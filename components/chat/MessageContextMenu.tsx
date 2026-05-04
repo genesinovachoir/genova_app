@@ -34,6 +34,7 @@ export function MessageContextMenu({
   onDelete,
   onCopy,
   onInfo,
+  onToggleStar,
 }: MessageContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const isOpen = message !== null && position !== null;

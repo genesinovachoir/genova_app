@@ -31,6 +31,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
+    "fix-webm-duration": "^1.0.6",
     "konva": "^10.2.5",
     "lottie-react": "^2.4.1",
     "lucide-react": "^0.553.0",

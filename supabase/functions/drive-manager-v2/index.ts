@@ -599,6 +599,40 @@ Deno.serve(async (req) => {
         await supabaseAdmin.from('assignments').update({ drive_folder_id: folder.id }).eq('id', assignment_id);
         return new Response(JSON.stringify({ folder_id: folder.id }), { headers: jsonHeaders });
       }
+      case 'upload_chat_image': {
+        const { room_id, file_name, mime_type, file_data_base64 } = body;
+        if (!room_id || !file_name || !file_data_base64) {
+          throw new Error('Eksik chat_image verisi');
+        }
+
+        const rootFolderId = Deno.env.get('GOOGLE_DRIVE_ROOT_FOLDER_ID');
+        if (!rootFolderId) throw new Error('GOOGLE_DRIVE_ROOT_FOLDER_ID eksik');
+
+        const chatFolderId = await ensureFolderExists(token, rootFolderId, 'Chat');
+        const roomFolderId = await ensureFolderExists(token, chatFolderId, room_id);
+
+        const mimeType = typeof mime_type === 'string' && mime_type.length > 0
+          ? mime_type
+          : 'application/octet-stream';
+        const fileBytes = Uint8Array.from(atob(file_data_base64), c => c.charCodeAt(0));
+
+        const uploadResult = await uploadFileMultipart(token, fileBytes, {
+          name: file_name,
+          parents: [roomFolderId],
+          mimeType,
+        });
+
+        await setFilePublicReadable(token, uploadResult.id);
+
+        return new Response(JSON.stringify({ 
+          success: true, 
+          file_id: uploadResult.id,
+          web_view_link: uploadResult.webViewLink,
+          web_content_link: uploadResult.webContentLink,
+          public_url: `https://drive.google.com/uc?id=${uploadResult.id}`,
+        }), { headers: jsonHeaders });
+      }
+
       case 'upload_submission': {
         const { assignment_id, file_name, mime_type, file_data_base64, submission_note } = body;
         if (!assignment_id || !file_name || !file_data_base64) {

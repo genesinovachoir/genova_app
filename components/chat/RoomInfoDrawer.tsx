@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   X,
@@ -37,12 +37,14 @@ interface RoomInfoDrawerProps {
   roomId: string;
   roomMembers: ChatRoomMember[];
   onMembersChange: (members: ChatRoomMember[]) => void;
+  onGoToMessage: (messageId: string) => void;
 }
 
 export function RoomInfoDrawer({
   roomId,
   roomMembers,
   onMembersChange,
+  onGoToMessage,
 }: RoomInfoDrawerProps) {
   const router = useRouter();
   const { member } = useAuth();
@@ -220,7 +222,7 @@ export function RoomInfoDrawer({
                       const file = e.target.files?.[0];
                       if (file && member?.id && isAdmin) {
                         try {
-                          await updateRoomAvatar(roomId, member.id, file);
+                          await updateRoomAvatar(roomId, file);
                         } catch (err) {
                           console.error('Failed to update avatar', err);
                         }
@@ -284,33 +286,212 @@ export function RoomInfoDrawer({
                     )}
                   </div>
                 )}
-                            {rm.role === 'admin' && (
-                              <Crown
-                                size={12}
-                                className="shrink-0 text-amber-500"
-                              />
-                            )}
-                          </div>
-                          <p className="text-xs text-[var(--color-text-low)]">
-                            {cm.voice_group ?? ''}
-                          </p>
-                        </div>
 
-                        {/* Admin actions */}
-                        {isAdmin && !isSelf && !isDm && (
+                {/* Description */}
+                {!isDm && (
+                  <div className="mt-4 w-full">
+                    {isEditingDesc ? (
+                      <div className="flex flex-col gap-2">
+                        <textarea
+                          value={editDesc}
+                          onChange={(e) => setEditDesc(e.target.value)}
+                          className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-high)] focus:border-[var(--color-accent)] focus:outline-none"
+                          rows={3}
+                          placeholder="Oda açıklaması ekle..."
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') setIsEditingDesc(false);
+                          }}
+                        />
+                        <div className="flex justify-end gap-2">
                           <button
-                            onClick={() =>
-                              void handleRemoveMember(rm.member_id)
-                            }
-                            className="shrink-0 rounded-full p-1.5 text-[var(--color-text-low)] hover:bg-red-50 hover:text-red-500"
+                            onClick={() => setIsEditingDesc(false)}
+                            className="rounded-lg px-3 py-1 text-sm font-medium text-[var(--color-text-low)] hover:bg-[var(--color-surface)]"
                           >
-                            <Trash2 size={14} />
+                            İptal
+                          </button>
+                          <button
+                            onClick={() => void handleSaveDesc()}
+                            className="rounded-lg bg-[var(--color-accent)] px-3 py-1 text-sm font-medium text-white"
+                          >
+                            Kaydet
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="group relative flex items-start gap-2">
+                        <p className="flex-1 text-center text-sm text-[var(--color-text-medium)]">
+                          {room.description || 'Açıklama yok'}
+                        </p>
+                        {isAdmin && (
+                          <button
+                            onClick={() => {
+                              setEditDesc(room.description ?? '');
+                              setIsEditingDesc(true);
+                            }}
+                            className="absolute -right-2 -top-2 rounded-full p-1.5 text-[var(--color-text-low)] opacity-0 transition-opacity hover:bg-[var(--color-surface)] group-hover:opacity-100"
+                          >
+                            <Pencil size={14} />
                           </button>
                         )}
                       </div>
-                    );
-                  })}
-                </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Tabs */}
+              <div className="flex border-b border-[var(--color-border)] px-4">
+                <button
+                  onClick={() => setActiveTab('members')}
+                  className={`flex-1 border-b-2 py-3 text-sm font-medium transition-colors ${
+                    activeTab === 'members'
+                      ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
+                      : 'border-transparent text-[var(--color-text-medium)] hover:text-[var(--color-text-high)]'
+                  }`}
+                >
+                  Üyeler ({roomMembers.length})
+                </button>
+                <button
+                  onClick={() => setActiveTab('media')}
+                  className={`flex-1 border-b-2 py-3 text-sm font-medium transition-colors ${
+                    activeTab === 'media'
+                      ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
+                      : 'border-transparent text-[var(--color-text-medium)] hover:text-[var(--color-text-high)]'
+                  }`}
+                >
+                  Medya
+                </button>
+                <button
+                  onClick={() => setActiveTab('starred')}
+                  className={`flex-1 border-b-2 py-3 text-sm font-medium transition-colors ${
+                    activeTab === 'starred'
+                      ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
+                      : 'border-transparent text-[var(--color-text-medium)] hover:text-[var(--color-text-high)]'
+                  }`}
+                >
+                  Yıldızlılar
+                </button>
+              </div>
+
+              {/* Tab Content */}
+              <div className="flex-1 overflow-y-auto">
+                {activeTab === 'media' ? (
+                  <MediaGalleryGrid roomId={roomId} onGoToMessage={onGoToMessage} />
+                ) : activeTab === 'starred' ? (
+                  <StarredMessagesPanel roomId={roomId} onGoToMessage={onGoToMessage} />
+                ) : (
+                  <div className="flex flex-col gap-1 p-2">
+                    {/* Notifications Toggle */}
+                    <button
+                      onClick={() => void handleToggleNotifications()}
+                      className="flex items-center gap-3 rounded-xl p-3 text-left transition-colors hover:bg-[var(--color-surface)]"
+                    >
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface)]">
+                        {notificationsEnabled ? (
+                          <Bell size={20} className="text-[var(--color-accent)]" />
+                        ) : (
+                          <BellOff size={20} className="text-[var(--color-text-medium)]" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="text-sm font-semibold text-[var(--color-text-high)]">
+                          Bildirimler
+                        </h4>
+                        <p className="text-xs text-[var(--color-text-low)]">
+                          {notificationsEnabled ? 'Açık' : 'Kapalı'}
+                        </p>
+                      </div>
+                    </button>
+
+                    {/* Add Member Button */}
+                    {isAdmin && !isDm && (
+                      <button className="flex items-center gap-3 rounded-xl p-3 text-left transition-colors hover:bg-[var(--color-surface)]">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)]/10 text-[var(--color-accent)]">
+                          <UserPlus size={20} />
+                        </div>
+                        <span className="text-sm font-semibold text-[var(--color-accent)]">
+                          Üye Ekle
+                        </span>
+                      </button>
+                    )}
+
+                    <div className="my-2 h-px bg-[var(--color-border)]" />
+
+                    {/* Members List */}
+                    {sortedMembers.map((rm) => {
+                      const isSelf = rm.member_id === member?.id;
+                      const cm = rm.choir_members;
+                      if (!cm) return null;
+                      const isOnline = onlineUsers.includes(rm.member_id);
+
+                      return (
+                        <div
+                          key={rm.id}
+                          className="flex items-center gap-3 rounded-xl p-2 transition-colors hover:bg-[var(--color-surface)] cursor-pointer"
+                          onClick={() => {
+                            if (isAdmin && !isSelf && !isDm) {
+                              setSelectedMember(rm);
+                            }
+                          }}
+                        >
+                          <div className="relative">
+                            {cm.photo_url ? (
+                              <img
+                                src={cm.photo_url}
+                                alt={cm.first_name}
+                                className="h-10 w-10 rounded-full object-cover"
+                              />
+                            ) : (
+                              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--color-accent)]/10 text-[var(--color-accent)]">
+                                {cm.first_name[0]}
+                                {cm.last_name[0]}
+                              </div>
+                            )}
+                            {isOnline && (
+                              <div className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[var(--color-background)]">
+                                <Circle
+                                  size={10}
+                                  className="fill-green-500 text-green-500"
+                                />
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <h4 className="truncate text-sm font-semibold text-[var(--color-text-high)]">
+                                {cm.first_name} {cm.last_name}
+                                {isSelf && ' (Sen)'}
+                              </h4>
+                              {rm.role === 'admin' && (
+                                <Crown
+                                  size={12}
+                                  className="shrink-0 text-amber-500"
+                                />
+                              )}
+                            </div>
+                            <p className="text-xs text-[var(--color-text-low)]">
+                              {cm.voice_group ?? ''}
+                            </p>
+                          </div>
+
+                          {/* Admin actions */}
+                          {isAdmin && !isSelf && !isDm && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleRemoveMember(rm.member_id);
+                              }}
+                              className="shrink-0 rounded-full p-1.5 text-[var(--color-text-low)] hover:bg-red-50 hover:text-red-500"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -338,7 +519,7 @@ export function RoomInfoDrawer({
           onMakeAdmin={async () => {
             if (!member?.id) return;
             try {
-              await updateMemberRole(roomId, member.id, selectedMember.member_id, 'admin');
+              await updateMemberRole(roomId, selectedMember.member_id, 'admin');
               onMembersChange(roomMembers.map(m => m.id === selectedMember.id ? { ...m, role: 'admin' } : m));
             } catch (err) {
               console.error('Failed to make admin:', err);
@@ -347,7 +528,7 @@ export function RoomInfoDrawer({
           onRemoveAdmin={async () => {
             if (!member?.id) return;
             try {
-              await updateMemberRole(roomId, member.id, selectedMember.member_id, 'member');
+              await updateMemberRole(roomId, selectedMember.member_id, 'member');
               onMembersChange(roomMembers.map(m => m.id === selectedMember.id ? { ...m, role: 'member' } : m));
             } catch (err) {
               console.error('Failed to remove admin:', err);

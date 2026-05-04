@@ -418,6 +418,11 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
     }
   }, [member?.id, store]);
 
+  const handleGoToMessage = useCallback((messageId: string) => {
+    const event = new CustomEvent('scrollToMessage', { detail: messageId });
+    window.dispatchEvent(event);
+  }, []);
+
   const handleImageClick = useCallback((msg: ChatMessage, imageIndex: number) => {
     const images = messages.filter(m => m.message_type === 'image');
     
@@ -645,7 +650,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         isStarred={!!contextMenuMessage && store.starredMessageIds.includes(contextMenuMessage.id)}
         onClose={store.closeContextMenu}
         onReply={(m) => store.setReplyingTo(m)}
-        onReact={handleReactionToggle}
+        onReact={(m, emoji) => void handleReactionToggle(m.id, emoji)}
         onEdit={(m) => store.setEditingMessage(m)}
         onDelete={handleDeleteMessage}
         onCopy={handleCopyMessage}
@@ -687,6 +692,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         roomId={roomId}
         roomMembers={roomMembers}
         onMembersChange={setRoomMembers}
+        onGoToMessage={handleGoToMessage}
       />
 
       {/* Poll Creation Modal */}

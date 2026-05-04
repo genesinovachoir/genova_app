@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, Clock, XCircle, Loader2, RotateCcw, Users } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'next/navigation';
 
 import { supabase, type Rehearsal, type Attendance } from '@/lib/supabase';
 import { useAuth } from '@/components/AuthProvider';
@@ -98,6 +99,14 @@ function getTodayString() {
 
 function monthLabel(date: Date) {
   return date.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' }).toUpperCase();
+}
+
+function isIsoDateOnly(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const parsed = new Date(`${value}T12:00:00`);
+  return !Number.isNaN(parsed.getTime());
 }
 
 async function fetchMonthData(memberId: string, currentMonth: Date) {
@@ -268,12 +277,21 @@ export default function DevamsizlikPage() {
   const toast = useToast();
   const { member, isAdmin, isSectionLeader } = useAuth();
   const handleBack = useBackOrHome();
+  const searchParams = useSearchParams();
+  const dateQueryParam = searchParams.get('date')?.trim() ?? null;
+  const initialSelectedDateFromQuery = dateQueryParam && isIsoDateOnly(dateQueryParam)
+    ? dateQueryParam
+    : null;
 
   const [currentMonth, setCurrentMonth] = useState(() => {
+    if (initialSelectedDateFromQuery) {
+      const parsed = new Date(`${initialSelectedDateFromQuery}T12:00:00`);
+      return new Date(parsed.getFullYear(), parsed.getMonth(), 1);
+    }
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>(initialSelectedDateFromQuery);
   const [showEventForm, setShowEventForm] = useState(false);
   const [editRehearsal, setEditRehearsal] = useState<Rehearsal | null>(null);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);

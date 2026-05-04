@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { uploadChatImage } from '@/lib/drive';
 
 // =============================================
 // Type Definitions
@@ -610,23 +611,11 @@ export async function updateMemberRole(roomId: string, memberId: string, role: C
   if (error) throw error;
 }
 
-/** Update room avatar */
+/** Update room avatar — uploads to Google Drive */
 export async function updateRoomAvatar(roomId: string, file: File) {
-  const ext = file.name.split('.').pop() ?? 'jpg';
-  const path = `avatars/${roomId}-${Date.now()}.${ext}`;
-
-  const { error: uploadError } = await supabase.storage
-    .from('chat-images')
-    .upload(path, file, { contentType: file.type, upsert: true });
-
-  if (uploadError) throw uploadError;
-
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from('chat-images').getPublicUrl(path);
-
-  await updateRoom(roomId, { avatar_url: publicUrl });
-  return publicUrl;
+  const { public_url } = await uploadChatImage(roomId, file);
+  await updateRoom(roomId, { avatar_url: public_url });
+  return public_url;
 }
 
 /** Add members to an existing room */
@@ -701,7 +690,7 @@ export async function removePollVote(pollId: string, memberId: string, optionId:
   if (error) throw error;
 }
 
-/** Upload photos to Storage and send them as an image message */
+/** Upload photos to Google Drive and send them as an image message */
 export async function sendImageMessage(
   roomId: string,
   senderId: string,
@@ -712,36 +701,40 @@ export async function sendImageMessage(
   if (files.length > 5) throw new Error('Maximum 5 files allowed');
 
   const uploadPromises = files.map(async (file) => {
-    const ext = file.name.split('.').pop() ?? 'jpg';
-    const path = `chat/${roomId}/${senderId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from('chat-images')
-      .upload(path, file, { contentType: file.type, upsert: false });
-
-    if (uploadError) throw uploadError;
-
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from('chat-images').getPublicUrl(path);
-
-    return { url: publicUrl, path };
+    const result = await uploadChatImage(roomId, file);
+    return {
+      url: result.public_url,
+      web_view_link: result.web_view_link,
+      web_content_link: result.web_content_link,
+      drive_file_id: result.file_id,
+    };
   });
 
   const uploadedFiles = await Promise.all(uploadPromises);
 
-  // If single file, maintain backward compatibility format, otherwise use urls array
-  const metadataJson = uploadedFiles.length === 1 
-    ? { url: uploadedFiles[0].url, path: uploadedFiles[0].path }
-    : { urls: uploadedFiles.map(f => f.url), paths: uploadedFiles.map(f => f.path) };
+  // Single file: backward-compatible format; multiple: use arrays
+  const metadataJson =
+    uploadedFiles.length === 1
+      ? {
+          url: uploadedFiles[0].url,
+          web_view_link: uploadedFiles[0].web_view_link,
+          drive_file_id: uploadedFiles[0].drive_file_id,
+        }
+      : {
+          urls: uploadedFiles.map((f) => f.url),
+          web_view_links: uploadedFiles.map((f) => f.web_view_link),
+          drive_file_ids: uploadedFiles.map((f) => f.drive_file_id),
+        };
 
-  // Insert message record
   return sendMessage(roomId, senderId, '', {
     messageType: 'image',
     replyToId: options?.replyToId ?? null,
     metadataJson,
   });
 }
+
+/** Alias used in ChatRoom.tsx — same behaviour as sendImageMessage */
+export const sendMultiImageMessage = sendImageMessage;
 
 // =============================================
 // Phase 3: Gallery & Starred Messages

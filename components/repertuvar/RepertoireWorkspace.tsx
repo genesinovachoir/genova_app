@@ -99,7 +99,7 @@ const FLOATING_BAR_EDGE_GAP = 8;
 const FLOATING_BAR_SETTLE_DURATION = 520;
 const PINCH_ZOOM_ACTIVATION_DELTA_PX = 18;
 const RECENT_ANNOTATION_COLORS_STORAGE_KEY = 'genova:repertoire:recent-annotation-colors';
-const MAX_RECENT_ANNOTATION_COLORS = 5;
+const MAX_RECENT_ANNOTATION_COLORS = 12;
 
 interface FloatingBarPosition {
   x: number;
@@ -165,6 +165,81 @@ const TOOL_CYCLE: Array<{
 ];
 
 const COLOR_OPTIONS = ANNOTATION_COLOR_PRESETS;
+type PaletteColorOption = { color: AnnotationColor; label: string };
+
+function hslToHex(hue: number, saturation: number, lightness: number): `#${string}` {
+  const h = ((hue % 360) + 360) % 360;
+  const s = clampNumber(saturation, 0, 100) / 100;
+  const l = clampNumber(lightness, 0, 100) / 100;
+
+  const chroma = (1 - Math.abs(2 * l - 1)) * s;
+  const huePrime = h / 60;
+  const x = chroma * (1 - Math.abs((huePrime % 2) - 1));
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if (huePrime >= 0 && huePrime < 1) {
+    r = chroma;
+    g = x;
+  } else if (huePrime < 2) {
+    r = x;
+    g = chroma;
+  } else if (huePrime < 3) {
+    g = chroma;
+    b = x;
+  } else if (huePrime < 4) {
+    g = x;
+    b = chroma;
+  } else if (huePrime < 5) {
+    r = x;
+    b = chroma;
+  } else {
+    r = chroma;
+    b = x;
+  }
+
+  const m = l - chroma / 2;
+  const toHex = (value: number) =>
+    Math.round((value + m) * 255)
+      .toString(16)
+      .padStart(2, '0');
+
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function buildRgbPaletteOptions(): PaletteColorOption[] {
+  const hueSteps = [0, 20, 40, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330];
+  const options: PaletteColorOption[] = [];
+
+  hueSteps.forEach((hue) => {
+    options.push({
+      color: hslToHex(hue, 92, 50),
+      label: `RGB ${hue}°`,
+    });
+  });
+
+  hueSteps.forEach((hue) => {
+    options.push({
+      color: hslToHex(hue, 82, 36),
+      label: `RGB ${hue}° Koyu`,
+    });
+  });
+
+  ['#ffffff', '#d4d4d8', '#a1a1aa', '#52525b', '#18181b'].forEach((color, index) => {
+    options.push({
+      color: color as AnnotationColor,
+      label: `RGB Gri ${index + 1}`,
+    });
+  });
+
+  return options;
+}
+
+const RGB_PALETTE_OPTIONS = buildRgbPaletteOptions();
+const DEFAULT_RECENT_ANNOTATION_COLORS: AnnotationColor[] = COLOR_OPTIONS
+  .map((option) => option.color)
+  .slice(0, MAX_RECENT_ANNOTATION_COLORS);
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -218,15 +293,24 @@ function normalizeRecentAnnotationColors(colors: unknown): AnnotationColor[] {
 
 function getStoredRecentAnnotationColors(): AnnotationColor[] {
   if (typeof window === 'undefined') {
-    return [];
+    return [...DEFAULT_RECENT_ANNOTATION_COLORS];
   }
 
   try {
-    return normalizeRecentAnnotationColors(
+    const storedColors = normalizeRecentAnnotationColors(
       JSON.parse(window.localStorage.getItem(RECENT_ANNOTATION_COLORS_STORAGE_KEY) ?? '[]'),
     );
+
+    if (storedColors.length === 0) {
+      return [...DEFAULT_RECENT_ANNOTATION_COLORS];
+    }
+
+    return normalizeRecentAnnotationColors([
+      ...storedColors,
+      ...DEFAULT_RECENT_ANNOTATION_COLORS,
+    ]);
   } catch {
-    return [];
+    return [...DEFAULT_RECENT_ANNOTATION_COLORS];
   }
 }
 
@@ -2536,7 +2620,10 @@ export function RepertoireWorkspace({
     );
   }
 
-  function renderColorButton({ color, label }: (typeof COLOR_OPTIONS)[number]) {
+  function renderColorButton(
+    { color, label }: PaletteColorOption,
+    swatchSizeClassName = 'h-5 w-5',
+  ) {
     const selected = activeColor === color;
     const resolvedColor = resolveAnnotationColor(color);
 
@@ -2550,7 +2637,7 @@ export function RepertoireWorkspace({
         }}
         title={label}
         aria-label={label}
-        className={`h-5 w-5 rounded-full border transition-transform active:scale-90 ${
+        className={`${swatchSizeClassName} rounded-full border transition-transform active:scale-90 ${
           selected
             ? 'border-[var(--color-accent)] ring-2 ring-[var(--color-accent)]/25'
             : 'border-white/20 hover:border-[var(--color-border-strong)]'
@@ -2582,14 +2669,14 @@ export function RepertoireWorkspace({
           />
 
           {isColorPaletteOpen && (
-            <div className="absolute left-0 top-full z-[120] mt-2 w-[168px] rounded-[10px] border border-[var(--color-border-strong)] bg-[var(--color-surface-solid)]/98 p-2 shadow-[0_18px_48px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+            <div className="absolute left-0 top-full z-[120] mt-2 w-[208px] rounded-[10px] border border-[var(--color-border-strong)] bg-[var(--color-surface-solid)]/98 p-2 shadow-[0_18px_48px_rgba(0,0,0,0.45)] backdrop-blur-xl">
               {recentColorOptions.length > 0 && (
                 <>
                   <p className="mb-1 text-[0.5rem] font-bold uppercase tracking-[0.16em] text-[var(--color-text-low)]">
                     Son
                   </p>
                   <div className="mb-2 flex flex-wrap gap-1.5">
-                    {recentColorOptions.map(renderColorButton)}
+                    {recentColorOptions.map((opt) => renderColorButton(opt))}
                   </div>
                 </>
               )}
@@ -2597,15 +2684,26 @@ export function RepertoireWorkspace({
               <p className="mb-1 text-[0.5rem] font-bold uppercase tracking-[0.16em] text-[var(--color-text-low)]">
                 Palet
               </p>
-              <div className="flex flex-wrap gap-1.5">
-                {COLOR_OPTIONS.map(renderColorButton)}
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {COLOR_OPTIONS.map((opt) => renderColorButton(opt))}
+              </div>
+
+              <p className="mb-1 text-[0.5rem] font-bold uppercase tracking-[0.16em] text-[var(--color-text-low)]">
+                RGB
+              </p>
+              <div className="grid grid-cols-8 gap-1">
+                {RGB_PALETTE_OPTIONS.map((option) => (
+                  <div key={option.color}>
+                    {renderColorButton(option, 'h-4 w-4')}
+                  </div>
+                ))}
               </div>
             </div>
           )}
         </div>
 
         <div className="hidden min-w-0 flex-wrap items-center gap-1 min-[420px]:flex">
-          {recentColorOptions.slice(0, 3).map(renderColorButton)}
+          {recentColorOptions.slice(0, 5).map((option) => renderColorButton(option))}
         </div>
 
         <span className="mx-0.5 hidden h-4 w-px shrink-0 bg-[var(--color-border)] min-[380px]:block" />

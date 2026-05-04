@@ -64,7 +64,7 @@ export function StarredMessagesPanel({ roomId, onGoToMessage }: StarredMessagesP
   return (
     <div className="flex flex-col gap-3 p-4">
       {messages.map((msg) => {
-        const senderName = msg.choir_members?.first_name || 'Bilinmeyen';
+        const senderName = msg.sender?.first_name || 'Bilinmeyen';
         const dateStr = new Date(msg.created_at).toLocaleDateString('tr-TR', {
           day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
         });

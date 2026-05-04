@@ -254,6 +254,37 @@ export async function listDriveFolder(folderId: string) {
   }>('list_files', { folder_id: folderId });
 }
 
+// =============================================
+// CHAT GÖRSEL YÜKLEME
+// =============================================
+
+export interface ChatImageUploadResult {
+  file_id: string;
+  web_view_link: string;
+  web_content_link: string;
+  public_url: string;
+}
+
+/**
+ * Chat içindeki bir görseli Google Drive'a yükler.
+ * Root/Chat/[room_id]/ klasörüne kaydeder ve herkese açık erişim verir.
+ */
+export async function uploadChatImage(
+  roomId: string,
+  file: File
+): Promise<ChatImageUploadResult> {
+  const arrayBuffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  const base64 = btoa(String.fromCharCode(...bytes));
+
+  return callDrive<ChatImageUploadResult>('upload_chat_image', {
+    room_id: roomId,
+    file_name: `${Date.now()}_${file.name}`,
+    mime_type: file.type || 'application/octet-stream',
+    file_data_base64: base64,
+  });
+}
+
 /**
  * Drive dosya bilgisini getir
  */

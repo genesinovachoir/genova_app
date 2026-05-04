@@ -67,7 +67,6 @@ export function ImageGalleryViewer({
   const currentUrl = imageUrls[0] || '';
 
   const senderName = currentMessage?.sender?.first_name 
-    || currentMessage?.choir_members?.first_name 
     || 'Bilinmeyen Kullanıcı';
     
   const dateStr = currentMessage 

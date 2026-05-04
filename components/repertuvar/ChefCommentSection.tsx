@@ -13,6 +13,7 @@ import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ToastProvider';
 import { useProtectedDriveFileUrl } from '@/hooks/useProtectedDriveFileUrl';
 import type { PreviewVoiceGroup, VoiceGroup } from '@/lib/repertuvar/annotation-types';
+import fixWebmDuration from 'fix-webm-duration';
 
 interface ChefCommentSectionProps {
   songId: string;
@@ -207,6 +208,7 @@ export function ChefCommentSection({
   const recorderChunksRef = useRef<Blob[]>([]);
   const recorderStreamRef = useRef<MediaStream | null>(null);
   const recorderTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingStartedAtRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const commentsQuery = useQuery({
@@ -288,6 +290,7 @@ export function ChefCommentSection({
       clearInterval(recorderTimerRef.current);
       recorderTimerRef.current = null;
     }
+    recordingStartedAtRef.current = null;
     recorderStreamRef.current?.getTracks().forEach((track) => track.stop());
     recorderStreamRef.current = null;
   }
@@ -316,6 +319,7 @@ export function ChefCommentSection({
       recorderRef.current = recorder;
       setRecordingSeconds(0);
       setRecording(true);
+      recordingStartedAtRef.current = Date.now();
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -327,26 +331,40 @@ export function ChefCommentSection({
         setAudioError('Ses kaydı başlatılamadı.');
       };
 
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         const chunks = recorderChunksRef.current;
         const recordedType = recorder.mimeType || 'audio/webm';
-        const blob = new Blob(chunks, { type: recordedType });
+        const rawBlob = new Blob(chunks, { type: recordedType });
         recorderChunksRef.current = [];
+        const elapsedMs = Math.max(
+          1,
+          (recordingStartedAtRef.current ? Date.now() - recordingStartedAtRef.current : 0) || recordingSeconds * 1000,
+        );
+        recordingStartedAtRef.current = null;
         stopRecordingResources();
         setRecording(false);
 
-        if (!blob.size) {
+        if (!rawBlob.size) {
           setAudioError('Ses kaydı boş olduğu için kaydedilemedi.');
           return;
         }
-        if (blob.size > MAX_COMMENT_AUDIO_BYTES) {
-          setAudioError('Ses kaydı 20MB sınırını aşıyor.');
-          return;
-        }
 
-        const fileName = `sef-notu-${Date.now()}.${fileExtensionForMimeType(recordedType)}`;
-        const recordedFile = new File([blob], fileName, { type: recordedType });
-        setSelectedAudioFile(recordedFile);
+        try {
+          const normalizedBlob = recordedType.includes('webm')
+            ? await fixWebmDuration(rawBlob, elapsedMs, { logger: false })
+            : rawBlob;
+          const finalMimeType = normalizedBlob.type || recordedType;
+          if (normalizedBlob.size > MAX_COMMENT_AUDIO_BYTES) {
+            setAudioError('Ses kaydı 20MB sınırını aşıyor.');
+            return;
+          }
+
+          const fileName = `sef-notu-${Date.now()}.${fileExtensionForMimeType(finalMimeType)}`;
+          const recordedFile = new File([normalizedBlob], fileName, { type: finalMimeType });
+          setSelectedAudioFile(recordedFile);
+        } catch {
+          setAudioError('Kayıt dosyası hazırlanırken hata oluştu.');
+        }
       };
 
       recorder.start(250);
