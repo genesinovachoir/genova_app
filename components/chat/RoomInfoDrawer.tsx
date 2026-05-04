@@ -34,6 +34,7 @@ import { StarredMessagesPanel } from './StarredMessagesPanel';
 import { MemberActionSheet } from './MemberActionSheet';
 import { LinksPanel } from './LinksPanel';
 import { FilesPanel } from './FilesPanel';
+import { getDriveImageUrl } from '@/lib/drive';
 
 interface RoomInfoDrawerProps {
   roomId: string;
@@ -257,7 +258,7 @@ export function RoomInfoDrawer({
                   />
                   {room.avatar_url ? (
                     <img
-                      src={room.avatar_url}
+                      src={getDriveImageUrl(room.avatar_url)}
                       alt={room.name}
                       className={`h-full w-full rounded-full object-cover ${isAdmin && !isDm ? 'group-hover:opacity-60 transition-opacity' : ''}`}
                     />

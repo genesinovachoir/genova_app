@@ -78,15 +78,17 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   if (!session) return null;
 
   const isProfilePage = pathname.startsWith('/profil');
+  const isChatPage = pathname.startsWith('/chat');
+  const showFadeOverlays = showNavigation && !isProfilePage && !isChatPage;
 
   return (
     <>
-      {showNavigation && !isProfilePage && <div className="fade-overlay fade-overlay-top" />}
+      {showFadeOverlays && <div className="fade-overlay fade-overlay-top" />}
       {showNavigation && !isProfilePage && <TopBar />}
       {children}
       <FloatingMiniPlayer hasBottomNav={showNavigation} />
       {showNavigation && <BottomNav />}
-      {showNavigation && <div className="fade-overlay fade-overlay-bottom" />}
+      {showFadeOverlays && <div className="fade-overlay fade-overlay-bottom" />}
       <ProfileChangeRequestNotifier />
       <NotificationPrompt />
     </>

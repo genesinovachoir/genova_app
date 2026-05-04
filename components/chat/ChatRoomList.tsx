@@ -17,6 +17,7 @@ import {
   setRoomNotifications,
   type ChatRoom,
 } from '@/lib/chat';
+import { getDriveImageUrl } from '@/lib/drive';
 import { RoomListContextMenu } from './RoomListContextMenu';
 
 function formatRelativeTime(dateStr: string): string {
@@ -358,7 +359,7 @@ export function ChatRoomList() {
                   <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)]">
                     {room.avatar_url ? (
                       <img
-                        src={room.avatar_url}
+                        src={getDriveImageUrl(room.avatar_url)}
                         alt={displayName}
                         className="h-full w-full rounded-full object-cover"
                       />

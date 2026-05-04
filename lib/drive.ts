@@ -338,6 +338,19 @@ export async function uploadChatImage(
 }
 
 /**
+ * Google Drive uc?id= formatındaki URL'leri img taglerinde 403 yememesi için
+ * lh3.googleusercontent.com/d/ formatına çevirir.
+ */
+export function getDriveImageUrl(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  const match = url.match(/drive\.google\.com\/uc\?id=([a-zA-Z0-9_-]+)/);
+  if (match && match[1]) {
+    return `https://lh3.googleusercontent.com/d/${match[1]}`;
+  }
+  return url;
+}
+
+/**
  * Drive dosya bilgisini getir
  */
 export async function getDriveFile(fileId: string) {
