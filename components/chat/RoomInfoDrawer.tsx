@@ -165,24 +165,26 @@ export function RoomInfoDrawer({
   if (!room) return null;
 
   return (
+    <>
     <AnimatePresence>
       {isRoomInfoOpen && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[150] bg-black/30 backdrop-blur-sm"
-            onClick={() => setRoomInfoOpen(false)}
-          />
+        <motion.div
+          key="room-info-backdrop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[150] bg-black/30 backdrop-blur-sm"
+          onClick={() => setRoomInfoOpen(false)}
+        />
+      )}
+      {isRoomInfoOpen && (
 
-          {/* Drawer */}
-          <motion.div
-            initial={{ x: '100%' }}
-            animate={{ x: 0 }}
-            exit={{ x: '100%' }}
-            transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+        <motion.div
+          key="room-info-drawer"
+          initial={{ x: '100%' }}
+          animate={{ x: 0 }}
+          exit={{ x: '100%' }}
+          transition={{ type: 'spring', damping: 28, stiffness: 300 }}
             className="fixed right-0 top-0 z-[151] flex h-full w-[85%] max-w-sm flex-col bg-[var(--color-background)]"
           >
             {/* Header */}
@@ -498,35 +500,35 @@ export function RoomInfoDrawer({
               </div>
             )}
           </motion.div>
-        </>
-      )}
-      
-      {selectedMember && (
-        <MemberActionSheet
-          isOpen={!!selectedMember}
-          member={selectedMember}
-          onClose={() => setSelectedMember(null)}
-          onMakeAdmin={async () => {
-            if (!member?.id) return;
-            try {
-              await updateMemberRole(roomId, selectedMember.member_id, 'admin');
-              onMembersChange(roomMembers.map(m => m.id === selectedMember.id ? { ...m, role: 'admin' } : m));
-            } catch (err) {
-              console.error('Failed to make admin:', err);
-            }
-          }}
-          onRemoveAdmin={async () => {
-            if (!member?.id) return;
-            try {
-              await updateMemberRole(roomId, selectedMember.member_id, 'member');
-              onMembersChange(roomMembers.map(m => m.id === selectedMember.id ? { ...m, role: 'member' } : m));
-            } catch (err) {
-              console.error('Failed to remove admin:', err);
-            }
-          }}
-          onRemoveMember={() => void handleRemoveMember(selectedMember.member_id)}
-        />
       )}
     </AnimatePresence>
+      
+    {selectedMember && (
+      <MemberActionSheet
+        isOpen={!!selectedMember}
+        member={selectedMember}
+        onClose={() => setSelectedMember(null)}
+        onMakeAdmin={async () => {
+          if (!member?.id) return;
+          try {
+            await updateMemberRole(roomId, selectedMember.member_id, 'admin');
+            onMembersChange(roomMembers.map(m => m.id === selectedMember.id ? { ...m, role: 'admin' } : m));
+          } catch (err) {
+            console.error('Failed to make admin:', err);
+          }
+        }}
+        onRemoveAdmin={async () => {
+          if (!member?.id) return;
+          try {
+            await updateMemberRole(roomId, selectedMember.member_id, 'member');
+            onMembersChange(roomMembers.map(m => m.id === selectedMember.id ? { ...m, role: 'member' } : m));
+          } catch (err) {
+            console.error('Failed to remove admin:', err);
+          }
+        }}
+        onRemoveMember={() => void handleRemoveMember(selectedMember.member_id)}
+      />
+    )}
+    </>
   );
 }

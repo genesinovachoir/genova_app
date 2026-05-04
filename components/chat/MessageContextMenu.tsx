@@ -131,28 +131,29 @@ export function MessageContextMenu({
   return (
     <AnimatePresence>
       {isOpen && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            className="fixed inset-0 z-[200] bg-black/20 backdrop-blur-[2px]"
-          />
+        <motion.div
+          key="context-menu-backdrop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          className="fixed inset-0 z-[200] bg-black/20 backdrop-blur-[2px]"
+        />
+      )}
+      {isOpen && (
 
-          {/* Menu */}
-          <motion.div
-            ref={menuRef}
-            initial={{ opacity: 0, scale: 0.8, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.8, y: 10 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 400 }}
-            className="fixed z-[201] w-[260px] overflow-hidden rounded-2xl bg-[var(--color-background)] shadow-2xl"
-            style={{
-              ...getMenuStyle(),
-              border: '1px solid var(--color-border)',
-            }}
+        <motion.div
+          key="context-menu-content"
+          ref={menuRef}
+          initial={{ opacity: 0, scale: 0.8, y: 10 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.8, y: 10 }}
+          transition={{ type: 'spring', damping: 25, stiffness: 400 }}
+          className="fixed z-[201] w-[260px] overflow-hidden rounded-2xl bg-[var(--color-background)] shadow-2xl"
+          style={{
+            ...getMenuStyle(),
+            border: '1px solid var(--color-border)',
+          }}
           >
             {/* Quick Emoji Row */}
             <div className="flex items-center justify-around border-b border-[var(--color-border)] px-3 py-2.5">
@@ -218,8 +219,7 @@ export function MessageContextMenu({
                 />
               )}
             </div>
-          </motion.div>
-        </>
+        </motion.div>
       )}
     </AnimatePresence>
   );

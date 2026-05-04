@@ -608,8 +608,8 @@ Deno.serve(async (req) => {
         const rootFolderId = Deno.env.get('GOOGLE_DRIVE_ROOT_FOLDER_ID');
         if (!rootFolderId) throw new Error('GOOGLE_DRIVE_ROOT_FOLDER_ID eksik');
 
-        const chatFolderId = await ensureFolderExists(token, rootFolderId, 'Chat');
-        const roomFolderId = await ensureFolderExists(token, chatFolderId, room_id);
+        const chatFolderId = await findOrCreateFolder(token, 'Chat', rootFolderId);
+        const roomFolderId = await findOrCreateFolder(token, room_id, chatFolderId);
 
         const mimeType = typeof mime_type === 'string' && mime_type.length > 0
           ? mime_type
