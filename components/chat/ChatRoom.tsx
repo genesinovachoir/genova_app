@@ -10,7 +10,7 @@ import { useChatRealtime } from '@/hooks/useChatRealtime';
 import {
   fetchMessages,
   sendMessage,
-  sendImageMessage,
+  sendMultiImageMessage,
   markRoomAsRead,
   fetchRoomMembers,
   fetchReactionsForMessages,
@@ -20,6 +20,9 @@ import {
   deleteMessage,
   deleteMessageForMe,
   createPollMessage,
+  starMessage,
+  unstarMessage,
+  fetchStarredMessages,
 } from '@/lib/chat';
 import type { ChatMessage, ChatRoomMember } from '@/lib/chat';
 import { MessageBubble } from './MessageBubble';
@@ -28,6 +31,7 @@ import { MessageContextMenu } from './MessageContextMenu';
 import { RoomInfoDrawer } from './RoomInfoDrawer';
 import { CreatePollModal } from './CreatePollModal';
 import { StickerPicker } from './StickerPicker';
+import { ImageGalleryViewer } from './ImageGalleryViewer';
 import { MessageInfoModal } from './MessageInfoModal';
 
 interface ChatRoomProps {
@@ -44,7 +48,12 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
   const [roomMembers, setRoomMembers] = useState<ChatRoomMember[]>([]);
   const [isPollModalOpen, setIsPollModalOpen] = useState(false);
   const [isStickerOpen, setIsStickerOpen] = useState(false);
-  const [infoMessageId, setInfoMessageId] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<ChatMessage | null>(null);
+
+  // Gallery state
+  const [galleryImages, setGalleryImages] = useState<ChatMessage[]>([]);
+  const [galleryIndex, setGalleryIndex] = useState<number>(0);
+  const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialLoad = useRef(true);
@@ -81,15 +90,19 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         ]);
         const reversedMsgs = msgs.reverse();
 
-        // Fetch reactions for all loaded messages
         const msgIds = reversedMsgs.map((m) => m.id);
-        const reactionsMap = await fetchReactionsForMessages(msgIds);
+        const [reactionsMap, starredData] = await Promise.all([
+          fetchReactionsForMessages(msgIds),
+          fetchStarredMessages(member.id, roomId)
+        ]);
+        
         const msgsWithReactions = reversedMsgs.map((m) => ({
           ...m,
           reactions: reactionsMap[m.id] ?? [],
         }));
 
         store.setMessages(roomId, msgsWithReactions);
+        store.setStarredMessageIds(starredData.map((m: any) => m.id));
         setRoomMembers(members);
         setHasMore(msgs.length >= 40);
         await markRoomAsRead(roomId, member.id);
@@ -250,10 +263,13 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
 
   // Image upload handler
   const handleImageSelect = useCallback(
-    async (file: File) => {
-      if (!member?.id) return;
+    async (files: File[]) => {
+      if (!member?.id || files.length === 0) return;
       const replyTo = useChatStore.getState().replyingTo;
       const tempId = `temp-${Date.now()}`;
+      
+      const objectUrls = files.map(f => URL.createObjectURL(f));
+      
       // Optimistic UI: show a placeholder bubble immediately
       const opt: ChatMessage = {
         id: tempId,
@@ -275,7 +291,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
                 : null,
             }
           : null,
-        metadata_json: { url: URL.createObjectURL(file) },
+        metadata_json: { urls: objectUrls },
         is_edited: false,
         is_deleted: false,
         created_at: new Date().toISOString(),
@@ -290,7 +306,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
       store.addMessage(roomId, opt);
       store.setReplyingTo(null);
       try {
-        const real = await sendImageMessage(roomId, member.id, file, {
+        const real = await sendMultiImageMessage(roomId, member.id, files, {
           replyToId: replyTo?.id ?? null,
         });
         useChatStore.getState().updateMessage(roomId, tempId, {
@@ -298,49 +314,24 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
           metadata_json: real.metadata_json,
           created_at: real.created_at,
         });
+        
+        // Revoke object urls to free memory
+        objectUrls.forEach(url => window.URL.revokeObjectURL(url));
       } catch (err) {
-        console.error('Image upload failed:', err);
-        useChatStore.getState().updateMessage(roomId, tempId, {
-          metadata_json: { _failed: true },
-        });
+        console.error('Failed to send images:', err);
+        useChatStore.getState().removeOptimisticMessage(roomId, tempId);
       }
     },
     [member, roomId]
   );
 
-  // Context menu handlers
-  const handleLongPress = useCallback(
-    (msg: ChatMessage, position: { x: number; y: number }) => {
-      openContextMenu(msg, position);
-    },
-    [openContextMenu]
-  );
-
-  const handleReply = useCallback(
-    (msg: ChatMessage) => {
-      setReplyingTo(msg);
-    },
-    [setReplyingTo]
-  );
-
-  const handleCopy = useCallback((msg: ChatMessage) => {
+  const handleCopyMessage = useCallback((msg: ChatMessage) => {
     if (msg.content) {
       void navigator.clipboard.writeText(msg.content);
     }
   }, []);
 
-  const handleInfo = useCallback((msg: ChatMessage) => {
-    setInfoMessageId(msg.id);
-  }, []);
-
-  const handleEdit = useCallback(
-    (msg: ChatMessage) => {
-      setEditingMessage(msg);
-    },
-    [setEditingMessage]
-  );
-
-  const handleDelete = useCallback(
+  const handleDeleteMessage = useCallback(
     async (msg: ChatMessage, type: 'me' | 'everyone') => {
       const confirmText = type === 'me' 
         ? 'Bu mesajı kendinizden silmek istediğinize emin misiniz?' 
@@ -358,7 +349,6 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
           });
         } else if (type === 'me' && member?.id) {
           await deleteMessageForMe(msg.id, member.id);
-          // Add to local state metadata so it hides immediately
           const currentMetadata = msg.metadata_json || {};
           const deletedFor = Array.isArray(currentMetadata.deleted_for) ? [...currentMetadata.deleted_for] : [];
           deletedFor.push(member.id);
@@ -376,22 +366,25 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
     [roomId, member?.id]
   );
 
-  const handleReact = useCallback(
-    async (msg: ChatMessage, emoji: string) => {
+  const handleReactionToggle = useCallback(
+    async (messageId: string, emoji: string) => {
       if (!member?.id) return;
-      const existing = msg.reactions?.find(
+      const msg = messages.find((m) => m.id === messageId);
+      if (!msg) return;
+
+      const userReacted = msg.reactions?.some(
         (r) => r.member_id === member.id && r.emoji === emoji
       );
+
       try {
-        if (existing) {
-          await removeReaction(msg.id, member.id, emoji);
-          store.removeReactionFromMessage(roomId, msg.id, existing.id);
+        if (userReacted) {
+          await removeReaction(messageId, member.id, emoji);
+          store.removeReactionFromMessage(roomId, messageId, msg.reactions?.find(r => r.member_id === member.id && r.emoji === emoji)?.id ?? '');
         } else {
-          await addReaction(msg.id, member.id, emoji);
-          // Optimistic: add a temporary reaction
-          store.addReactionToMessage(roomId, msg.id, {
+          await addReaction(messageId, member.id, emoji);
+          store.addReactionToMessage(roomId, messageId, {
             id: `temp-${Date.now()}`,
-            message_id: msg.id,
+            message_id: messageId,
             member_id: member.id,
             emoji,
             created_at: new Date().toISOString(),
@@ -406,16 +399,48 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         console.error('Reaction failed:', err);
       }
     },
-    [member, roomId]
+    [member?.id, messages, roomId]
   );
 
-  const handleReactionToggle = useCallback(
-    (messageId: string, emoji: string) => {
-      const msg = messages.find((m) => m.id === messageId);
-      if (msg) void handleReact(msg, emoji);
-    },
-    [messages, handleReact]
-  );
+  const handleToggleStar = useCallback(async (msg: ChatMessage) => {
+    if (!member?.id) return;
+    const isStarred = store.starredMessageIds.includes(msg.id);
+    if (isStarred) {
+      await unstarMessage(msg.id, member.id);
+      store.removeStarredMessageId(msg.id);
+    } else {
+      await starMessage(msg.id, member.id);
+      store.addStarredMessageId(msg.id);
+    }
+  }, [member?.id, store]);
+
+  const handleImageClick = useCallback((msg: ChatMessage, imageIndex: number) => {
+    const images = messages.filter(m => m.message_type === 'image');
+    
+    const flattened: ChatMessage[] = [];
+    images.forEach(im => {
+      const meta = im.metadata_json as any;
+      if (meta?.urls && Array.isArray(meta.urls)) {
+        meta.urls.forEach((url: string, idx: number) => {
+          flattened.push({ ...im, metadata_json: { url, originalIndex: idx } });
+        });
+      } else if (meta?.url) {
+        flattened.push(im);
+      }
+    });
+
+    let foundIndex = 0;
+    const targetUrl = Array.isArray((msg.metadata_json as any)?.urls) 
+      ? (msg.metadata_json as any).urls[imageIndex] 
+      : (msg.metadata_json as any)?.url;
+      
+    const idx = flattened.findIndex(f => (f.metadata_json as any)?.url === targetUrl);
+    if (idx !== -1) foundIndex = idx;
+    
+    setGalleryImages(flattened);
+    setGalleryIndex(foundIndex);
+    setIsGalleryOpen(true);
+  }, [messages]);
 
   // Grouped messages by date
   const grouped = useMemo(() => {
@@ -463,16 +488,6 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
     }
     return room?.name ?? 'Sohbet';
   }, [room, roomMembers, member?.id]);
-
-  const visibleMessages = useMemo(() => {
-    return messages.filter(msg => {
-      const deletedFor = msg.metadata_json?.deleted_for;
-      if (Array.isArray(deletedFor) && member?.id && deletedFor.includes(member.id)) {
-        return false;
-      }
-      return true;
-    });
-  }, [messages, member?.id]);
 
   return (
     <div className="flex h-[100dvh] flex-col bg-[var(--color-background)]">
@@ -549,9 +564,10 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
                         !isOwn && prev?.sender_id !== msg.sender_id
                       }
                       currentMemberId={member?.id ?? ''}
-                      onLongPress={handleLongPress}
+                      onLongPress={(m, pos) => store.openContextMenu(m, pos)}
                       onReactionToggle={handleReactionToggle}
-                      onReply={handleReply}
+                      onReply={(m) => store.setReplyingTo(m)}
+                      onImageClick={handleImageClick}
                     />
                   );
                 })}
@@ -606,24 +622,45 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         message={contextMenuMessage}
         isOwn={contextMenuMessage?.sender_id === member?.id}
         position={contextMenuPosition}
-        onClose={closeContextMenu}
-        onReply={handleReply}
-        onReact={handleReact}
-        onEdit={handleEdit}
-        onDelete={handleDelete}
-        onCopy={handleCopy}
-        onInfo={handleInfo}
+        isStarred={!!contextMenuMessage && store.starredMessageIds.includes(contextMenuMessage.id)}
+        onClose={store.closeContextMenu}
+        onReply={(m) => store.setReplyingTo(m)}
+        onReact={handleReactionToggle}
+        onEdit={(m) => store.setEditingMessage(m)}
+        onDelete={handleDeleteMessage}
+        onCopy={handleCopyMessage}
+        onInfo={(m) => setInfoMessage(m)}
+        onToggleStar={handleToggleStar}
       />
 
       {/* Message Info Modal */}
       <AnimatePresence>
-        {infoMessageId && (
+        {infoMessage && (
           <MessageInfoModal
-            messageId={infoMessageId}
-            onClose={() => setInfoMessageId(null)}
+            messageId={infoMessage.id}
+            onClose={() => setInfoMessage(null)}
           />
         )}
       </AnimatePresence>
+
+      {/* Gallery Viewer */}
+      {isGalleryOpen && (
+        <ImageGalleryViewer
+          images={galleryImages}
+          initialIndex={galleryIndex}
+          onClose={() => setIsGalleryOpen(false)}
+          onGoToMessage={(messageId) => {
+            const el = document.getElementById(`message-${messageId}`);
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              el.classList.add('ring-4', 'ring-[var(--color-accent)]', 'bg-[var(--color-accent-soft)]', 'transition-all', 'duration-500');
+              setTimeout(() => {
+                el.classList.remove('ring-4', 'ring-[var(--color-accent)]', 'bg-[var(--color-accent-soft)]');
+              }, 2000);
+            }
+          }}
+        />
+      )}
 
       {/* Room Info Drawer */}
       <RoomInfoDrawer

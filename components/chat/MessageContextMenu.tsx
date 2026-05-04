@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Reply, Copy, Pencil, Trash2, X, Info } from 'lucide-react';
+import { Reply, Copy, Pencil, Trash2, X, Info, Star, StarOff } from 'lucide-react';
 import type { ChatMessage } from '@/lib/chat';
 
 const QUICK_EMOJIS = ['❤️', '😂', '😮', '😢', '🔥', '👍'];
@@ -11,6 +11,7 @@ interface MessageContextMenuProps {
   message: ChatMessage | null;
   isOwn: boolean;
   position: { x: number; y: number } | null;
+  isStarred?: boolean;
   onClose: () => void;
   onReply: (message: ChatMessage) => void;
   onReact: (message: ChatMessage, emoji: string) => void;
@@ -18,12 +19,14 @@ interface MessageContextMenuProps {
   onDelete: (message: ChatMessage, type: 'me' | 'everyone') => void;
   onCopy: (message: ChatMessage) => void;
   onInfo: (message: ChatMessage) => void;
+  onToggleStar?: (message: ChatMessage) => void;
 }
 
 export function MessageContextMenu({
   message,
   isOwn,
   position,
+  isStarred,
   onClose,
   onReply,
   onReact,
@@ -76,7 +79,7 @@ export function MessageContextMenu({
   );
 
   const handleAction = useCallback(
-    (action: 'reply' | 'copy' | 'edit' | 'delete_me' | 'delete_everyone' | 'info') => {
+    (action: 'reply' | 'copy' | 'edit' | 'delete_me' | 'delete_everyone' | 'info' | 'star') => {
       if (!message) return;
       switch (action) {
         case 'reply':
@@ -97,10 +100,13 @@ export function MessageContextMenu({
         case 'info':
           onInfo(message);
           break;
+        case 'star':
+          onToggleStar?.(message);
+          break;
       }
       onClose();
     },
-    [message, onReply, onCopy, onEdit, onDelete, onClose]
+    [message, onReply, onCopy, onEdit, onDelete, onInfo, onToggleStar, onClose]
   );
 
   const isUnderOneHour = message ? (new Date().getTime() - new Date(message.created_at).getTime() < 60 * 60 * 1000) : false;
@@ -167,6 +173,11 @@ export function MessageContextMenu({
                 icon={Reply}
                 label="Yanıtla"
                 onClick={() => handleAction('reply')}
+              />
+              <ContextMenuItem
+                icon={isStarred ? StarOff : Star}
+                label={isStarred ? "Yıldızı Kaldır" : "Yıldızla"}
+                onClick={() => handleAction('star')}
               />
               {isOwn && (
                 <ContextMenuItem

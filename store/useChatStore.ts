@@ -10,6 +10,7 @@ interface ChatState {
   // Realtime state
   typingUsers: Record<string, string[]>; // roomId → member_id[]
   onlineUsers: string[]; // member_ids currently online
+  starredMessageIds: string[]; // Currently starred message IDs
 
   // UI state
   replyingTo: ChatMessage | null;
@@ -32,6 +33,9 @@ interface ChatState {
 
   setTypingUsers: (roomId: string, userIds: string[]) => void;
   setOnlineUsers: (userIds: string[]) => void;
+  setStarredMessageIds: (ids: string[]) => void;
+  addStarredMessageId: (id: string) => void;
+  removeStarredMessageId: (id: string) => void;
 
   setReplyingTo: (message: ChatMessage | null) => void;
   setEditingMessage: (message: ChatMessage | null) => void;
@@ -60,6 +64,7 @@ const initialState = {
   messagesByRoom: {},
   typingUsers: {},
   onlineUsers: [],
+  starredMessageIds: [],
   replyingTo: null,
   editingMessage: null,
   contextMenuMessage: null,
@@ -150,6 +155,10 @@ export const useChatStore = create<ChatState>((set) => ({
     })),
 
   setOnlineUsers: (onlineUsers) => set({ onlineUsers }),
+  
+  setStarredMessageIds: (ids) => set({ starredMessageIds: ids }),
+  addStarredMessageId: (id) => set((state) => ({ starredMessageIds: [...state.starredMessageIds, id] })),
+  removeStarredMessageId: (id) => set((state) => ({ starredMessageIds: state.starredMessageIds.filter(v => v !== id) })),
 
   setReplyingTo: (replyingTo) => set({ replyingTo }),
   setEditingMessage: (editingMessage) => set({ editingMessage }),

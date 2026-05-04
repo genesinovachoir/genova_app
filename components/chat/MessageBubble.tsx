@@ -15,6 +15,7 @@ interface MessageBubbleProps {
   onLongPress?: (message: ChatMessage, position: { x: number; y: number }) => void;
   onReactionToggle?: (messageId: string, emoji: string) => void;
   onReply?: (message: ChatMessage) => void;
+  onImageClick?: (message: ChatMessage, imageIndex: number) => void;
 }
 
 function formatMessageTime(dateStr: string): string {
@@ -49,6 +50,7 @@ export function MessageBubble({
   onLongPress,
   onReactionToggle,
   onReply,
+  onImageClick,
 }: MessageBubbleProps) {
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
@@ -133,6 +135,44 @@ export function MessageBubble({
     return () => window.removeEventListener('scrollToMessage', handleScrollToMessage);
   }, [message.id]);
 
+  const [isRevealed, setIsRevealed] = useState(false);
+  useEffect(() => {
+    if (message.message_type === 'image') {
+      const revealed = localStorage.getItem(`revealed-${message.id}`);
+      if (revealed === 'true') {
+        setIsRevealed(true);
+      }
+    }
+  }, [message.id, message.message_type]);
+
+  const handleImageClick = async (index: number, url: string) => {
+    if (!isRevealed) {
+      localStorage.setItem(`revealed-${message.id}`, 'true');
+      setIsRevealed(true);
+      
+      // Trigger download on first reveal
+      try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const objectUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = `photo-${message.id}-${index}.jpg`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(objectUrl);
+      } catch (err) {
+        console.error('Auto download failed', err);
+      }
+    }
+    
+    // Defer the image click to allow state to settle
+    setTimeout(() => {
+      onImageClick?.(message, index);
+    }, 50);
+  };
+
   if (message.is_deleted) {
     return (
       <div id={`message-${message.id}`} className={`flex ${isOwn ? 'justify-end' : 'justify-start'} px-3 py-1 opacity-60`}>
@@ -203,24 +243,13 @@ export function MessageBubble({
       <div className={`max-w-[75%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
         {/* Bubble */}
         <div
-          className={`relative transition-all duration-300 ${
-            isHighlighted ? 'ring-2 ring-[var(--color-accent)] ring-offset-2 ring-offset-[var(--color-background)] scale-[1.02]' : ''
-          } ${
-            message.message_type === 'sticker'
-              ? ''
-              : `rounded-2xl px-3 py-2 ${
-                  isOwn
-                    ? 'rounded-br-md bg-[var(--color-accent)] text-white'
-                    : 'rounded-bl-md bg-[var(--color-surface)] text-[var(--color-text-high)]'
-                }`
-          }`}
-          style={{
-            boxShadow: message.message_type === 'sticker'
-              ? 'none'
+          className={`relative max-w-[85%] rounded-3xl ${
+            message.message_type === 'image' || message.message_type === 'sticker'
+              ? 'bg-transparent shadow-none'
               : isOwn
-                ? '0 1px 3px rgba(0,0,0,0.15)'
-                : '0 1px 2px rgba(0,0,0,0.06)',
-          }}
+                ? 'rounded-tr-sm bg-gradient-to-br from-[var(--color-accent)] to-[var(--color-accent-dark)] text-white shadow-md'
+                : 'rounded-tl-sm border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-high)] shadow-sm'
+          } ${isHighlighted ? 'ring-4 ring-[var(--color-accent)] scale-[1.02] transition-all duration-300' : ''}`}
         >
           {/* Sender name (group chats) */}
           {!isOwn && showSender && (
@@ -273,21 +302,66 @@ export function MessageBubble({
             </p>
           )}
 
-          {message.message_type === 'image' && (
-            <div className="overflow-hidden rounded-xl">
-              <img
-                src={(message.metadata_json?.url as string) ?? ''}
-                alt="Paylaşılan resim"
-                className="max-h-64 w-full object-cover"
-                loading="lazy"
-              />
-              {message.content && (
-                <p className="mt-1 whitespace-pre-wrap break-words text-[0.88rem] leading-snug">
-                  {message.content}
-                </p>
-              )}
-            </div>
-          )}
+          {message.message_type === 'image' && (() => {
+            const meta = message.metadata_json as Record<string, unknown> | undefined;
+            let urls: string[] = [];
+            if (meta) {
+              if (Array.isArray(meta.urls)) urls = meta.urls as string[];
+              else if (typeof meta.url === 'string') urls = [meta.url];
+            }
+            if (urls.length === 0) return null;
+
+            // Compute grid layout
+            let gridClass = 'grid-cols-1';
+            if (urls.length === 2 || urls.length === 4) gridClass = 'grid-cols-2';
+            else if (urls.length >= 3) gridClass = 'grid-cols-3';
+
+            return (
+              <div className="overflow-hidden rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] shadow-sm p-1">
+                <div className={`grid gap-1 ${gridClass}`}>
+                  {urls.slice(0, 5).map((url, i) => {
+                    const isLastAndMore = urls.length > 5 && i === 4;
+                    // For 3 items, make first item take 2 rows/cols if we wanted, but let's keep it simple: grid-cols-3 and items span 1.
+                    // To be more WhatsApp like, 3 items is usually 1 top full width, 2 bottom.
+                    // We'll use a standard aspect-square for all for simplicity unless it's a single image.
+                    const aspectClass = urls.length === 1 ? 'aspect-auto max-h-64' : 'aspect-square';
+                    
+                    return (
+                      <div 
+                        key={i} 
+                        className={`relative cursor-pointer overflow-hidden rounded-lg ${aspectClass} ${urls.length === 3 && i === 0 ? 'col-span-3' : ''}`} 
+                        onClick={() => handleImageClick(i, url)}
+                      >
+                        <img
+                          src={url}
+                          alt="Paylaşılan resim"
+                          className={`h-full w-full object-cover transition-all duration-300 ${!isRevealed ? 'blur-xl scale-110' : ''}`}
+                          loading="lazy"
+                        />
+                        {!isRevealed && (urls.length === 1 || i === 0) && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                            <span className="bg-black/50 text-white text-[10px] sm:text-xs px-2 py-1 rounded-full font-medium backdrop-blur-md">
+                              Görmek için dokun
+                            </span>
+                          </div>
+                        )}
+                        {isLastAndMore && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                            <span className="text-white font-bold text-xl">+{urls.length - 4}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {message.content && (
+                  <p className={`mt-2 mb-1 px-2 whitespace-pre-wrap break-words text-[0.88rem] leading-snug ${isOwn ? 'text-[var(--color-text-high)]' : 'text-[var(--color-text-high)]'}`}>
+                    {message.content}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
 
           {message.message_type === 'sticker' && (
             <div className="flex items-center justify-center py-1">

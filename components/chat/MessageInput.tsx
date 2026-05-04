@@ -20,7 +20,7 @@ interface MessageInputProps {
   disabled?: boolean;
   editingMessage?: ChatMessage | null;
   onCancelEdit?: () => void;
-  onImageSelect?: (file: File) => void;
+  onImageSelect?: (files: File[]) => void;
   onPollCreate?: () => void;
   onStickerOpen?: () => void;
 }
@@ -116,9 +116,14 @@ export function MessageInput({
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && onImageSelect) {
-      onImageSelect(file);
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0 && onImageSelect) {
+      if (files.length > 5) {
+        alert('En fazla 5 fotoğraf seçebilirsiniz.');
+        onImageSelect(files.slice(0, 5));
+      } else {
+        onImageSelect(files);
+      }
       setShowExtras(false);
     }
     // Reset input so same file can be selected again
@@ -298,10 +303,11 @@ export function MessageInput({
 
       {/* Hidden file input for photos */}
       <input
-        ref={fileInputRef}
         type="file"
         accept="image/*"
+        multiple
         className="hidden"
+        ref={fileInputRef}
         onChange={handleFileSelect}
       />
     </div>

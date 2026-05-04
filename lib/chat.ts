@@ -599,6 +599,36 @@ export async function leaveRoom(roomId: string, memberId: string) {
   return removeMember(roomId, memberId);
 }
 
+/** Update a member's role (admin only) */
+export async function updateMemberRole(roomId: string, memberId: string, role: ChatRoomMemberRole) {
+  const { error } = await supabase
+    .from('chat_room_members')
+    .update({ role })
+    .eq('room_id', roomId)
+    .eq('member_id', memberId);
+
+  if (error) throw error;
+}
+
+/** Update room avatar */
+export async function updateRoomAvatar(roomId: string, file: File) {
+  const ext = file.name.split('.').pop() ?? 'jpg';
+  const path = `avatars/${roomId}-${Date.now()}.${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('chat-images')
+    .upload(path, file, { contentType: file.type, upsert: true });
+
+  if (uploadError) throw uploadError;
+
+  const {
+    data: { publicUrl },
+  } = supabase.storage.from('chat-images').getPublicUrl(path);
+
+  await updateRoom(roomId, { avatar_url: publicUrl });
+  return publicUrl;
+}
+
 /** Add members to an existing room */
 export async function addMembersToRoom(roomId: string, memberIds: string[]) {
   const rows = memberIds.map((id) => ({
@@ -671,34 +701,105 @@ export async function removePollVote(pollId: string, memberId: string, optionId:
   if (error) throw error;
 }
 
-/** Upload a photo to Storage and send it as an image message */
+/** Upload photos to Storage and send them as an image message */
 export async function sendImageMessage(
   roomId: string,
   senderId: string,
-  file: File,
+  files: File[],
   options?: { replyToId?: string | null }
 ) {
-  // 1. Upload to Supabase Storage
-  const ext = file.name.split('.').pop() ?? 'jpg';
-  const path = `chat/${roomId}/${senderId}/${Date.now()}.${ext}`;
+  if (!files || files.length === 0) throw new Error('No files provided');
+  if (files.length > 5) throw new Error('Maximum 5 files allowed');
 
-  const { error: uploadError } = await supabase.storage
-    .from('chat-images')
-    .upload(path, file, { contentType: file.type, upsert: false });
+  const uploadPromises = files.map(async (file) => {
+    const ext = file.name.split('.').pop() ?? 'jpg';
+    const path = `chat/${roomId}/${senderId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
 
-  if (uploadError) throw uploadError;
+    const { error: uploadError } = await supabase.storage
+      .from('chat-images')
+      .upload(path, file, { contentType: file.type, upsert: false });
 
-  // 2. Get public URL
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from('chat-images').getPublicUrl(path);
+    if (uploadError) throw uploadError;
 
-  // 3. Insert message record
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from('chat-images').getPublicUrl(path);
+
+    return { url: publicUrl, path };
+  });
+
+  const uploadedFiles = await Promise.all(uploadPromises);
+
+  // If single file, maintain backward compatibility format, otherwise use urls array
+  const metadataJson = uploadedFiles.length === 1 
+    ? { url: uploadedFiles[0].url, path: uploadedFiles[0].path }
+    : { urls: uploadedFiles.map(f => f.url), paths: uploadedFiles.map(f => f.path) };
+
+  // Insert message record
   return sendMessage(roomId, senderId, '', {
     messageType: 'image',
     replyToId: options?.replyToId ?? null,
-    metadataJson: { url: publicUrl, path },
+    metadataJson,
   });
+}
+
+// =============================================
+// Phase 3: Gallery & Starred Messages
+// =============================================
+
+export async function starMessage(messageId: string, memberId: string) {
+  const { error } = await supabase
+    .from('chat_starred_messages')
+    .insert({ message_id: messageId, member_id: memberId });
+  if (error) throw error;
+}
+
+export async function unstarMessage(messageId: string, memberId: string) {
+  const { error } = await supabase
+    .from('chat_starred_messages')
+    .delete()
+    .eq('message_id', messageId)
+    .eq('member_id', memberId);
+  if (error) throw error;
+}
+
+export async function fetchStarredMessages(memberId: string, roomId?: string) {
+  let query = supabase
+    .from('chat_starred_messages')
+    .select(`
+      message_id,
+      chat_messages!inner (
+        id, content, message_type, metadata_json, created_at, room_id,
+        choir_members!chat_messages_sender_id_fkey (first_name, last_name, photo_url)
+      )
+    `)
+    .eq('member_id', memberId)
+    .order('created_at', { ascending: false });
+
+  if (roomId) {
+    query = query.eq('chat_messages.room_id', roomId);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  return data.map(d => d.chat_messages) as unknown as ChatMessage[];
+}
+
+export async function fetchRoomMedia(roomId: string) {
+  const { data, error } = await supabase
+    .from('chat_messages')
+    .select(`
+      id, content, message_type, metadata_json, created_at,
+      choir_members!chat_messages_sender_id_fkey (first_name, last_name, photo_url)
+    `)
+    .eq('room_id', roomId)
+    .eq('message_type', 'image')
+    .eq('is_deleted', false)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return data as unknown as ChatMessage[];
 }
 
 /** Fetch poll data with votes */

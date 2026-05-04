@@ -23,10 +23,15 @@ import {
   removeMember,
   leaveRoom,
   fetchRoomMembers,
+  updateRoomAvatar,
+  updateMemberRole,
 } from '@/lib/chat';
 import type { ChatRoomMember } from '@/lib/chat';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
+import { MediaGalleryGrid } from './MediaGalleryGrid';
+import { StarredMessagesPanel } from './StarredMessagesPanel';
+import { MemberActionSheet } from './MemberActionSheet';
 
 interface RoomInfoDrawerProps {
   roomId: string;
@@ -50,6 +55,10 @@ export function RoomInfoDrawer({
   const [isEditingDesc, setIsEditingDesc] = useState(false);
   const [editDesc, setEditDesc] = useState('');
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+
+  const [activeTab, setActiveTab] = useState<'members' | 'media' | 'starred'>('members');
+  const [selectedMember, setSelectedMember] = useState<ChatRoomMember | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const myMembership = useMemo(
     () => roomMembers.find((m) => m.member_id === member?.id),
@@ -192,16 +201,38 @@ export function RoomInfoDrawer({
               </button>
             </div>
 
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto">
-              {/* Room Avatar & Name */}
+            <div className="flex-1 flex flex-col overflow-hidden">
               <div className="flex flex-col items-center border-b border-[var(--color-border)] px-4 py-6">
-                <div className="mb-3 flex h-20 w-20 items-center justify-center rounded-full bg-[var(--color-accent-soft)]">
+                <div 
+                  className="relative mx-auto mb-4 flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--color-surface)] shadow-md group"
+                  onClick={() => {
+                    if (isAdmin && !isDm) {
+                      fileInputRef.current?.click();
+                    }
+                  }}
+                >
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    className="hidden" 
+                    ref={fileInputRef} 
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (file && member?.id && isAdmin) {
+                        try {
+                          await updateRoomAvatar(roomId, member.id, file);
+                        } catch (err) {
+                          console.error('Failed to update avatar', err);
+                        }
+                      }
+                      if (e.target) e.target.value = '';
+                    }} 
+                  />
                   {room.avatar_url ? (
                     <img
                       src={room.avatar_url}
                       alt={room.name}
-                      className="h-full w-full rounded-full object-cover"
+                      className={`h-full w-full rounded-full object-cover ${isAdmin && !isDm ? 'group-hover:opacity-60 transition-opacity' : ''}`}
                     />
                   ) : (
                     <Users
@@ -209,9 +240,13 @@ export function RoomInfoDrawer({
                       className="text-[var(--color-accent)]"
                     />
                   )}
+                  {isAdmin && !isDm && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Pencil size={20} className="text-white" />
+                    </div>
+                  )}
                 </div>
 
-                {/* Name (editable for admins) */}
                 {isEditingName ? (
                   <div className="flex w-full items-center gap-2">
                     <input
@@ -249,148 +284,6 @@ export function RoomInfoDrawer({
                     )}
                   </div>
                 )}
-
-                {/* Description */}
-                {isEditingDesc ? (
-                  <div className="mt-2 flex w-full items-start gap-2">
-                    <textarea
-                      value={editDesc}
-                      onChange={(e) => setEditDesc(e.target.value)}
-                      rows={2}
-                      className="flex-1 resize-none rounded-lg border border-[var(--color-accent)] bg-[var(--color-surface)] px-3 py-1.5 text-center text-sm text-[var(--color-text-medium)] focus:outline-none"
-                      autoFocus
-                    />
-                    <button
-                      onClick={() => void handleSaveDesc()}
-                      className="mt-1 rounded-full bg-[var(--color-accent)] p-1.5 text-white"
-                    >
-                      <Check size={16} />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="mt-1 flex items-center gap-1.5">
-                    <p className="text-center text-sm text-[var(--color-text-low)]">
-                      {room.description || (isAdmin && !isDm ? 'Açıklama ekle...' : '')}
-                    </p>
-                    {isAdmin && !isDm && (
-                      <button
-                        onClick={() => {
-                          setEditDesc(room.description ?? '');
-                          setIsEditingDesc(true);
-                        }}
-                        className="rounded-full p-0.5 text-[var(--color-text-low)] hover:bg-[var(--color-surface)]"
-                      >
-                        <Pencil size={12} />
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                <p className="mt-2 text-xs text-[var(--color-text-low)]">
-                  {roomMembers.length} üye
-                </p>
-              </div>
-
-              {/* Notifications */}
-              <div className="border-b border-[var(--color-border)] px-4 py-3">
-                <button
-                  onClick={handleToggleNotifications}
-                  className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-[var(--color-surface)]"
-                >
-                  {notificationsEnabled ? (
-                    <Bell
-                      size={20}
-                      className="text-[var(--color-accent)]"
-                    />
-                  ) : (
-                    <BellOff
-                      size={20}
-                      className="text-[var(--color-text-low)]"
-                    />
-                  )}
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-[var(--color-text-high)]">
-                      Bildirimler
-                    </p>
-                    <p className="text-xs text-[var(--color-text-low)]">
-                      {notificationsEnabled ? 'Açık' : 'Kapalı'}
-                    </p>
-                  </div>
-                  <div
-                    className={`h-6 w-11 rounded-full p-0.5 transition-colors ${
-                      notificationsEnabled
-                        ? 'bg-[var(--color-accent)]'
-                        : 'bg-[var(--color-border)]'
-                    }`}
-                  >
-                    <motion.div
-                      layout
-                      className="h-5 w-5 rounded-full bg-white shadow-sm"
-                      animate={{
-                        x: notificationsEnabled ? 20 : 0,
-                      }}
-                      transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                    />
-                  </div>
-                </button>
-              </div>
-
-              {/* Members */}
-              <div className="px-4 py-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <h4 className="text-sm font-semibold text-[var(--color-text-medium)]">
-                    Üyeler ({roomMembers.length})
-                  </h4>
-                  {isAdmin && !isDm && (
-                    <button className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]">
-                      <UserPlus size={14} />
-                      Ekle
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex flex-col gap-0.5">
-                  {sortedMembers.map((rm) => {
-                    const cm = rm.choir_members;
-                    if (!cm) return null;
-                    const isOnline = onlineUsers.includes(rm.member_id);
-                    const isSelf = rm.member_id === member?.id;
-
-                    return (
-                      <div
-                        key={rm.id}
-                        className="flex items-center gap-3 rounded-xl px-2 py-2"
-                      >
-                        {/* Avatar */}
-                        <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface)]">
-                          {cm.photo_url ? (
-                            <img
-                              src={cm.photo_url}
-                              alt={cm.first_name}
-                              className="h-full w-full rounded-full object-cover"
-                            />
-                          ) : (
-                            <span className="text-sm font-bold text-[var(--color-accent)]">
-                              {cm.first_name[0]}
-                            </span>
-                          )}
-                          {isOnline && (
-                            <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-[var(--color-background)] bg-green-500" />
-                          )}
-                        </div>
-
-                        {/* Info */}
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <p className="truncate text-sm font-medium text-[var(--color-text-high)]">
-                              {cm.first_name} {cm.last_name}
-                              {isSelf && (
-                                <span className="text-[var(--color-text-low)]">
-                                  {' '}
-                                  (sen)
-                                </span>
-                              )}
-                            </p>
                             {rm.role === 'admin' && (
                               <Crown
                                 size={12}
@@ -435,6 +328,33 @@ export function RoomInfoDrawer({
             )}
           </motion.div>
         </>
+      )}
+      
+      {selectedMember && (
+        <MemberActionSheet
+          isOpen={!!selectedMember}
+          member={selectedMember}
+          onClose={() => setSelectedMember(null)}
+          onMakeAdmin={async () => {
+            if (!member?.id) return;
+            try {
+              await updateMemberRole(roomId, member.id, selectedMember.member_id, 'admin');
+              onMembersChange(roomMembers.map(m => m.id === selectedMember.id ? { ...m, role: 'admin' } : m));
+            } catch (err) {
+              console.error('Failed to make admin:', err);
+            }
+          }}
+          onRemoveAdmin={async () => {
+            if (!member?.id) return;
+            try {
+              await updateMemberRole(roomId, member.id, selectedMember.member_id, 'member');
+              onMembersChange(roomMembers.map(m => m.id === selectedMember.id ? { ...m, role: 'member' } : m));
+            } catch (err) {
+              console.error('Failed to remove admin:', err);
+            }
+          }}
+          onRemoveMember={() => void handleRemoveMember(selectedMember.member_id)}
+        />
       )}
     </AnimatePresence>
   );
