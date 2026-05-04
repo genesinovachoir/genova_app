@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { motion } from 'motion/react';
 import { Megaphone, CalendarDays, FileText, Music4, AlertTriangle, Info, Heart, Loader2, ArrowLeft, Plus } from 'lucide-react';
 import Link from 'next/link';
@@ -11,6 +10,7 @@ import { supabase, type Announcement } from '@/lib/supabase';
 import { useAuth } from '@/components/AuthProvider';
 import { CreateAnnouncementModal } from '@/components/CreateAnnouncementModal';
 import { useToast } from '@/components/ToastProvider';
+import { useBackOrHome } from '@/hooks/useBackOrHome';
 
 const ICON_MAP: Record<string, React.ElementType> = {
   megaphone: Megaphone,
@@ -49,10 +49,10 @@ async function fetchAnnouncements() {
 
 export default function AnnouncementsPage() {
   const { isAdmin, isSectionLeader } = useAuth();
-  const router = useRouter();
   const queryClient = useQueryClient();
   const toast = useToast();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const handleBack = useBackOrHome();
 
   const announcementsQuery = useQuery({
     queryKey: ANNOUNCEMENTS_QUERY_KEY,
@@ -66,7 +66,7 @@ export default function AnnouncementsPage() {
       <motion.section initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className="flex h-full flex-col">
         <div className="mb-6 flex flex-col gap-4">
           <button
-            onClick={() => router.back()}
+            onClick={handleBack}
             className="inline-flex w-fit items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] active:scale-95"
           >
             <ArrowLeft size={18} />

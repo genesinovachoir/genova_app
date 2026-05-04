@@ -19,7 +19,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const pathname = usePathname();
   const queryClient = useQueryClient();
 
-  const mainNavPages = ['/', '/repertuvar', '/odevler', '/profil'];
+  const mainNavPages = ['/', '/repertuvar', '/chat', '/odevler', '/profil'];
   const showNavigation = mainNavPages.includes(pathname);
   const roleScope = getRepertoireRoleScope(isAdmin(), isSectionLeader());
 

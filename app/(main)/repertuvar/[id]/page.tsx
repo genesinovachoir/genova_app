@@ -4,11 +4,11 @@ import { useMemo } from 'react';
 import { motion } from 'motion/react';
 import { use } from 'react';
 import dynamic from 'next/dynamic';
-import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
 import { LottieIcon } from '@/components/LottieIcon';
+import { useBackOrHome } from '@/hooks/useBackOrHome';
 import { createSlugLookup, isUuidLike } from '@/lib/internalPageLinks';
 import {
   getRepertoireCatalogCacheScope,
@@ -42,7 +42,7 @@ const RepertoireWorkspace = dynamic(
 export default function SongDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const identifier = decodeURIComponent(id);
-  const router = useRouter();
+  const handleBack = useBackOrHome();
   const { isAdmin, isSectionLeader, member, isLoading: authLoading } = useAuth();
   const isChef = isAdmin();
   const isLeader = isSectionLeader();
@@ -113,7 +113,7 @@ export default function SongDetailPage({ params }: { params: Promise<{ id: strin
     <main className="min-h-screen bg-[var(--color-background)] pb-[max(2rem,env(safe-area-inset-bottom))]">
       <div className="border-b border-[var(--color-border)] bg-[var(--color-background)]/90 px-5 pb-4 pt-[max(env(safe-area-inset-top),1.25rem)] backdrop-blur-sm">
         <button
-          onClick={() => router.back()}
+          onClick={handleBack}
           className="mb-5 inline-flex items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] active:scale-95"
         >
           <ArrowLeft size={18} />

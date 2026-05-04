@@ -31,6 +31,12 @@ describe('sanitizeRichText', () => {
     expect(sanitizeRichText('')).toBe('<p></p>');
     expect(sanitizeRichText(null)).toBe('<p></p>');
   });
+
+  it('keeps empty paragraphs visible as blank lines', () => {
+    const sanitized = sanitizeRichText('<p>satir 1</p><p></p><p>satir 2</p>');
+
+    expect(sanitized).toBe('<p>satir 1</p><p><br /></p><p>satir 2</p>');
+  });
 });
 
 describe('isRichTextMeaningful', () => {
@@ -47,6 +53,12 @@ describe('stripHtmlTags', () => {
   it('returns simplified plain text from rich html', () => {
     const plainText = stripHtmlTags('<p>Merhaba&nbsp;<strong>dunya</strong><br/>Bugun &amp; yarin</p><p>Not: &#39;deneme&#39;</p>');
 
-    expect(plainText).toBe("Merhaba dunya Bugun & yarin Not: 'deneme'");
+    expect(plainText).toBe("Merhaba dunya\nBugun & yarin\nNot: 'deneme'");
+  });
+
+  it('preserves intentional blank lines', () => {
+    const plainText = stripHtmlTags('<p>satir1</p><p><br /></p><p>satir2</p>');
+
+    expect(plainText).toBe('satir1\n\nsatir2');
   });
 });

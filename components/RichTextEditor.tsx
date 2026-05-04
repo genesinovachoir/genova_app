@@ -5,51 +5,13 @@ import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
-import { markInputRule, markPasteRule } from '@tiptap/core';
+import { Extension, InputRule, markInputRule, markPasteRule } from '@tiptap/core';
 import TiptapBold from '@tiptap/extension-bold';
 import TiptapItalic from '@tiptap/extension-italic';
 import TiptapStrike from '@tiptap/extension-strike';
+import TiptapUnderline from '@tiptap/extension-underline';
 import NextImage from 'next/image';
-
-const CustomBold = TiptapBold.extend({
-  addInputRules() {
-    return [
-      markInputRule({ find: /(?:^|\s)((?:\*)([^*]+)(?:\*))$/u, type: this.type })
-    ];
-  },
-  addPasteRules() {
-    return [
-      markPasteRule({ find: /(?:^|\s)((?:\*)([^*]+)(?:\*))/g, type: this.type })
-    ];
-  }
-});
-
-const CustomItalic = TiptapItalic.extend({
-  addInputRules() {
-    return [
-      markInputRule({ find: /(?:^|\s)((?:_)([^_]+)(?:_))$/u, type: this.type })
-    ];
-  },
-  addPasteRules() {
-    return [
-      markPasteRule({ find: /(?:^|\s)((?:_)([^_]+)(?:_))/g, type: this.type })
-    ];
-  }
-});
-
-const CustomStrike = TiptapStrike.extend({
-  addInputRules() {
-    return [
-      markInputRule({ find: /(?:^|\s)((?:~)([^~]+)(?:~))$/u, type: this.type })
-    ];
-  },
-  addPasteRules() {
-    return [
-      markPasteRule({ find: /(?:^|\s)((?:~)([^~]+)(?:~))/g, type: this.type })
-    ];
-  }
-});
-import { Bold, Italic, Strikethrough, List, ImageIcon, Loader2 } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, List, ImageIcon, Loader2 } from 'lucide-react';
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ToastProvider';
@@ -60,6 +22,132 @@ import {
   getRepertoirePath,
   normalizeInternalPath,
 } from '@/lib/internalPageLinks';
+
+const SINGLE_STAR_BOLD_INPUT_REGEX = /(?:^|\s)(\*(?!\s+\*)((?:[^*]+))\*(?!\s+\*))$/u;
+const SINGLE_STAR_BOLD_PASTE_REGEX = /(?:^|\s)(\*(?!\s+\*)((?:[^*]+))\*(?!\s+\*))/g;
+const SINGLE_UNDERSCORE_ITALIC_INPUT_REGEX = /(?:^|\s)(_(?!\s+_)((?:[^_]+))_(?!\s+_))$/u;
+const SINGLE_UNDERSCORE_ITALIC_PASTE_REGEX = /(?:^|\s)(_(?!\s+_)((?:[^_]+))_(?!\s+_))/g;
+const SINGLE_TILDE_STRIKE_INPUT_REGEX = /(?:^|\s)(~(?!\s+~)((?:[^~]+))~(?!\s+~))$/u;
+const SINGLE_TILDE_STRIKE_PASTE_REGEX = /(?:^|\s)(~(?!\s+~)((?:[^~]+))~(?!\s+~))/g;
+const DOUBLE_UNDERSCORE_UNDERLINE_INPUT_REGEX = /(?:^|\s)(__(?!\s+__)((?:[^_]+))__(?!\s+__))$/u;
+const DOUBLE_UNDERSCORE_UNDERLINE_PASTE_REGEX = /(?:^|\s)(__(?!\s+__)((?:[^_]+))__(?!\s+__))/g;
+
+interface MixedMarkPattern {
+  find: RegExp;
+  marks: Array<'bold' | 'italic' | 'strike' | 'underline'>;
+}
+
+const MIXED_MARK_PATTERNS: MixedMarkPattern[] = [
+  { find: /(?:^|\s)(?:\*_(?!\s+_\*)((?:[^_]+))_\*)$/u, marks: ['bold', 'italic'] },
+  { find: /(?:^|\s)(?:_\*(?!\s+\*_)((?:[^*]+))\*_)$/u, marks: ['bold', 'italic'] },
+  { find: /(?:^|\s)(?:\*~(?!\s+~\*)((?:[^~]+))~\*)$/u, marks: ['bold', 'strike'] },
+  { find: /(?:^|\s)(?:~\*(?!\s+\*~)((?:[^*]+))\*~)$/u, marks: ['bold', 'strike'] },
+  { find: /(?:^|\s)(?:_~(?!\s+~_)((?:[^~]+))~_)$/u, marks: ['italic', 'strike'] },
+  { find: /(?:^|\s)(?:~_(?!\s+_~)((?:[^_]+))_~)$/u, marks: ['italic', 'strike'] },
+  { find: /(?:^|\s)(?:\*__(?!\s+__\*)((?:[^_]+))__\*)$/u, marks: ['bold', 'underline'] },
+  { find: /(?:^|\s)(?:__\*(?!\s+\*__)((?:[^*]+))\*__)$/u, marks: ['bold', 'underline'] },
+  { find: /(?:^|\s)(?:~__(?!\s+__~)((?:[^_]+))__~)$/u, marks: ['strike', 'underline'] },
+  { find: /(?:^|\s)(?:__(?!\s+~__)~((?:[^~]+))~__)$/u, marks: ['strike', 'underline'] },
+];
+
+const MixedMarksShortcut = Extension.create({
+  name: 'mixedMarksShortcut',
+  addInputRules() {
+    const createRule = (pattern: MixedMarkPattern) =>
+      new InputRule({
+        find: pattern.find,
+        handler: ({ state, range, match }) => {
+          const fullMatch = match[0];
+          const captureGroup = match[match.length - 1];
+          if (!captureGroup) return null;
+
+          const startSpaces = fullMatch.search(/\S/);
+          if (startSpaces < 0) return null;
+
+          const textStart = range.from + fullMatch.indexOf(captureGroup);
+          const textEnd = textStart + captureGroup.length;
+          const { tr } = state;
+
+          if (textEnd < range.to) {
+            tr.delete(textEnd, range.to);
+          }
+          if (textStart > range.from) {
+            tr.delete(range.from + startSpaces, textStart);
+          }
+
+          const markFrom = range.from + startSpaces;
+          const markTo = markFrom + captureGroup.length;
+
+          const availableMarks = pattern.marks
+            .map((name) => state.schema.marks[name])
+            .filter((markType): markType is NonNullable<typeof markType> => Boolean(markType));
+
+          if (availableMarks.length !== pattern.marks.length) {
+            return null;
+          }
+
+          for (const markType of availableMarks) {
+            tr.addMark(markFrom, markTo, markType.create());
+            tr.removeStoredMark(markType);
+          }
+        },
+      });
+
+    return MIXED_MARK_PATTERNS.map((pattern) => createRule(pattern));
+  },
+});
+
+const CustomBold = TiptapBold.extend({
+  addInputRules() {
+    return [
+      markInputRule({ find: SINGLE_STAR_BOLD_INPUT_REGEX, type: this.type }),
+    ];
+  },
+  addPasteRules() {
+    return [
+      markPasteRule({ find: SINGLE_STAR_BOLD_PASTE_REGEX, type: this.type }),
+    ];
+  },
+});
+
+const CustomItalic = TiptapItalic.extend({
+  addInputRules() {
+    return [
+      markInputRule({ find: SINGLE_UNDERSCORE_ITALIC_INPUT_REGEX, type: this.type }),
+    ];
+  },
+  addPasteRules() {
+    return [
+      markPasteRule({ find: SINGLE_UNDERSCORE_ITALIC_PASTE_REGEX, type: this.type }),
+    ];
+  },
+});
+
+const CustomStrike = TiptapStrike.extend({
+  addInputRules() {
+    return [
+      markInputRule({ find: SINGLE_TILDE_STRIKE_INPUT_REGEX, type: this.type }),
+    ];
+  },
+  addPasteRules() {
+    return [
+      markPasteRule({ find: SINGLE_TILDE_STRIKE_PASTE_REGEX, type: this.type }),
+    ];
+  },
+});
+
+const CustomUnderline = TiptapUnderline.extend({
+  addInputRules() {
+    return [
+      markInputRule({ find: DOUBLE_UNDERSCORE_UNDERLINE_INPUT_REGEX, type: this.type }),
+    ];
+  },
+  addPasteRules() {
+    return [
+      markPasteRule({ find: DOUBLE_UNDERSCORE_UNDERLINE_PASTE_REGEX, type: this.type }),
+    ];
+  },
+});
 
 interface Props {
   content: string;
@@ -394,9 +482,17 @@ function resolveSlashSuggestions(
   return { contextRoot: rootPath, items };
 }
 
+function isRootLevelSlashToken(token: string): boolean {
+  const lowered = token.trim().toLowerCase();
+  if (!lowered.startsWith('/')) return false;
+  const segments = lowered.split('/').filter(Boolean);
+  return segments.length === 1 && !lowered.endsWith('/');
+}
+
 export function RichTextEditor({
   content,
   onChange,
+  placeholder,
   borderless = false,
 }: Props) {
   const toast = useToast();
@@ -523,10 +619,14 @@ export function RichTextEditor({
         bold: false,
         italic: false,
         strike: false,
+        underline: false,
+        listKeymap: false,
       }),
+      MixedMarksShortcut,
       CustomBold,
       CustomItalic,
       CustomStrike,
+      CustomUnderline,
       Link.configure({
         openOnClick: false,
         autolink: false,
@@ -546,7 +646,7 @@ export function RichTextEditor({
         },
       }),
       Placeholder.configure({
-        placeholder: '',
+        placeholder: placeholder ?? '',
         emptyEditorClass: 'is-editor-empty',
       }),
     ],
@@ -736,7 +836,7 @@ export function RichTextEditor({
     (page: InternalPageOption) => {
       if (!editor || !slashMenu) return;
 
-      if (page.parentPath === null && page.hasChildren) {
+      if (page.parentPath === null && page.hasChildren && !isRootLevelSlashToken(slashMenu.text)) {
         const nextQuery = `${page.path}/`;
         const nextPos = slashMenu.from + nextQuery.length;
         editor
@@ -882,6 +982,13 @@ export function RichTextEditor({
           className={`p-1 rounded-[4px] hover:bg-[var(--color-soft-bg-hover)] transition-colors ${editor.isActive('italic') ? 'bg-[var(--color-soft-bg)] text-[var(--color-accent)]' : 'text-[var(--color-text-medium)]'}`}
         >
           <Italic size={13} strokeWidth={2.5} />
+        </button>
+        <button
+          type="button"
+          onClick={() => editor.chain().focus().toggleUnderline().run()}
+          className={`p-1 rounded-[4px] hover:bg-[var(--color-soft-bg-hover)] transition-colors ${editor.isActive('underline') ? 'bg-[var(--color-soft-bg)] text-[var(--color-accent)]' : 'text-[var(--color-text-medium)]'}`}
+        >
+          <Underline size={13} strokeWidth={2.5} />
         </button>
         <button
           type="button"

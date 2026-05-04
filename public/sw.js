@@ -516,7 +516,9 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
   const targetUrl = event.notification.data?.url || '/';
-  const urlToOpen = new URL(targetUrl, self.location.origin).href;
+  const resolvedUrl = new URL(targetUrl, self.location.origin);
+  resolvedUrl.searchParams.set('fromNotification', '1');
+  const urlToOpen = resolvedUrl.href;
 
   const promiseChain = clients
     .matchAll({ type: 'window', includeUncontrolled: true })

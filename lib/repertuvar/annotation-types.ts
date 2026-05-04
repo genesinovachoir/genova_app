@@ -2,7 +2,7 @@ export const VOICE_GROUPS = ['Soprano', 'Alto', 'Tenor', 'Bass'] as const;
 
 export type VoiceGroup = (typeof VOICE_GROUPS)[number];
 export type PreviewVoiceGroup = VoiceGroup | 'ALL';
-export type AnnotationTool = 'pen' | 'arrow' | 'rectangle' | 'text' | 'eraser' | null;
+export type AnnotationTool = 'pen' | 'highlighter' | 'arrow' | 'rectangle' | 'text' | 'eraser' | null;
 export type LegacyAnnotationColor = 'black' | 'red' | 'white';
 export type HexAnnotationColor = `#${string}`;
 export type AnnotationColor = LegacyAnnotationColor | HexAnnotationColor;
@@ -17,12 +17,18 @@ export interface NormalizedPoint {
 
 export interface AnnotationBase {
   id: string;
-  type: 'pen' | 'arrow' | 'rectangle' | 'text';
+  type: 'pen' | 'highlighter' | 'arrow' | 'rectangle' | 'text';
   color: AnnotationColor;
 }
 
 export interface PenStroke extends AnnotationBase {
   type: 'pen';
+  points: NormalizedPoint[];
+  strokeWidth: number;
+}
+
+export interface HighlighterStroke extends AnnotationBase {
+  type: 'highlighter';
   points: NormalizedPoint[];
   strokeWidth: number;
 }
@@ -48,7 +54,7 @@ export interface TextNote extends AnnotationBase {
   width: number;
 }
 
-export type AnnotationItem = PenStroke | ArrowShape | RectangleShape | TextNote;
+export type AnnotationItem = PenStroke | HighlighterStroke | ArrowShape | RectangleShape | TextNote;
 
 export interface AnnotationContextDescriptor {
   fileId: string;
@@ -62,7 +68,9 @@ export interface LayerVisibility {
 }
 
 export const DEFAULT_ANNOTATION_COLOR: LegacyAnnotationColor = 'red';
+export const DEFAULT_HIGHLIGHTER_COLOR: HexAnnotationColor = '#facc15';
 export const DEFAULT_ANNOTATION_STROKE_WIDTH_PX = 3;
+export const DEFAULT_HIGHLIGHTER_STROKE_WIDTH_PX = 10;
 export const MIN_ANNOTATION_STROKE_WIDTH_PX = 1;
 export const MAX_ANNOTATION_STROKE_WIDTH_PX = 14;
 export const LEGACY_ANNOTATION_COLORS: LegacyAnnotationColor[] = ['black', 'red', 'white'];
@@ -72,6 +80,16 @@ export const ANNOTATION_COLOR_SWATCHES: Record<LegacyAnnotationColor, string> = 
   red: '#ef4444',
   white: '#f8fafc',
 };
+
+export const ANNOTATION_COLOR_PRESETS: Array<{ color: AnnotationColor; label: string }> = [
+  { color: 'black', label: 'Siyah' },
+  { color: 'red', label: 'Kırmızı' },
+  { color: 'white', label: 'Beyaz' },
+  { color: DEFAULT_HIGHLIGHTER_COLOR, label: 'Sarı' },
+  { color: '#22c55e', label: 'Yeşil' },
+  { color: '#38bdf8', label: 'Mavi' },
+  { color: '#f97316', label: 'Turuncu' },
+];
 
 const HEX_ANNOTATION_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 
@@ -195,6 +213,7 @@ export function createAnnotationId(): string {
 export function cloneAnnotationItem(item: AnnotationItem): AnnotationItem {
   switch (item.type) {
     case 'pen':
+    case 'highlighter':
       return {
         ...item,
         points: item.points.map((point) => ({ ...point })),

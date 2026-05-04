@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
@@ -15,6 +14,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from '@/components/AuthProvider';
 import { supabase } from '@/lib/supabase';
+import { useBackOrHome } from '@/hooks/useBackOrHome';
 import {
   loadPerformanceOverview,
   PERFORMANCE_ROOT_QUERY_KEY,
@@ -30,19 +30,6 @@ function formatPercent(value: number | null | undefined) {
   return `%${Math.max(0, Math.min(100, Math.round(value)))}`;
 }
 
-function calculateGeneralScore(
-  attendancePercent: number | null | undefined,
-  homeworkPercent: number | null | undefined,
-  showHomeworkMetrics: boolean,
-) {
-  const attendance = Math.max(0, Math.min(100, attendancePercent ?? 0));
-  if (!showHomeworkMetrics) {
-    return attendance;
-  }
-  const homework = Math.max(0, Math.min(100, homeworkPercent ?? 0));
-  return (attendance + homework * 0.5) / 1.5;
-}
-
 function VoiceGroupStatCard({
   summary,
 }: {
@@ -51,14 +38,13 @@ function VoiceGroupStatCard({
     member_count: number;
     attendance_percent: number;
     homework_percent: number | null;
+    continuity_percent: number | null;
     show_homework_metrics: boolean;
   };
 }) {
-  const generalScore = calculateGeneralScore(
-    summary.attendance_percent,
-    summary.homework_percent,
-    summary.show_homework_metrics,
-  );
+  const continuityPercent = summary.show_homework_metrics
+    ? summary.continuity_percent
+    : summary.attendance_percent;
 
   return (
     <div className="min-w-[140px] flex-1 rounded-[10px] border border-[var(--color-border)] bg-white/[0.03] p-3.5 transition-colors hover:bg-white/[0.05]">
@@ -83,8 +69,8 @@ function VoiceGroupStatCard({
           </div>
         )}
         <div className="flex flex-col">
-          <span className="text-[0.52rem] font-bold uppercase tracking-wider text-[var(--color-text-medium)] opacity-70">SKOR</span>
-          <span className="font-serif text-[0.95rem] text-[var(--color-text-high)]">{formatPercent(generalScore)}</span>
+          <span className="text-[0.52rem] font-bold uppercase tracking-wider text-[var(--color-text-medium)] opacity-70">DEVAM</span>
+          <span className="font-serif text-[0.95rem] text-[var(--color-text-high)]">{formatPercent(continuityPercent)}</span>
         </div>
       </div>
     </div>
@@ -198,11 +184,11 @@ function MemberCard({
 }
 
 export default function KoristlerPage() {
-  const router = useRouter();
   const queryClient = useQueryClient();
   const { member, isAdmin, isSectionLeader } = useAuth();
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
+  const handleBack = useBackOrHome();
 
   const privileged = isAdmin() || isSectionLeader();
 
@@ -278,7 +264,7 @@ export default function KoristlerPage() {
       <main className="page-shell space-y-6 pb-28 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
         <div className="flex items-center justify-between gap-3">
           <button
-            onClick={() => router.back()}
+            onClick={handleBack}
             className="inline-flex items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)]"
           >
             <ArrowLeft size={18} />
@@ -310,7 +296,7 @@ export default function KoristlerPage() {
       >
         <div className="flex items-center justify-between gap-4">
           <button
-            onClick={() => router.back()}
+            onClick={handleBack}
             className="inline-flex items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)]"
           >
             <ArrowLeft size={18} />

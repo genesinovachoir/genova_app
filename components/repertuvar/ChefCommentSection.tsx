@@ -287,7 +287,7 @@ export function ChefCommentSection({
                         <span className="text-[11px] text-[var(--color-text-medium)]">{formatCommentDate(comment.created_at)}</span>
 
                         {canEditComment(comment) || canDeleteComment(comment) ? (
-                          <div className="ml-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                          <div className="ml-1 flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                             {canEditComment(comment) ? (
                               <button
                                 type="button"

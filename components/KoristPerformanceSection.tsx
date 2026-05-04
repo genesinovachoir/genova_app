@@ -21,19 +21,6 @@ function formatPercent(value: number | null | undefined) {
   return `%${Math.max(0, Math.min(100, Math.round(value)))}`;
 }
 
-function calculateGeneralScore(
-  attendancePercent: number | null | undefined,
-  homeworkPercent: number | null | undefined,
-  showHomeworkMetrics: boolean,
-) {
-  const attendance = Math.max(0, Math.min(100, attendancePercent ?? 0));
-  if (!showHomeworkMetrics) {
-    return attendance;
-  }
-  const homework = Math.max(0, Math.min(100, homeworkPercent ?? 0));
-  return (attendance + homework * 0.5) / 1.5;
-}
-
 function VoiceGroupStatCard({
   summary,
 }: {
@@ -42,14 +29,13 @@ function VoiceGroupStatCard({
     member_count: number;
     attendance_percent: number;
     homework_percent: number | null;
+    continuity_percent: number | null;
     show_homework_metrics: boolean;
   };
 }) {
-  const generalScore = calculateGeneralScore(
-    summary.attendance_percent,
-    summary.homework_percent,
-    summary.show_homework_metrics,
-  );
+  const continuityPercent = summary.show_homework_metrics
+    ? summary.continuity_percent
+    : summary.attendance_percent;
 
   return (
     <div className="min-w-[140px] flex-1 rounded-[10px] border border-[var(--color-border)] bg-white/[0.03] p-3.5 transition-colors hover:bg-white/[0.05]">
@@ -74,8 +60,8 @@ function VoiceGroupStatCard({
           </div>
         )}
         <div className="flex flex-col">
-          <span className="text-[0.55rem] font-bold uppercase tracking-wider text-[var(--color-text-medium)] opacity-70">SKOR</span>
-          <span className="font-serif text-[1rem] text-[var(--color-text-high)]">{formatPercent(generalScore)}</span>
+          <span className="text-[0.55rem] font-bold uppercase tracking-wider text-[var(--color-text-medium)] opacity-70">DEVAM</span>
+          <span className="font-serif text-[1rem] text-[var(--color-text-high)]">{formatPercent(continuityPercent)}</span>
         </div>
       </div>
     </div>

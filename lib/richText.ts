@@ -39,7 +39,11 @@ export function sanitizeRichText(html: string | null | undefined): string {
     },
   }).trim();
 
-  return sanitized || '<p></p>';
+  const withVisibleEmptyParagraphs = sanitized
+    .replace(/<p>(?:\s|&nbsp;)*<\/p>/gi, '<p><br /></p>')
+    .replace(/<p>(?:\s|&nbsp;)*(<br\s*\/?>)(?:\s|&nbsp;)*<\/p>/gi, '<p><br /></p>');
+
+  return withVisibleEmptyParagraphs || '<p></p>';
 }
 
 export function isRichTextMeaningful(html: string | null | undefined) {
@@ -63,7 +67,10 @@ export function stripHtmlTags(html: string | null | undefined): string {
 
   return decodeHtmlEntities(withSeparators)
     .replace(/\u00a0/g, ' ')
-    .replace(/\s+/g, ' ')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t\f\v]+/g, ' ')
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 

@@ -34,6 +34,8 @@ type ChoirMemberRoleRow = {
 };
 
 const LEADERSHIP_ROLE_NAMES = new Set(['sef', 'partisyon sefi']);
+const REHEARSAL_CONTINUITY_WEIGHT = 1;
+const HOMEWORK_CONTINUITY_WEIGHT = 0.5;
 
 interface PerformanceMember extends ChoirMember {
   school_name: string | null;
@@ -146,6 +148,13 @@ function formatSearchDate(dateStr: string | null | undefined) {
 function formatMetricPercent(numerator: number, denominator: number) {
   if (denominator <= 0) return 0;
   return Math.max(0, Math.min(100, Math.round((numerator / denominator) * 100)));
+}
+
+function calculateContinuityPercent(attendedRehearsals: number, totalRehearsals: number, approvedAssignments: number, totalAssignments: number) {
+  return formatMetricPercent(
+    attendedRehearsals * REHEARSAL_CONTINUITY_WEIGHT + approvedAssignments * HOMEWORK_CONTINUITY_WEIGHT,
+    totalRehearsals * REHEARSAL_CONTINUITY_WEIGHT + totalAssignments * HOMEWORK_CONTINUITY_WEIGHT,
+  );
 }
 
 function normalizeRoleName(value: string) {
@@ -309,6 +318,7 @@ function buildMemberMetrics(
   submissionRows: AssignmentSubmission[],
   todayKey: string,
   includeHomeworkMetrics: boolean,
+  isLeadershipMember: boolean,
 ): PerformanceMemberMetrics {
   const memberInviteeIds = new Set(
     inviteRows.filter((row) => row.member_id === member.id).map((row) => row.rehearsal_id),
@@ -328,25 +338,27 @@ function buildMemberMetrics(
     }
   }
 
-  let attendedRehearsals = 0;
+  let attendedRehearsals = isLeadershipMember ? relevantRehearsals.length : 0;
   let pendingRehearsals = 0;
   let missedRehearsals = 0;
 
-  for (const rehearsal of relevantRehearsals) {
-    const attendance = attendanceByRehearsal.get(rehearsal.id) ?? null;
-    if (attendance?.status === 'approved') {
-      attendedRehearsals += 1;
-      continue;
-    }
-    if (attendance?.status === 'pending') {
-      pendingRehearsals += 1;
+  if (!isLeadershipMember) {
+    for (const rehearsal of relevantRehearsals) {
+      const attendance = attendanceByRehearsal.get(rehearsal.id) ?? null;
+      if (attendance?.status === 'approved') {
+        attendedRehearsals += 1;
+        continue;
+      }
+      if (attendance?.status === 'pending') {
+        pendingRehearsals += 1;
+        missedRehearsals += 1;
+        continue;
+      }
       missedRehearsals += 1;
-      continue;
     }
-    missedRehearsals += 1;
   }
 
-  const attendancePercent = formatMetricPercent(attendedRehearsals, relevantRehearsals.length);
+  const attendancePercent = isLeadershipMember ? 100 : formatMetricPercent(attendedRehearsals, relevantRehearsals.length);
 
   if (!includeHomeworkMetrics) {
     return {
@@ -404,9 +416,11 @@ function buildMemberMetrics(
   }
 
   const homeworkPercent = formatMetricPercent(approvedAssignments, totalAssignments);
-  const continuityPercent = formatMetricPercent(
-    attendedRehearsals + approvedAssignments,
-    relevantRehearsals.length + totalAssignments,
+  const continuityPercent = calculateContinuityPercent(
+    attendedRehearsals,
+    relevantRehearsals.length,
+    approvedAssignments,
+    totalAssignments,
   );
 
   return {
@@ -626,6 +640,7 @@ function buildScopeSummary(dataset: PerformanceDataset): {
       submissionRows,
       todayKey,
       show_homework_metrics && homeworkEligibleMemberIds.has(member.id),
+      leadershipMemberIds.has(member.id),
     ),
   );
 
@@ -671,9 +686,11 @@ function buildScopeSummary(dataset: PerformanceDataset): {
   summary.attendance_percent = formatMetricPercent(summary.attended_rehearsals, summary.total_rehearsals);
   if (show_homework_metrics) {
     summary.homework_percent = formatMetricPercent(summary.approved_assignments ?? 0, summary.total_assignments ?? 0);
-    summary.continuity_percent = formatMetricPercent(
-      summary.attended_rehearsals + (summary.approved_assignments ?? 0),
-      summary.total_rehearsals + (summary.total_assignments ?? 0),
+    summary.continuity_percent = calculateContinuityPercent(
+      summary.attended_rehearsals,
+      summary.total_rehearsals,
+      summary.approved_assignments ?? 0,
+      summary.total_assignments ?? 0,
     );
   }
 
@@ -718,9 +735,11 @@ function buildScopeSummary(dataset: PerformanceDataset): {
     groupSummary.attendance_percent = formatMetricPercent(groupSummary.attended_rehearsals, groupSummary.total_rehearsals);
     if (show_homework_metrics) {
       groupSummary.homework_percent = formatMetricPercent(groupSummary.approved_assignments ?? 0, groupSummary.total_assignments ?? 0);
-      groupSummary.continuity_percent = formatMetricPercent(
-        groupSummary.attended_rehearsals + (groupSummary.approved_assignments ?? 0),
-        groupSummary.total_rehearsals + (groupSummary.total_assignments ?? 0),
+      groupSummary.continuity_percent = calculateContinuityPercent(
+        groupSummary.attended_rehearsals,
+        groupSummary.total_rehearsals,
+        groupSummary.approved_assignments ?? 0,
+        groupSummary.total_assignments ?? 0,
       );
     }
 
@@ -770,6 +789,7 @@ export async function loadPerformanceMemberDetail(
   }
 
   const todayKey = getTodayKey();
+  const isSelectedMemberLeadership = dataset.leadershipMemberIds.has(targetMemberId);
   const inviteRows = dataset.inviteRows.filter((row) => row.member_id === targetMemberId);
   const memberInviteeIds = new Set(inviteRows.map((row) => row.rehearsal_id));
   const attendanceByRehearsal = new Map<string, Attendance>();
@@ -789,6 +809,8 @@ export async function loadPerformanceMemberDetail(
     if (rehearsal.collect_attendance && isRelevant) {
       if (isFuture) {
         status = 'future';
+      } else if (isSelectedMemberLeadership) {
+        status = 'attended';
       } else if (attendance?.status === 'approved') {
         status = 'attended';
       } else if (attendance?.status === 'pending') {

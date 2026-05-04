@@ -39,6 +39,14 @@ interface SendAssignmentCreatedPushInput {
   targetMemberIds: string[];
 }
 
+interface SendAssignmentSubmittedPushInput {
+  assignmentId: string;
+  assignmentTitle: string;
+  submitterName: string;
+  targetMemberIds: string[];
+  isResubmission?: boolean;
+}
+
 interface SendRepertoireAssignmentPushInput {
   songId: string;
   songTitle: string;
@@ -204,6 +212,23 @@ function buildAssignmentCreatedPayload(input: SendAssignmentCreatedPushInput): P
   };
 }
 
+function buildAssignmentSubmittedPayload(input: SendAssignmentSubmittedPushInput): PushPayload {
+  const assignmentTitle = simplifyNotificationText(input.assignmentTitle, DEFAULT_TITLE_MAX_LENGTH) || 'Ödev';
+  const submitterName = simplifyNotificationText(input.submitterName, 70) || 'Bir korist';
+
+  return {
+    title: input.isResubmission ? 'Ödev Teslimi Güncellendi' : 'Yeni Ödev Teslimi',
+    body: `${submitterName}: ${assignmentTitle}`,
+    url: `/odevler/${input.assignmentId}?aid=${input.assignmentId}`,
+    data: {
+      type: 'assignment_submitted',
+      assignmentId: input.assignmentId,
+      isResubmission: Boolean(input.isResubmission),
+      at: getNotificationTimestampIso(),
+    },
+  };
+}
+
 function buildRepertoireAssignmentPayload(input: SendRepertoireAssignmentPushInput): PushPayload {
   const titleLine = simplifyNotificationText(input.songTitle, DEFAULT_TITLE_MAX_LENGTH) || 'Repertuvar';
   const partLine = simplifyNotificationText(input.partName, 60);
@@ -320,6 +345,10 @@ export async function sendRehearsalCreatedPush(input: SendRehearsalCreatedPushIn
 
 export async function sendAssignmentCreatedPush(input: SendAssignmentCreatedPushInput) {
   return sendPushToMembers(input.targetMemberIds, buildAssignmentCreatedPayload(input));
+}
+
+export async function sendAssignmentSubmittedPush(input: SendAssignmentSubmittedPushInput) {
+  return sendPushToMembers(input.targetMemberIds, buildAssignmentSubmittedPayload(input));
 }
 
 export async function sendRepertoireAssignmentPush(input: SendRepertoireAssignmentPushInput) {

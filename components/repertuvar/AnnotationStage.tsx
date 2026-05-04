@@ -50,10 +50,21 @@ interface PenDraft {
   points: NormalizedPoint[];
 }
 
+interface HighlighterDraft {
+  start: NormalizedPoint;
+  end: NormalizedPoint;
+  lockDirection: { x: number; y: number } | null;
+}
+
 interface ShapeDraft {
   start: NormalizedPoint;
   end: NormalizedPoint;
 }
+
+const HIGHLIGHTER_AXIS_SNAP_DEGREES = 12;
+const HIGHLIGHTER_LOCK_DISTANCE_PX = 14;
+const HIGHLIGHTER_OPACITY_ACTIVE = 0.38;
+const HIGHLIGHTER_OPACITY_INACTIVE = 0.3;
 
 function normalizeStrokeWidth(width: number, strokeWidthPx: number): number {
   return clampAnnotationStrokeWidthPx(strokeWidthPx) / Math.max(width, 1);
@@ -65,6 +76,60 @@ function getTextWidth(width: number): number {
 
 function hasRenderableArea(start: NormalizedPoint, end: NormalizedPoint): boolean {
   return Math.abs(start.x - end.x) > 0.005 || Math.abs(start.y - end.y) > 0.005;
+}
+
+function getHighlighterLockDirection(
+  start: NormalizedPoint,
+  point: NormalizedPoint,
+  width: number,
+  height: number,
+): { x: number; y: number } | null {
+  const startPx = denormalizePoint(start, width, height);
+  const pointPx = denormalizePoint(point, width, height);
+  const dx = pointPx.x - startPx.x;
+  const dy = pointPx.y - startPx.y;
+  const distance = Math.hypot(dx, dy);
+
+  if (distance < HIGHLIGHTER_LOCK_DISTANCE_PX) {
+    return null;
+  }
+
+  const angleFromHorizontal = Math.atan2(Math.abs(dy), Math.abs(dx)) * (180 / Math.PI);
+  const angleFromVertical = Math.atan2(Math.abs(dx), Math.abs(dy)) * (180 / Math.PI);
+
+  if (angleFromHorizontal <= HIGHLIGHTER_AXIS_SNAP_DEGREES) {
+    return { x: 1, y: 0 };
+  }
+
+  if (angleFromVertical <= HIGHLIGHTER_AXIS_SNAP_DEGREES) {
+    return { x: 0, y: 1 };
+  }
+
+  return {
+    x: dx / distance,
+    y: dy / distance,
+  };
+}
+
+function constrainPointToDirection(
+  start: NormalizedPoint,
+  point: NormalizedPoint,
+  direction: { x: number; y: number },
+  width: number,
+  height: number,
+): NormalizedPoint {
+  const startPx = denormalizePoint(start, width, height);
+  const pointPx = denormalizePoint(point, width, height);
+  const dx = pointPx.x - startPx.x;
+  const dy = pointPx.y - startPx.y;
+  const projectedDistance = dx * direction.x + dy * direction.y;
+
+  return clampNormalizedPoint(normalizePoint(
+    startPx.x + direction.x * projectedDistance,
+    startPx.y + direction.y * projectedDistance,
+    width,
+    height,
+  ));
 }
 
 export function AnnotationStage({
@@ -83,6 +148,7 @@ export function AnnotationStage({
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const twoFingerRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [penDraft, setPenDraft] = useState<PenDraft | null>(null);
+  const [highlighterDraft, setHighlighterDraft] = useState<HighlighterDraft | null>(null);
   const [shapeDraft, setShapeDraft] = useState<ShapeDraft | null>(null);
   const [draftTextEditor, setDraftTextEditor] = useState<DraftTextEditor | null>(null);
   const [isTwoFingerGesture, setIsTwoFingerGesture] = useState(false);
@@ -96,6 +162,7 @@ export function AnnotationStage({
   // Cancel any in-progress drawing drafts (used when switching to 2-finger gesture)
   const cancelActiveDrafts = useCallback(() => {
     setPenDraft(null);
+    setHighlighterDraft(null);
     setShapeDraft(null);
   }, []);
 
@@ -213,6 +280,15 @@ export function AnnotationStage({
       return;
     }
 
+    if (activeTool === 'highlighter') {
+      setHighlighterDraft({
+        start: point,
+        end: point,
+        lockDirection: null,
+      });
+      return;
+    }
+
     setShapeDraft({
       start: point,
       end: point,
@@ -275,6 +351,26 @@ export function AnnotationStage({
       });
     }
 
+    if (activeTool === 'highlighter' && highlighterDraft) {
+      setHighlighterDraft((current) => {
+        if (!current) {
+          return current;
+        }
+
+        const lockDirection =
+          current.lockDirection ??
+          getHighlighterLockDirection(current.start, point, width, height);
+
+        return {
+          ...current,
+          end: lockDirection
+            ? constrainPointToDirection(current.start, point, lockDirection, width, height)
+            : point,
+          lockDirection,
+        };
+      });
+    }
+
     if ((activeTool === 'arrow' || activeTool === 'rectangle') && shapeDraft) {
       setShapeDraft((current) => {
         if (!current) {
@@ -322,6 +418,25 @@ export function AnnotationStage({
       }
 
       setPenDraft(null);
+    }
+
+    if (activeTool === 'highlighter' && highlighterDraft) {
+      if (hasRenderableArea(highlighterDraft.start, highlighterDraft.end)) {
+        const strokeWidth = normalizeStrokeWidth(width, activeStrokeWidthPx);
+
+        commitItems([
+          ...activeItems,
+          {
+            id: createAnnotationId(),
+            type: 'highlighter',
+            color: activeColor,
+            points: [highlighterDraft.start, highlighterDraft.end],
+            strokeWidth,
+          },
+        ]);
+      }
+
+      setHighlighterDraft(null);
     }
 
     if ((activeTool === 'arrow' || activeTool === 'rectangle') && shapeDraft) {
@@ -423,7 +538,9 @@ export function AnnotationStage({
       opacity: entry.isActiveLayer ? 1 : 0.82,
     };
 
-    if (entry.item.type === 'pen') {
+    if (entry.item.type === 'pen' || entry.item.type === 'highlighter') {
+      const isHighlighter = entry.item.type === 'highlighter';
+
       return (
         <Line
           key={entry.item.id}
@@ -433,11 +550,16 @@ export function AnnotationStage({
             return [pixelPoint.x, pixelPoint.y];
           })}
           stroke={color}
-          strokeWidth={Math.max(entry.item.strokeWidth * width, 1)}
+          strokeWidth={Math.max(entry.item.strokeWidth * width, isHighlighter ? 6 : 1)}
+          opacity={isHighlighter
+            ? entry.isActiveLayer
+              ? HIGHLIGHTER_OPACITY_ACTIVE
+              : HIGHLIGHTER_OPACITY_INACTIVE
+            : commonProps.opacity}
           lineCap="round"
           lineJoin="round"
-          tension={0.2}
-          hitStrokeWidth={18}
+          tension={isHighlighter ? 0 : 0.2}
+          hitStrokeWidth={isHighlighter ? 24 : 18}
         />
       );
     }
@@ -561,6 +683,23 @@ export function AnnotationStage({
               lineCap="round"
               lineJoin="round"
               tension={0.2}
+            />
+          )}
+
+          {highlighterDraft && (
+            <Line
+              points={[
+                denormalizePoint(highlighterDraft.start, width, height).x,
+                denormalizePoint(highlighterDraft.start, width, height).y,
+                denormalizePoint(highlighterDraft.end, width, height).x,
+                denormalizePoint(highlighterDraft.end, width, height).y,
+              ]}
+              stroke={draftColor}
+              strokeWidth={Math.max(draftStrokeWidthPx, 6)}
+              opacity={HIGHLIGHTER_OPACITY_ACTIVE}
+              lineCap="round"
+              lineJoin="round"
+              tension={0}
             />
           )}
 

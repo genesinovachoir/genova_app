@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { ArrowLeft, Loader2, Megaphone, CalendarDays, FileText, Music4, AlertTriangle, Info, Heart, Edit2, Trash2 } from 'lucide-react';
-import { useRouter, useParams } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { motion } from 'motion/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -12,6 +12,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/ToastProvider';
 import { sanitizeRichText } from '@/lib/richText';
 import { supabase, type Announcement } from '@/lib/supabase';
+import { useBackOrHome } from '@/hooks/useBackOrHome';
 
 const ICON_MAP: Record<string, React.ElementType> = {
   megaphone: Megaphone,
@@ -77,13 +78,13 @@ async function fetchAnnouncement(id: string) {
 
 export default function AnnouncementPage() {
   const params = useParams();
-  const router = useRouter();
   const queryClient = useQueryClient();
   const toast = useToast();
   const id = params?.id as string;
   const { isAdmin, isSectionLeader, member } = useAuth();
   const [editingAnn, setEditingAnn] = useState<Announcement | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const handleBack = useBackOrHome();
 
   const announcementQuery = useQuery({
     queryKey: ['announcement', id],
@@ -100,7 +101,7 @@ export default function AnnouncementPage() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['announcements'] });
       toast.success('Duyuru silindi.');
-      router.back();
+      handleBack();
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Duyuru silinemedi.', 'Silme başarısız');
@@ -118,7 +119,7 @@ export default function AnnouncementPage() {
   if (announcementQuery.isError || !announcementQuery.data) {
     return (
       <main className="min-h-screen bg-[var(--color-background)] px-5 pb-10 pt-[max(env(safe-area-inset-top),1.5rem)]">
-        <button onClick={() => router.back()} className="mb-8 inline-flex items-center gap-2 text-[var(--color-text-medium)]">
+        <button onClick={handleBack} className="mb-8 inline-flex items-center gap-2 text-[var(--color-text-medium)]">
           <ArrowLeft size={18} />
           <span className="text-xs uppercase tracking-[0.1em]">Geri</span>
         </button>
@@ -135,7 +136,7 @@ export default function AnnouncementPage() {
     <main className="min-h-screen bg-[var(--color-background)] px-5 pb-10 pt-[max(env(safe-area-inset-top),1.5rem)]">
       <div className="mb-8 flex items-center justify-between">
         <button
-          onClick={() => router.back()}
+          onClick={handleBack}
           className="inline-flex items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] active:scale-95"
         >
           <ArrowLeft size={18} />

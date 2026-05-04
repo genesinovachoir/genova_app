@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useState } from 'react';
 import { Music4 } from 'lucide-react';
 import { LottieIcon } from './LottieIcon';
+import { MainNotificationsBell } from './MainNotificationsBell';
 import { useAuth } from './AuthProvider';
 import { getRoleDisplayLabel } from '@/lib/role-labels';
 import { useTheme } from 'next-themes';
@@ -74,7 +75,7 @@ export function TopBar() {
   return (
     <header className="fixed inset-x-0 top-0 z-50">
       <div className="mx-auto max-w-lg px-2 pt-[env(safe-area-inset-top)]">
-        <div className="glass-panel !border-none !shadow-none mt-2 flex items-center justify-between gap-2.5 px-4 py-3 sm:px-6">
+        <div className="glass-panel !overflow-visible !border-none !shadow-none mt-2 flex items-center justify-between gap-2.5 px-4 py-3 sm:px-6">
           {isBirthdayWeek && celebrationAnimation && (
             <div
               className="pointer-events-none absolute inset-0 overflow-hidden"
@@ -114,6 +115,7 @@ export function TopBar() {
           </div>
 
           <div className="flex shrink-0 items-center justify-end gap-2">
+            <MainNotificationsBell />
             <div className="status-pill !min-h-[1.4rem] !px-2 !text-[0.5rem] sm:!text-[0.55rem] tracking-normal whitespace-nowrap opacity-80">{roleLabel}</div>
           </div>
         </div>

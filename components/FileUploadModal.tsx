@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Upload, X, Music2, FileText, Mic, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useMiniAudioPlayerStore } from '@/store/useMiniAudioPlayerStore';
-import { ALLOWED_SHEET_TYPES, ALLOWED_MIDI_TYPES, ALLOWED_AUDIO_TYPES, ALLOWED_SUBMISSION_TYPES, formatFileSize } from '@/lib/drive';
+import { ALLOWED_SHEET_TYPES, ALLOWED_MIDI_TYPES, ALLOWED_AUDIO_TYPES, formatFileSize } from '@/lib/drive';
 import { LottieIcon } from '@/components/LottieIcon';
 
 type UploadMode = 'sheet' | 'midi' | 'audio' | 'submission';
@@ -24,10 +24,11 @@ interface FileUploadModalProps {
 
 const MODE_CONFIG: Record<UploadMode, {
   icon: React.ElementType;
-  acceptedTypes: string[];
-  accept: string;
+  acceptedTypes?: string[];
+  accept?: string;
   hint: string;
   color: string;
+  maxSizeMb: number;
 }> = {
   sheet: {
     icon: FileText,
@@ -35,6 +36,7 @@ const MODE_CONFIG: Record<UploadMode, {
     accept: '.pdf',
     hint: 'PDF dosyası',
     color: 'text-[#C0B283]',
+    maxSizeMb: 20,
   },
   midi: {
     icon: Music2,
@@ -42,6 +44,7 @@ const MODE_CONFIG: Record<UploadMode, {
     accept: '.mid,.midi',
     hint: 'MIDI dosyası (.mid veya .midi)',
     color: 'text-sky-400',
+    maxSizeMb: 20,
   },
   audio: {
     icon: Mic,
@@ -49,13 +52,13 @@ const MODE_CONFIG: Record<UploadMode, {
     accept: '.mp3',
     hint: 'MP3 dosyası',
     color: 'text-purple-400',
+    maxSizeMb: 20,
   },
   submission: {
     icon: Upload,
-    acceptedTypes: ALLOWED_SUBMISSION_TYPES,
-    accept: '.mp3,.mp4,.m4a,.wav,.ogg,.mid,.midi,.pdf',
-    hint: 'Video (MP4), Ses veya PDF (max 20MB)',
+    hint: 'Tüm dosya türleri (max 50MB)',
     color: 'text-[#C0B283]',
+    maxSizeMb: 50,
   },
 };
 
@@ -118,11 +121,11 @@ export function FileUploadModal({
 
   const validateFile = (file: File): string | null => {
     const ext = '.' + file.name.split('.').pop()?.toLowerCase();
-    if (!config.acceptedTypes.includes(ext)) {
+    if (config.acceptedTypes?.length && !config.acceptedTypes.includes(ext)) {
       return `Geçersiz dosya tipi. Kabul edilenler: ${config.acceptedTypes.join(', ')}`;
     }
-    if (file.size > 20 * 1024 * 1024) {
-      return 'Dosya boyutu 20MB\'ı aşamaz';
+    if (file.size > config.maxSizeMb * 1024 * 1024) {
+      return `Dosya boyutu ${config.maxSizeMb}MB'ı aşamaz`;
     }
     return null;
   };

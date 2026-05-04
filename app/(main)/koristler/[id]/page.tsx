@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft,
@@ -23,6 +23,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/components/AuthProvider';
 import { supabase } from '@/lib/supabase';
 import { sanitizeRichText } from '@/lib/richText';
+import { useBackOrHome } from '@/hooks/useBackOrHome';
 import {
   loadPerformanceMemberDetail,
   PERFORMANCE_ROOT_QUERY_KEY,
@@ -308,10 +309,10 @@ function MetricBox({
 }
 
 export default function KoristDetailPage() {
-  const router = useRouter();
   const params = useParams<{ id?: string | string[] }>();
   const queryClient = useQueryClient();
   const { member: currentMember, isAdmin, isSectionLeader } = useAuth();
+  const handleBack = useBackOrHome();
 
   const memberId = typeof params?.id === 'string' ? params.id : Array.isArray(params?.id) ? params.id[0] : '';
   const privileged = isAdmin() || isSectionLeader();
@@ -390,7 +391,7 @@ export default function KoristDetailPage() {
     return (
       <main className="page-shell space-y-6 pb-28 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
         <button
-          onClick={() => router.back()}
+          onClick={handleBack}
           className="inline-flex items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)]"
         >
           <ArrowLeft size={18} />
@@ -413,7 +414,7 @@ export default function KoristDetailPage() {
     return (
       <main className="page-shell space-y-6 pb-28 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
         <button
-          onClick={() => router.back()}
+          onClick={handleBack}
           className="inline-flex items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)]"
         >
           <ArrowLeft size={18} />
@@ -440,7 +441,7 @@ export default function KoristDetailPage() {
     <main className="page-shell space-y-6 pb-28 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
       <div className="flex items-center justify-between gap-3">
         <button
-          onClick={() => router.back()}
+          onClick={handleBack}
           className="inline-flex items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)]"
         >
           <ArrowLeft size={18} />

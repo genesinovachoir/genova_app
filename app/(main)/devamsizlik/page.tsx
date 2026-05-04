@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, Clock, XCircle, Loader2, RotateCcw, Users } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -10,6 +9,8 @@ import { supabase, type Rehearsal, type Attendance } from '@/lib/supabase';
 import { useAuth } from '@/components/AuthProvider';
 import { EventFormModal } from '@/components/EventFormModal';
 import { useToast } from '@/components/ToastProvider';
+import { useBackOrHome } from '@/hooks/useBackOrHome';
+import { isRichTextMeaningful, sanitizeRichText } from '@/lib/richText';
 
 const DAY_LABELS = ['PZT', 'SAL', 'ÇAR', 'PER', 'CUM', 'CMT', 'PAZ'];
 
@@ -189,10 +190,7 @@ async function fetchPendingApprovals() {
   })) as PendingAttendance[];
 }
 
-async function fetchRehearsalParticipants(
-  rehearsalId: string,
-  options: { isAdmin: boolean; voiceGroup: string | null },
-) {
+async function fetchRehearsalParticipants(rehearsalId: string) {
   const { data: inviteeRows, error: inviteeError } = await supabase
     .from('rehearsal_invitees')
     .select('member_id')
@@ -207,22 +205,12 @@ async function fetchRehearsalParticipants(
     return [] as RehearsalParticipant[];
   }
 
-  if (!options.isAdmin && !options.voiceGroup) {
-    return [] as RehearsalParticipant[];
-  }
-
-  let membersQuery = supabase
+  const { data: members, error: membersError } = await supabase
     .from('choir_members')
     .select('id, first_name, last_name, voice_group, sub_voice_group')
     .in('id', invitedMemberIds)
     .order('voice_group')
     .order('first_name');
-
-  if (!options.isAdmin) {
-    membersQuery = membersQuery.eq('voice_group', options.voiceGroup);
-  }
-
-  const { data: members, error: membersError } = await membersQuery;
   if (membersError) {
     throw membersError;
   }
@@ -276,10 +264,10 @@ async function fetchContinuityInfo(memberId: string) {
 }
 
 export default function DevamsizlikPage() {
-  const router = useRouter();
   const queryClient = useQueryClient();
   const toast = useToast();
   const { member, isAdmin, isSectionLeader } = useAuth();
+  const handleBack = useBackOrHome();
 
   const [currentMonth, setCurrentMonth] = useState(() => {
     const now = new Date();
@@ -474,12 +462,9 @@ export default function DevamsizlikPage() {
 
   const selectedRehearsalId = selectedDay?.rehearsal?.id ?? null;
   const participantsQuery = useQuery({
-    queryKey: ['devamsizlik', 'participants', selectedRehearsalId, canManageAdmin, member?.voice_group],
-    queryFn: () => fetchRehearsalParticipants(selectedRehearsalId!, {
-      isAdmin: canManageAdmin,
-      voiceGroup: member?.voice_group ?? null,
-    }),
-    enabled: Boolean(canApprove && selectedRehearsalId),
+    queryKey: ['devamsizlik', 'participants', selectedRehearsalId],
+    queryFn: () => fetchRehearsalParticipants(selectedRehearsalId!),
+    enabled: Boolean(selectedRehearsalId),
   });
 
   const loading = monthDataQuery.isPending || (canApprove && pendingQuery.isPending);
@@ -487,6 +472,8 @@ export default function DevamsizlikPage() {
   const approvingId = approveMutation.isPending ? approveMutation.variables : null;
   const participants = participantsQuery.data ?? [];
   const manualAttendanceVariables = manualAttendanceMutation.variables;
+  const selectedRehearsalNotes = selectedDay?.rehearsal?.notes ?? null;
+  const hasSelectedRehearsalNotes = isRichTextMeaningful(selectedRehearsalNotes);
 
   const navigateMonth = (delta: number) => {
     setCurrentMonth((previous) => new Date(previous.getFullYear(), previous.getMonth() + delta, 1));
@@ -549,7 +536,7 @@ export default function DevamsizlikPage() {
     <main className="min-h-screen bg-[var(--color-background)] pb-[max(2rem,env(safe-area-inset-bottom))]">
       <div className="border-b border-[var(--color-border)] bg-[var(--color-background)]/90 px-5 pb-4 pt-[max(env(safe-area-inset-top),1.25rem)] backdrop-blur-sm">
         <button
-          onClick={() => router.back()}
+          onClick={handleBack}
           className="mb-4 inline-flex items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] active:scale-95"
         >
           <ArrowLeft size={18} />
@@ -681,6 +668,17 @@ export default function DevamsizlikPage() {
                         {selectedDay.rehearsal.end_time ? ` — ${selectedDay.rehearsal.end_time.slice(0, 5)}` : ''}
                       </p>
                       <p>📍 {selectedDay.rehearsal.location}</p>
+                      {hasSelectedRehearsalNotes ? (
+                        <div className="pt-2">
+                          <p className="mb-2 text-[0.68rem] font-bold uppercase tracking-[0.18em] text-[var(--color-text-medium)]">
+                            Açıklama
+                          </p>
+                          <div
+                            className="prose max-w-none text-[var(--color-text-high)] opacity-90 [--tw-prose-body:var(--color-text-high)] [--tw-prose-headings:var(--color-text-high)] [--tw-prose-links:var(--color-accent)] [--tw-prose-bold:var(--color-text-high)] [--tw-prose-bullets:var(--color-text-medium)] [--tw-prose-quotes:var(--color-text-high)] [--tw-prose-code:var(--color-text-high)] [--tw-prose-hr:var(--color-border)] prose-p:my-0.5 prose-p:text-[14px] prose-p:leading-[1.45] prose-ul:list-disc prose-ol:list-decimal prose-li:my-0.5 prose-a:text-[var(--color-accent)] prose-img:my-2 prose-img:max-h-[30vh] prose-img:w-full prose-img:rounded-[8px] prose-img:border prose-img:border-[var(--color-border)] prose-img:object-cover"
+                            dangerouslySetInnerHTML={{ __html: sanitizeRichText(selectedRehearsalNotes) }}
+                          />
+                        </div>
+                      ) : null}
                       {selectedDay.rehearsal.collect_attendance ? (
                         <p className="pt-1 text-[0.72rem] uppercase tracking-[0.12em]">
                           Durum:{' '}
@@ -708,7 +706,7 @@ export default function DevamsizlikPage() {
                     </div>
                   ) : null}
 
-                  {selectedDay.rehearsal && canApprove ? (
+                  {selectedDay.rehearsal ? (
                     <div className="border-t border-[var(--color-border)] pt-4">
                       <div className="mb-3 flex items-center justify-between gap-3">
                         <span className="page-kicker">Katılımcılar</span>
@@ -733,6 +731,11 @@ export default function DevamsizlikPage() {
                       ) : (
                         <div className="space-y-2">
                           {participants.map((participant) => {
+                            const canEditParticipant = canManageAdmin || (
+                              canManageSectionLeader
+                              && Boolean(member?.voice_group)
+                              && participant.voice_group === member?.voice_group
+                            );
                             const isExpanded = selectedParticipantId === participant.member_id;
                             const isUpdatingParticipant = manualAttendanceMutation.isPending && manualAttendanceVariables?.memberId === participant.member_id;
                             const updatingStatus = isUpdatingParticipant ? manualAttendanceVariables?.status : null;
@@ -741,8 +744,13 @@ export default function DevamsizlikPage() {
                               <div key={participant.member_id} className="rounded-[8px] border border-[var(--color-border)] bg-white/4">
                                 <button
                                   type="button"
-                                  onClick={() => setSelectedParticipantId(isExpanded ? null : participant.member_id)}
-                                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-white/5"
+                                  onClick={() => {
+                                    if (canEditParticipant) {
+                                      setSelectedParticipantId(isExpanded ? null : participant.member_id);
+                                    }
+                                  }}
+                                  disabled={!canEditParticipant}
+                                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors enabled:hover:bg-white/5 disabled:cursor-default"
                                 >
                                   <div className="min-w-0">
                                     <p className="truncate text-sm font-medium">
@@ -758,7 +766,7 @@ export default function DevamsizlikPage() {
                                 </button>
 
                                 <AnimatePresence initial={false}>
-                                  {isExpanded ? (
+                                  {canEditParticipant && isExpanded ? (
                                     <motion.div
                                       initial={{ height: 0, opacity: 0 }}
                                       animate={{ height: 'auto', opacity: 1 }}

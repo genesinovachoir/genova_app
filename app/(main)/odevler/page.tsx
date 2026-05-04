@@ -115,6 +115,20 @@ interface ReviewerQueueItem {
   submission_submitted_at: string | null;
 }
 
+interface ReviewerAssignmentSummary {
+  assignment_id: string;
+  assignment_title: string;
+  assignment_created_at: string;
+  assignment_deadline: string | null;
+  assignment_is_active: boolean;
+  assignment_creator_first_name: string | null;
+  assignment_creator_last_name: string | null;
+  assignment_creator_role: string | null;
+  total: number;
+  submitted: number;
+  completed: number;
+}
+
 interface ChoirMemberRoleRow {
   member_id: string;
   roles?: { name?: string } | Array<{ name?: string }> | null;
@@ -755,6 +769,13 @@ function isReviewerQueueItemCompleted(item: ReviewerQueueItem): boolean {
   return false;
 }
 
+function isReviewerAssignmentCompleted(item: ReviewerAssignmentSummary): boolean {
+  if (!item.assignment_is_active) {
+    return true;
+  }
+  return item.total > 0 && item.completed >= item.total;
+}
+
 async function getAccessToken() {
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   if (sessionError || !sessionData.session?.access_token) {
@@ -856,6 +877,37 @@ export default function Odevler() {
   const memberAssignments = useMemo(() => assignmentsQuery.data ?? [], [assignmentsQuery.data]);
   const reviewerQueueItems = useMemo(() => reviewerQueueQuery.data ?? [], [reviewerQueueQuery.data]);
 
+  const reviewerAssignmentGroups = useMemo(() => {
+    const grouped = new Map<string, ReviewerAssignmentSummary>();
+
+    for (const item of reviewerQueueItems) {
+      const existing = grouped.get(item.assignment_id) ?? {
+        assignment_id: item.assignment_id,
+        assignment_title: item.assignment_title,
+        assignment_created_at: item.assignment_created_at,
+        assignment_deadline: item.assignment_deadline,
+        assignment_is_active: item.assignment_is_active,
+        assignment_creator_first_name: item.assignment_creator_first_name,
+        assignment_creator_last_name: item.assignment_creator_last_name,
+        assignment_creator_role: item.assignment_creator_role,
+        total: 0,
+        submitted: 0,
+        completed: 0,
+      };
+
+      existing.total += 1;
+      if (item.submission_status !== 'missing') {
+        existing.submitted += 1;
+      }
+      if (isReviewerQueueItemCompleted(item)) {
+        existing.completed += 1;
+      }
+      grouped.set(item.assignment_id, existing);
+    }
+
+    return Array.from(grouped.values());
+  }, [reviewerQueueItems]);
+
   const memberTabCounts = useMemo(() => {
     let active = 0;
     let completed = 0;
@@ -872,59 +924,21 @@ export default function Odevler() {
   const reviewerTabCounts = useMemo(() => {
     let active = 0;
     let completed = 0;
-    for (const item of reviewerQueueItems) {
-      if (isReviewerQueueItemCompleted(item)) {
+    for (const item of reviewerAssignmentGroups) {
+      if (isReviewerAssignmentCompleted(item)) {
         completed += 1;
       } else {
         active += 1;
       }
     }
     return { active, completed };
-  }, [reviewerQueueItems]);
+  }, [reviewerAssignmentGroups]);
 
   const tabCounts = reviewerView ? reviewerTabCounts : memberTabCounts;
 
   const reviewerAssignments = useMemo(() => {
-    const grouped = new Map<
-      string,
-      {
-        assignment_id: string;
-        assignment_title: string;
-        assignment_created_at: string;
-        assignment_deadline: string | null;
-        assignment_is_active: boolean;
-        assignment_creator_first_name: string | null;
-        assignment_creator_last_name: string | null;
-        assignment_creator_role: string | null;
-        total: number;
-        submitted: number;
-      }
-    >();
-
-    for (const item of reviewerQueueItems) {
-      const existing = grouped.get(item.assignment_id) ?? {
-        assignment_id: item.assignment_id,
-        assignment_title: item.assignment_title,
-        assignment_created_at: item.assignment_created_at,
-        assignment_deadline: item.assignment_deadline,
-        assignment_is_active: item.assignment_is_active,
-        assignment_creator_first_name: item.assignment_creator_first_name,
-        assignment_creator_last_name: item.assignment_creator_last_name,
-        assignment_creator_role: item.assignment_creator_role,
-        total: 0,
-        submitted: 0,
-      };
-
-      existing.total += 1;
-      if (item.submission_status !== 'missing') {
-        existing.submitted += 1;
-      }
-      grouped.set(item.assignment_id, existing);
-    }
-
-    const rows = Array.from(grouped.values());
-    const filtered = rows.filter((row) => {
-      const done = row.total > 0 && row.submitted >= row.total;
+    const filtered = reviewerAssignmentGroups.filter((row) => {
+      const done = isReviewerAssignmentCompleted(row);
       return activeTab === 'aktif' ? !done : done;
     });
 
@@ -940,7 +954,7 @@ export default function Odevler() {
     return [...filtered].sort(
       (a, b) => new Date(b.assignment_created_at).getTime() - new Date(a.assignment_created_at).getTime(),
     );
-  }, [activeTab, reviewerQueueItems, sortOption]);
+  }, [activeTab, reviewerAssignmentGroups, sortOption]);
 
   const memberRows = useMemo(() => {
     const filtered = memberAssignments.filter((assignment) => {
@@ -1133,7 +1147,7 @@ export default function Odevler() {
                 )}?aid=${item.assignment_id}`;
                 const deadlineInfo = formatDeadline(item.assignment_deadline);
                 const createdByLabel = getAssignmentCreatedByLabel(item);
-                const progress = item.total > 0 ? Math.round((item.submitted / item.total) * 100) : 0;
+                const progress = item.total > 0 ? Math.round((item.completed / item.total) * 100) : 0;
 
                 const isCreatorChef = item.assignment_creator_role === 'Şef';
                 const canModifyAssignment = isChef || (isLeader && !isCreatorChef);
@@ -1163,7 +1177,8 @@ export default function Odevler() {
 
                         <div className="mt-2 flex flex-wrap items-center gap-3 text-[0.65rem] text-[var(--color-text-medium)]">
                           <span>%{progress} tamamlandı</span>
-                          <span>{item.submitted}/{item.total}</span>
+                          <span>{item.completed}/{item.total} değerlendirildi</span>
+                          <span>{item.submitted} teslim</span>
                           {deadlineInfo ? <span className={deadlineInfo.isUrgent ? 'text-red-400' : ''}>{deadlineInfo.text}</span> : null}
                         </div>
                       </div>

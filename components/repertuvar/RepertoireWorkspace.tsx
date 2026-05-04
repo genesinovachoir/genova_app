@@ -12,6 +12,7 @@ import {
   EyeOff,
   FileText,
   GripVertical,
+  Highlighter,
   Loader2,
   Music4,
   Pause,
@@ -52,13 +53,13 @@ import {
   type OfflineSyncResult,
 } from '@/lib/repertuvar/offline';
 import {
-  ANNOTATION_COLOR_SWATCHES,
+  ANNOTATION_COLOR_PRESETS,
   AnnotationColor,
   AnnotationItem,
   AnnotationLayerKey,
   AnnotationTool,
-  LEGACY_ANNOTATION_COLORS,
-  LegacyAnnotationColor,
+  DEFAULT_HIGHLIGHTER_COLOR,
+  DEFAULT_HIGHLIGHTER_STROKE_WIDTH_PX,
   MAX_ANNOTATION_STROKE_WIDTH_PX,
   MIN_ANNOTATION_STROKE_WIDTH_PX,
   PreviewVoiceGroup,
@@ -91,11 +92,14 @@ const COVER_PARTITION_LABEL = '__cover__';
 const DEFAULT_PAGE_ASPECT_RATIO = 1.414;
 
 const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 2.0;
+const MAX_ZOOM = 2.5;
 const ZOOM_STEP = 0.1;
 const PDF_RENDER_SETTLE_DELAY = 180;
 const FLOATING_BAR_EDGE_GAP = 8;
 const FLOATING_BAR_SETTLE_DURATION = 520;
+const PINCH_ZOOM_ACTIVATION_DELTA_PX = 18;
+const RECENT_ANNOTATION_COLORS_STORAGE_KEY = 'genova:repertoire:recent-annotation-colors';
+const MAX_RECENT_ANNOTATION_COLORS = 5;
 
 interface FloatingBarPosition {
   x: number;
@@ -154,12 +158,13 @@ const TOOL_CYCLE: Array<{
   Icon: typeof Pencil;
 }> = [
   { tool: 'pen', label: 'Kalem', Icon: Pencil },
+  { tool: 'highlighter', label: 'Highlighter', Icon: Highlighter },
   { tool: 'arrow', label: 'Ok', Icon: ArrowRight },
   { tool: 'rectangle', label: 'Kutu', Icon: Square },
   { tool: 'eraser', label: 'Silgi', Icon: Eraser },
 ];
 
-const COLOR_OPTIONS = LEGACY_ANNOTATION_COLORS;
+const COLOR_OPTIONS = ANNOTATION_COLOR_PRESETS;
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -170,14 +175,59 @@ function areZoomLevelsEqual(a: number, b: number) {
 }
 
 function isStrokeConfigurableTool(tool: AnnotationTool) {
-  return tool === 'pen' || tool === 'arrow' || tool === 'rectangle';
+  return tool === 'pen' || tool === 'highlighter' || tool === 'arrow' || tool === 'rectangle';
 }
 
 function getAnnotationColorLabel(color: AnnotationColor): string {
+  const preset = COLOR_OPTIONS.find((option) => option.color === color);
+  if (preset) return preset.label;
   if (color === 'black') return 'Siyah';
   if (color === 'red') return 'Kırmızı';
   if (color === 'white') return 'Beyaz';
   return color.toUpperCase();
+}
+
+function isValidAnnotationColorValue(color: string): color is AnnotationColor {
+  return color === 'black' || color === 'red' || color === 'white' || /^#[0-9a-fA-F]{6}$/.test(color);
+}
+
+function normalizeRecentAnnotationColors(colors: unknown): AnnotationColor[] {
+  if (!Array.isArray(colors)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const normalized: AnnotationColor[] = [];
+
+  colors.forEach((color) => {
+    if (typeof color !== 'string' || !isValidAnnotationColorValue(color)) {
+      return;
+    }
+
+    const resolved = resolveAnnotationColor(color);
+    if (seen.has(resolved)) {
+      return;
+    }
+
+    seen.add(resolved);
+    normalized.push(color as AnnotationColor);
+  });
+
+  return normalized.slice(0, MAX_RECENT_ANNOTATION_COLORS);
+}
+
+function getStoredRecentAnnotationColors(): AnnotationColor[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    return normalizeRecentAnnotationColors(
+      JSON.parse(window.localStorage.getItem(RECENT_ANNOTATION_COLORS_STORAGE_KEY) ?? '[]'),
+    );
+  } catch {
+    return [];
+  }
 }
 
 function getFloatingBarSize(node: HTMLDivElement | null): FloatingBarSize {
@@ -1078,6 +1128,8 @@ export function RepertoireWorkspace({
   const pinchStartDistRef = useRef<number | null>(null);
   const pinchStartZoomRef = useRef<number | null>(null);
   const pinchLastCenterRef = useRef<{ x: number; y: number } | null>(null);
+  const pinchZoomActiveRef = useRef(false);
+  const colorPaletteRef = useRef<HTMLDivElement | null>(null);
 
   const [offlineSupported, setOfflineSupported] = useState(false);
   const [offlineEnabled, setOfflineEnabledState] = useState(false);
@@ -1087,6 +1139,8 @@ export function RepertoireWorkspace({
   const [offlineLastSyncedAt, setOfflineLastSyncedAt] = useState<number | null>(null);
   const [offlineSyncedVersion, setOfflineSyncedVersion] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
+  const [recentAnnotationColors, setRecentAnnotationColors] = useState<AnnotationColor[]>([]);
+  const [isColorPaletteOpen, setColorPaletteOpen] = useState(false);
   const store = useRepertoireWorkspaceStore();
   const {
     selectedPdfId,
@@ -1721,6 +1775,29 @@ export function RepertoireWorkspace({
   }, []);
 
   useEffect(() => {
+    setRecentAnnotationColors(getStoredRecentAnnotationColors());
+  }, []);
+
+  useEffect(() => {
+    if (!isColorPaletteOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (colorPaletteRef.current?.contains(event.target as Node)) {
+        return;
+      }
+
+      setColorPaletteOpen(false);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+    };
+  }, [isColorPaletteOpen]);
+
+  useEffect(() => {
     if (!offlineSupported || !offlineEnabled || !isOnline || offlineSyncing) {
       return;
     }
@@ -1963,6 +2040,7 @@ export function RepertoireWorkspace({
         const dist = getDistance(e.touches[0], e.touches[1]);
         pinchStartDistRef.current = dist;
         pinchLastCenterRef.current = getCenter(e.touches[0], e.touches[1]);
+        pinchZoomActiveRef.current = false;
         setZoomLevel((prev) => {
           pinchStartZoomRef.current = prev;
           return prev;
@@ -1978,13 +2056,24 @@ export function RepertoireWorkspace({
 
         // --- Zoom ---
         const dist = getDistance(e.touches[0], e.touches[1]);
-        const scale = dist / pinchStartDistRef.current;
-        let newZoom = pinchStartZoomRef.current * scale;
-        
-        newZoom = Math.min(Math.max(newZoom, MIN_ZOOM), MAX_ZOOM);
-        
-        // Use 2 decimal places for smoother zooming
-        setZoomLevel(Math.round(newZoom * 100) / 100);
+        const distanceDelta = dist - pinchStartDistRef.current;
+        const absDistanceDelta = Math.abs(distanceDelta);
+
+        if (absDistanceDelta >= PINCH_ZOOM_ACTIVATION_DELTA_PX || pinchZoomActiveRef.current) {
+          pinchZoomActiveRef.current = true;
+
+          const signedExcessDelta =
+            Math.sign(distanceDelta) *
+            Math.max(0, absDistanceDelta - PINCH_ZOOM_ACTIVATION_DELTA_PX);
+          const effectiveDist = Math.max(1, pinchStartDistRef.current + signedExcessDelta);
+          const scale = effectiveDist / pinchStartDistRef.current;
+          let newZoom = pinchStartZoomRef.current * scale;
+
+          newZoom = Math.min(Math.max(newZoom, MIN_ZOOM), MAX_ZOOM);
+
+          // Use 2 decimal places for smoother zooming
+          setZoomLevel(Math.round(newZoom * 100) / 100);
+        }
 
         // --- Two-finger pan ---
         const center = getCenter(e.touches[0], e.touches[1]);
@@ -2019,6 +2108,7 @@ export function RepertoireWorkspace({
         pinchStartDistRef.current = null;
         pinchStartZoomRef.current = null;
         pinchLastCenterRef.current = null;
+        pinchZoomActiveRef.current = false;
       }
     };
 
@@ -2346,18 +2436,39 @@ export function RepertoireWorkspace({
     }
   }
 
+  function selectAnnotationColor(color: AnnotationColor) {
+    setActiveColor(color);
+    setRecentAnnotationColors((currentColors) => {
+      const nextColors = normalizeRecentAnnotationColors([color, ...currentColors]);
+
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(
+          RECENT_ANNOTATION_COLORS_STORAGE_KEY,
+          JSON.stringify(nextColors),
+        );
+      }
+
+      return nextColors;
+    });
+  }
+
   function handleToolCycle() {
     const idx = TOOL_CYCLE.findIndex((o) => o.tool === activeTool);
-    if (idx === -1) {
-      setActiveTool(TOOL_CYCLE[0].tool);
-    } else {
-      setActiveTool(TOOL_CYCLE[(idx + 1) % TOOL_CYCLE.length].tool);
+    const nextTool = idx === -1
+      ? TOOL_CYCLE[0].tool
+      : TOOL_CYCLE[(idx + 1) % TOOL_CYCLE.length].tool;
+
+    setActiveTool(nextTool);
+
+    if (nextTool === 'highlighter') {
+      selectAnnotationColor(DEFAULT_HIGHLIGHTER_COLOR);
+      setActiveStrokeWidthPx(Math.max(activeStrokeWidthPx, DEFAULT_HIGHLIGHTER_STROKE_WIDTH_PX));
     }
   }
 
   function handleColorCycle() {
-    const idx = COLOR_OPTIONS.indexOf(activeColor as LegacyAnnotationColor);
-    setActiveColor(COLOR_OPTIONS[(idx + 1) % COLOR_OPTIONS.length]);
+    const idx = COLOR_OPTIONS.findIndex((option) => option.color === activeColor);
+    selectAnnotationColor(COLOR_OPTIONS[(idx + 1) % COLOR_OPTIONS.length].color);
   }
 
   function handleStrokeWidthChange(value: number) {
@@ -2425,22 +2536,26 @@ export function RepertoireWorkspace({
     );
   }
 
-  function renderLegacyColorButton(color: LegacyAnnotationColor) {
+  function renderColorButton({ color, label }: (typeof COLOR_OPTIONS)[number]) {
     const selected = activeColor === color;
+    const resolvedColor = resolveAnnotationColor(color);
 
     return (
       <button
         key={color}
         type="button"
-        onClick={() => setActiveColor(color)}
-        title={getAnnotationColorLabel(color)}
-        aria-label={getAnnotationColorLabel(color)}
+        onClick={() => {
+          selectAnnotationColor(color);
+          setColorPaletteOpen(false);
+        }}
+        title={label}
+        aria-label={label}
         className={`h-5 w-5 rounded-full border transition-transform active:scale-90 ${
           selected
             ? 'border-[var(--color-accent)] ring-2 ring-[var(--color-accent)]/25'
             : 'border-white/20 hover:border-[var(--color-border-strong)]'
         }`}
-        style={{ backgroundColor: ANNOTATION_COLOR_SWATCHES[color] }}
+        style={{ backgroundColor: resolvedColor }}
       />
     );
   }
@@ -2448,39 +2563,54 @@ export function RepertoireWorkspace({
   function renderStrokeStrip() {
     const resolvedColor = resolveAnnotationColor(activeColor);
     const strokeWidth = clampAnnotationStrokeWidthPx(activeStrokeWidthPx);
+    const recentColorOptions = recentAnnotationColors.map((color) => ({
+      color,
+      label: getAnnotationColorLabel(color),
+    }));
 
     return (
-      <div className="flex min-h-7 max-w-full flex-wrap items-center gap-1 rounded-[7px] border border-[var(--color-border)] bg-white/[0.045] px-1.5 py-1">
-        <div
-          className="h-6 w-6 shrink-0 rounded-full border-2 border-[var(--color-border-strong)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.22)]"
-          style={{ backgroundColor: resolvedColor }}
-          title={getAnnotationColorLabel(activeColor)}
-        />
+      <div className="flex min-h-7 w-full min-w-0 max-w-full flex-wrap items-center gap-1 rounded-[7px] border border-[var(--color-border)] bg-white/[0.045] px-1.5 py-1 sm:w-auto">
+        <div ref={colorPaletteRef} className="relative shrink-0">
+          <button
+            type="button"
+            onClick={() => setColorPaletteOpen((open) => !open)}
+            className="h-6 w-6 rounded-full border-2 border-[var(--color-border-strong)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.22)] transition-transform active:scale-90"
+            style={{ backgroundColor: resolvedColor }}
+            title={`${getAnnotationColorLabel(activeColor)} · Renkleri aç`}
+            aria-label="Renkleri aç"
+            aria-expanded={isColorPaletteOpen}
+          />
 
-        <div className="flex items-center gap-1">
-          {COLOR_OPTIONS.map(renderLegacyColorButton)}
-          <label
-            title="Özel renk"
-            aria-label="Özel renk"
-            className="relative grid h-5 w-5 cursor-pointer place-items-center overflow-hidden rounded-full border border-dashed border-[var(--color-border-strong)] bg-white/5"
-          >
-            <span
-              className="h-3.5 w-3.5 rounded-full border border-white/20"
-              style={{ backgroundColor: resolvedColor }}
-            />
-            <input
-              type="color"
-              value={resolvedColor}
-              onChange={(event) => setActiveColor(event.target.value as AnnotationColor)}
-              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-              aria-label="Özel renk seç"
-            />
-          </label>
+          {isColorPaletteOpen && (
+            <div className="absolute left-0 top-full z-[120] mt-2 w-[168px] rounded-[10px] border border-[var(--color-border-strong)] bg-[var(--color-surface-solid)]/98 p-2 shadow-[0_18px_48px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+              {recentColorOptions.length > 0 && (
+                <>
+                  <p className="mb-1 text-[0.5rem] font-bold uppercase tracking-[0.16em] text-[var(--color-text-low)]">
+                    Son
+                  </p>
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    {recentColorOptions.map(renderColorButton)}
+                  </div>
+                </>
+              )}
+
+              <p className="mb-1 text-[0.5rem] font-bold uppercase tracking-[0.16em] text-[var(--color-text-low)]">
+                Palet
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {COLOR_OPTIONS.map(renderColorButton)}
+              </div>
+            </div>
+          )}
         </div>
 
-        <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--color-border)]" />
+        <div className="hidden min-w-0 flex-wrap items-center gap-1 min-[420px]:flex">
+          {recentColorOptions.slice(0, 3).map(renderColorButton)}
+        </div>
 
-        <div className="flex min-w-[138px] flex-1 items-center gap-1.5">
+        <span className="mx-0.5 hidden h-4 w-px shrink-0 bg-[var(--color-border)] min-[380px]:block" />
+
+        <div className="flex min-w-[126px] flex-1 items-center gap-1.5">
           <div className="flex h-6 w-11 shrink-0 items-center justify-center rounded-[6px] border border-[var(--color-border)] bg-black/10 px-1">
             <span
               className="w-8 rounded-full"
@@ -2497,7 +2627,7 @@ export function RepertoireWorkspace({
             step={1}
             value={strokeWidth}
             onChange={(event) => handleStrokeWidthChange(Number(event.target.value))}
-            className="annotation-stroke-range h-6 w-24 min-w-20 flex-1"
+            className="annotation-stroke-range h-6 min-w-16 flex-1"
             style={{ accentColor: resolvedColor, color: resolvedColor }}
             aria-label="Çizgi kalınlığı"
             title="Çizgi kalınlığı"
@@ -2520,12 +2650,13 @@ export function RepertoireWorkspace({
     return (
       <div
         ref={editFloatingBarRef}
-        className={`absolute z-[80] flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-1.5 rounded-[8px] border border-[var(--color-accent)]/25 bg-[var(--color-surface-solid)]/92 px-2 py-1.5 shadow-[0_14px_40px_rgba(0,0,0,0.34)] backdrop-blur-xl ${
+        className={`absolute z-[80] flex w-max flex-wrap items-center gap-1.5 rounded-[8px] border border-[var(--color-accent)]/25 bg-[var(--color-surface-solid)]/92 px-2 py-1.5 shadow-[0_14px_40px_rgba(0,0,0,0.34)] backdrop-blur-xl ${
           floatingBarPosition ? 'opacity-100' : 'pointer-events-none opacity-0'
         }`}
         style={{
           left: floatingBarPosition ? Math.round(floatingBarPosition.x) : -9999,
           top: floatingBarPosition ? Math.round(floatingBarPosition.y) : -9999,
+          maxWidth: 'min(calc(100vw - 1rem), calc(100% - 1rem))',
         }}
         onClick={(event) => event.stopPropagation()}
       >
@@ -2569,7 +2700,9 @@ export function RepertoireWorkspace({
         </button>
 
         {showStrokeStrip ? (
-          renderStrokeStrip()
+          <div className="min-w-0 max-w-full basis-full sm:basis-auto">
+            {renderStrokeStrip()}
+          </div>
         ) : (
           <button
             type="button"

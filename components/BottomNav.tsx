@@ -1,6 +1,6 @@
 'use client';
 
-import { Home, Music, ClipboardList, User } from 'lucide-react';
+import { Home, Music, ClipboardList, User, MessageCircle } from 'lucide-react';
 import { LottieIcon } from './LottieIcon';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -15,6 +15,7 @@ export function BottomNav() {
   const navItems = [
     { name: 'Anasayfa', path: '/', icon: Home, lottie: isLightTheme ? '/lottie/Home Icon light.json' : '/lottie/Home Icon.json' },
     { name: 'Repertuvar', path: '/repertuvar', icon: Music, lottie: isLightTheme ? '/lottie/player music.json' : '/lottie/player music dark.json' },
+    { name: 'Sohbet', path: '/chat', icon: MessageCircle, lottie: '' },
     { name: 'Ödevler', path: '/odevler', icon: ClipboardList, lottie: isLightTheme ? '/lottie/Tasks light.json' : '/lottie/Tasks.json' },
     { name: 'Profil', path: '/profil', icon: User, lottie: isLightTheme ? '/lottie/Profile Icon light.json' : '/lottie/Profile Icon.json' },
   ];
@@ -43,14 +44,14 @@ export function BottomNav() {
               <LottieIcon
                 path={item.lottie}
                 fallback={Icon}
-                size={24}
+                size={20}
                 isActive={isActive}
                 className={`relative z-10 transition-colors duration-300 ${
-                  item.name === 'Anasayfa' ? 'scale-[1.25]' : item.name === 'Repertuvar' ? 'scale-[1.45]' : 'scale-100'
+                  item.name === 'Anasayfa' ? 'scale-[1.2]' : item.name === 'Repertuvar' ? 'scale-[1.35]' : 'scale-100'
                 } ${isActive ? 'text-[var(--color-accent)]' : 'text-[var(--color-nav-icon)]'}`}
               />
               <span
-                className={`relative z-10 font-sans text-[0.6rem] font-bold uppercase tracking-[0.24em] ${
+                className={`relative z-10 font-sans text-[0.5rem] font-bold uppercase tracking-[0.16em] ${
                   isActive ? 'text-[var(--color-text-high)]' : 'text-[var(--color-text-medium)]'
                 }`}
               >

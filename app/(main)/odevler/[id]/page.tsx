@@ -33,6 +33,7 @@ import { FileUploadModal } from '@/components/FileUploadModal';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ReviewNoteDialog } from '@/components/ReviewNoteDialog';
 import { useToast } from '@/components/ToastProvider';
+import { useBackOrHome } from '@/hooks/useBackOrHome';
 import { uploadSubmission } from '@/lib/drive';
 import { sanitizeRichText } from '@/lib/richText';
 import { createSlugLookup, isUuidLike } from '@/lib/internalPageLinks';
@@ -775,6 +776,7 @@ export default function AssignmentDetailPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const { isAdmin, isSectionLeader, member, isLoading: authLoading } = useAuth();
+  const handleBack = useBackOrHome();
   const isChef = isAdmin();
   const isLeader = isSectionLeader();
   const reviewerVoiceGroup = !isChef ? member?.voice_group ?? null : null;
@@ -1096,7 +1098,7 @@ export default function AssignmentDetailPage() {
     <main className="min-h-screen bg-[var(--color-background)] pb-[max(2rem,env(safe-area-inset-bottom))]">
       <div className="space-y-6 px-5 pt-[max(env(safe-area-inset-top),1.25rem)]">
         <button
-          onClick={() => router.back()}
+          onClick={handleBack}
           className="inline-flex items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] active:scale-95"
         >
           <ArrowLeft size={18} />
@@ -1615,7 +1617,7 @@ export default function AssignmentDetailPage() {
                             onClick={() => setUploadOpen(true)}
                             className="inline-flex items-center gap-2 rounded-full bg-[var(--color-accent)] px-5 py-2 text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-background)] transition-transform hover:opacity-90 active:scale-95"
                           >
-                            <Upload size={14} strokeWidth={2.5} /> {mySubmission?.status === 'rejected' ? 'Yeni Dosya Yükle' : 'Medya Yükle'}
+                            <Upload size={14} strokeWidth={2.5} /> {mySubmission?.status === 'rejected' ? 'Yeni Dosya Yükle' : 'Dosya Yükle'}
                           </button>
                         </div>
                       </div>
@@ -1717,7 +1719,7 @@ export default function AssignmentDetailPage() {
         mode="submission"
         hideNoteInput={true}
         title={mySubmission ? 'Teslimi Güncelle' : 'Ödev Teslim Et'}
-        description="Video (MP4), Ses veya PDF yükleyebilirsiniz (max 20MB)"
+        description="Tüm dosya türlerini yükleyebilirsiniz (max 50MB)"
         onUpload={async (file, _, __) => {
           await uploadMutation.mutateAsync({ file, note: submissionNote.trim() || undefined });
         }}
