@@ -265,6 +265,50 @@ export interface ChatImageUploadResult {
   public_url: string;
 }
 
+async function normalizeChatImageForUpload(file: File): Promise<File> {
+  if (!file.type.startsWith('image/')) return file;
+  if (typeof window === 'undefined') return file;
+
+  const bitmap = await createImageBitmap(file);
+  const maxDimension = 1600;
+  const largestSide = Math.max(bitmap.width, bitmap.height);
+  const scale = largestSide > maxDimension ? maxDimension / largestSide : 1;
+  const targetWidth = Math.max(1, Math.round(bitmap.width * scale));
+  const targetHeight = Math.max(1, Math.round(bitmap.height * scale));
+
+  if (scale === 1 && file.size <= 2 * 1024 * 1024) {
+    bitmap.close();
+    return file;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    bitmap.close();
+    return file;
+  }
+
+  ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+  bitmap.close();
+
+  const targetType = 'image/jpeg';
+  const targetQuality = 0.82;
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, targetType, targetQuality);
+  });
+
+  if (!blob) return file;
+  if (blob.size >= file.size && scale === 1) return file;
+
+  const nameWithoutExt = file.name.replace(/\.[^.]+$/, '');
+  return new File([blob], `${nameWithoutExt}.jpg`, {
+    type: targetType,
+    lastModified: Date.now(),
+  });
+}
+
 /**
  * Chat içindeki bir görseli Google Drive'a yükler.
  * Root/Chat/[room_id]/ klasörüne kaydeder ve herkese açık erişim verir.
@@ -273,14 +317,22 @@ export async function uploadChatImage(
   roomId: string,
   file: File
 ): Promise<ChatImageUploadResult> {
-  const arrayBuffer = await file.arrayBuffer();
+  const normalizedFile = await normalizeChatImageForUpload(file);
+  const arrayBuffer = await normalizedFile.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
-  const base64 = btoa(String.fromCharCode(...bytes));
+  // Avoid call stack overflow for large files by converting in chunks.
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  const base64 = btoa(binary);
 
   return callDrive<ChatImageUploadResult>('upload_chat_image', {
     room_id: roomId,
-    file_name: `${Date.now()}_${file.name}`,
-    mime_type: file.type || 'application/octet-stream',
+    file_name: `${Date.now()}_${normalizedFile.name}`,
+    mime_type: normalizedFile.type || 'application/octet-stream',
     file_data_base64: base64,
   });
 }

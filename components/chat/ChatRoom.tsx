@@ -77,6 +77,15 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
     return () => store.setActiveRoomId(null);
   }, [roomId]);
 
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
   // Load initial messages + reactions
   useEffect(() => {
     if (!member?.id) return;
@@ -498,7 +507,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
   }, [room, roomMembers, member?.id]);
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-[var(--color-background)]">
+    <div className="fixed inset-0 z-40 flex h-[100dvh] flex-col bg-[var(--color-background)]">
       {/* Header */}
       <div className="relative z-50 flex items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-background)] px-3 py-3 pt-[calc(env(safe-area-inset-top,0px)+12px)]">
         <motion.button
