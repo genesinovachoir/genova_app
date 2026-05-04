@@ -51,6 +51,12 @@ export function MessageInput({
     }
   }, [editingMessage]);
 
+  useEffect(() => {
+    if (replyingTo) {
+      setTimeout(() => textareaRef.current?.focus(), 100);
+    }
+  }, [replyingTo, textareaRef]);
+
   // Auto-resize textarea
   useEffect(() => {
     const ta = textareaRef.current;

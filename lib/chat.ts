@@ -244,6 +244,10 @@ export async function fetchMessages(
       metadata_json, is_edited, is_deleted, created_at, updated_at,
       choir_members!chat_messages_sender_id_fkey (
         id, first_name, last_name, photo_url
+      ),
+      reply_to:chat_messages!chat_messages_reply_to_id_fkey (
+        id, content, sender_id,
+        choir_members!chat_messages_sender_id_fkey (first_name, last_name)
       )
     `)
     .eq('room_id', roomId)
@@ -261,6 +265,7 @@ export async function fetchMessages(
   return (data ?? []).map((msg) => ({
     ...msg,
     sender: (msg.choir_members as unknown as ChatMessage['sender']),
+    reply_to: (msg.reply_to as unknown as ChatMessage['reply_to']),
     metadata_json: (msg.metadata_json ?? {}) as Record<string, unknown>,
     message_type: msg.message_type as ChatMessageType,
   })) as ChatMessage[];
@@ -464,6 +469,24 @@ export async function fetchReactionsForMessages(messageIds: string[]) {
     });
   }
   return grouped;
+}
+
+/** Fetch detailed read/delivered status for a message */
+export async function fetchMessageStatuses(messageId: string) {
+  const { data, error } = await supabase
+    .from('chat_message_status')
+    .select(`
+      delivered_at, read_at,
+      choir_members (first_name, last_name, photo_url)
+    `)
+    .eq('message_id', messageId);
+
+  if (error) throw error;
+  return data as unknown as {
+    delivered_at: string | null;
+    read_at: string | null;
+    choir_members: { first_name: string; last_name: string; photo_url: string | null };
+  }[];
 }
 
 /** Get or create DM room */

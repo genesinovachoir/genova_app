@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Reply, Copy, Pencil, Trash2, X } from 'lucide-react';
+import { Reply, Copy, Pencil, Trash2, X, Info } from 'lucide-react';
 import type { ChatMessage } from '@/lib/chat';
 
 const QUICK_EMOJIS = ['❤️', '😂', '😮', '😢', '🔥', '👍'];
@@ -17,6 +17,7 @@ interface MessageContextMenuProps {
   onEdit: (message: ChatMessage) => void;
   onDelete: (message: ChatMessage) => void;
   onCopy: (message: ChatMessage) => void;
+  onInfo: (message: ChatMessage) => void;
 }
 
 export function MessageContextMenu({
@@ -29,6 +30,7 @@ export function MessageContextMenu({
   onEdit,
   onDelete,
   onCopy,
+  onInfo,
 }: MessageContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const isOpen = message !== null && position !== null;
@@ -74,7 +76,7 @@ export function MessageContextMenu({
   );
 
   const handleAction = useCallback(
-    (action: 'reply' | 'copy' | 'edit' | 'delete') => {
+    (action: 'reply' | 'copy' | 'edit' | 'delete' | 'info') => {
       if (!message) return;
       switch (action) {
         case 'reply':
@@ -88,6 +90,9 @@ export function MessageContextMenu({
           break;
         case 'delete':
           onDelete(message);
+          break;
+        case 'info':
+          onInfo(message);
           break;
       }
       onClose();
@@ -158,6 +163,13 @@ export function MessageContextMenu({
                 label="Yanıtla"
                 onClick={() => handleAction('reply')}
               />
+              {isOwn && (
+                <ContextMenuItem
+                  icon={Info}
+                  label="Bilgi"
+                  onClick={() => handleAction('info')}
+                />
+              )}
               {message?.content && (
                 <ContextMenuItem
                   icon={Copy}

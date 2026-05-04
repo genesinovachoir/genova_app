@@ -27,6 +27,7 @@ import { MessageContextMenu } from './MessageContextMenu';
 import { RoomInfoDrawer } from './RoomInfoDrawer';
 import { CreatePollModal } from './CreatePollModal';
 import { StickerPicker } from './StickerPicker';
+import { MessageInfoModal } from './MessageInfoModal';
 
 interface ChatRoomProps {
   roomId: string;
@@ -42,6 +43,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
   const [roomMembers, setRoomMembers] = useState<ChatRoomMember[]>([]);
   const [isPollModalOpen, setIsPollModalOpen] = useState(false);
   const [isStickerOpen, setIsStickerOpen] = useState(false);
+  const [infoMessageId, setInfoMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialLoad = useRef(true);
@@ -197,6 +199,19 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         content,
         message_type: 'text',
         reply_to_id: replyTo?.id ?? null,
+        reply_to: replyTo
+          ? {
+              id: replyTo.id,
+              content: replyTo.content,
+              sender_id: replyTo.sender_id,
+              choir_members: replyTo.sender
+                ? {
+                    first_name: replyTo.sender.first_name,
+                    last_name: replyTo.sender.last_name,
+                  }
+                : null,
+            }
+          : null,
         metadata_json: {},
         is_edited: false,
         is_deleted: false,
@@ -246,6 +261,19 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         content: null,
         message_type: 'image',
         reply_to_id: replyTo?.id ?? null,
+        reply_to: replyTo
+          ? {
+              id: replyTo.id,
+              content: replyTo.content,
+              sender_id: replyTo.sender_id,
+              choir_members: replyTo.sender
+                ? {
+                    first_name: replyTo.sender.first_name,
+                    last_name: replyTo.sender.last_name,
+                  }
+                : null,
+            }
+          : null,
         metadata_json: { url: URL.createObjectURL(file) },
         is_edited: false,
         is_deleted: false,
@@ -298,6 +326,10 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
     if (msg.content) {
       void navigator.clipboard.writeText(msg.content);
     }
+  }, []);
+
+  const handleInfo = useCallback((msg: ChatMessage) => {
+    setInfoMessageId(msg.id);
   }, []);
 
   const handleEdit = useCallback(
@@ -549,7 +581,18 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         onEdit={handleEdit}
         onDelete={handleDelete}
         onCopy={handleCopy}
+        onInfo={handleInfo}
       />
+
+      {/* Message Info Modal */}
+      <AnimatePresence>
+        {infoMessageId && (
+          <MessageInfoModal
+            messageId={infoMessageId}
+            onClose={() => setInfoMessageId(null)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Room Info Drawer */}
       <RoomInfoDrawer
@@ -597,6 +640,19 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
             content: emoji,
             message_type: 'sticker',
             reply_to_id: replyTo?.id ?? null,
+            reply_to: replyTo
+              ? {
+                  id: replyTo.id,
+                  content: replyTo.content,
+                  sender_id: replyTo.sender_id,
+                  choir_members: replyTo.sender
+                    ? {
+                        first_name: replyTo.sender.first_name,
+                        last_name: replyTo.sender.last_name,
+                      }
+                    : null,
+                }
+              : null,
             metadata_json: { emoji },
             is_edited: false,
             is_deleted: false,

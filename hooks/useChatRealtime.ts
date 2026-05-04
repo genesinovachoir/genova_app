@@ -55,18 +55,43 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
         reactions: [],
       };
 
-      // Fetch sender info
-      void supabase
-        .from('choir_members')
-        .select('id, first_name, last_name, photo_url')
-        .eq('id', senderId)
-        .single()
-        .then(({ data }) => {
-          if (data) {
-            newMessage.sender = data;
+      // Fetch sender info and reply_to info if needed
+      const fetchDetails = async () => {
+        try {
+          const [senderRes, replyRes] = await Promise.all([
+            supabase
+              .from('choir_members')
+              .select('id, first_name, last_name, photo_url')
+              .eq('id', senderId)
+              .single(),
+            msg.reply_to_id
+              ? supabase
+                  .from('chat_messages')
+                  .select(`
+                    id, content, sender_id,
+                    choir_members!chat_messages_sender_id_fkey (first_name, last_name)
+                  `)
+                  .eq('id', msg.reply_to_id)
+                  .single()
+              : Promise.resolve({ data: null }),
+          ]);
+
+          if (senderRes.data) {
+            newMessage.sender = senderRes.data;
           }
+          if (replyRes.data) {
+            newMessage.reply_to = replyRes.data as any;
+          }
+
           addMessage(msgRoomId, newMessage);
-        });
+        } catch (err) {
+          console.error('Error fetching message details:', err);
+          // Still add the message even if details fetch fails
+          addMessage(msgRoomId, newMessage);
+        }
+      };
+
+      void fetchDetails();
 
       // Increment unread if not the active room
       if (msgRoomId !== activeRoomId) {
