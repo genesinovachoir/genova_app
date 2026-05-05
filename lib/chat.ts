@@ -502,8 +502,165 @@ function collectFileCandidates(value: unknown, out: FileCandidate[], depth = 0):
   }
 }
 
+interface ChatRoomsRpcRow {
+  room_id: string;
+  membership_id: string;
+  nickname: string | null;
+  membership_role: string | null;
+  last_read_at: string | null;
+  notifications_enabled: boolean | null;
+  hidden_at: string | null;
+  room_name: string;
+  room_slug: string | null;
+  room_description: string | null;
+  room_type: ChatRoomType | string | null;
+  room_created_by: string | null;
+  room_avatar_url: string | null;
+  room_is_archived: boolean | null;
+  room_created_at: string;
+  room_updated_at: string;
+  last_message: unknown;
+  unread_count: number | string | null;
+  member_count: number | string | null;
+  members_preview: unknown;
+}
+
+function parseRecord(value: unknown): Record<string, any> | null {
+  if (!value) return null;
+  if (typeof value === 'object') return value as Record<string, any>;
+  if (typeof value !== 'string') return null;
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, any> : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseNumberFallback(value: unknown, fallback = 0): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function normalizeMembersPreview(value: unknown): ChatRoomMemberPreview[] {
+  const parsed = typeof value === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(value) as unknown;
+        } catch {
+          return [];
+        }
+      })()
+    : value;
+
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed
+    .map((entry) => parseRecord(entry))
+    .filter((entry): entry is Record<string, any> => Boolean(entry?.member_id))
+    .map((entry) => ({
+      member_id: String(entry.member_id),
+      first_name: typeof entry.first_name === 'string' && entry.first_name.trim()
+        ? entry.first_name.trim()
+        : 'Üye',
+      photo_url: typeof entry.photo_url === 'string' ? entry.photo_url : null,
+    }));
+}
+
+function normalizeRpcLastMessage(value: unknown, roomId: string): ChatMessage | null {
+  const message = parseRecord(value);
+  if (!message?.id || !message.sender_id || !message.created_at) return null;
+
+  const sender = parseRecord(message.sender);
+  const metadataJson = parseRecord(message.metadata_json) ?? {};
+
+  return {
+    id: String(message.id),
+    room_id: typeof message.room_id === 'string' ? message.room_id : roomId,
+    sender_id: String(message.sender_id),
+    content: typeof message.content === 'string' ? message.content : null,
+    message_type: (message.message_type as ChatMessageType | undefined) ?? 'text',
+    reply_to_id: typeof message.reply_to_id === 'string' ? message.reply_to_id : null,
+    metadata_json: metadataJson,
+    is_edited: Boolean(message.is_edited),
+    is_deleted: Boolean(message.is_deleted),
+    created_at: String(message.created_at),
+    updated_at: typeof message.updated_at === 'string' ? message.updated_at : String(message.created_at),
+    sender: sender
+      ? {
+          id: String(sender.id ?? message.sender_id),
+          first_name: typeof sender.first_name === 'string' ? sender.first_name : '',
+          last_name: typeof sender.last_name === 'string' ? sender.last_name : '',
+          photo_url: typeof sender.photo_url === 'string' ? sender.photo_url : null,
+        }
+      : null,
+  };
+}
+
+function mapChatRoomsRpcRows(rows: ChatRoomsRpcRow[], memberId: string): ChatRoom[] {
+  return rows
+    .filter((row) => row.room_id && row.room_name)
+    .map((row) => ({
+      id: row.room_id,
+      name: row.room_name,
+      slug: row.room_slug ?? generateSlug(row.room_name),
+      description: row.room_description,
+      type: (row.room_type as ChatRoomType | null) ?? 'custom',
+      created_by: row.room_created_by,
+      avatar_url: row.room_avatar_url,
+      is_archived: Boolean(row.room_is_archived),
+      created_at: row.room_created_at,
+      updated_at: row.room_updated_at,
+      last_message: normalizeRpcLastMessage(row.last_message, row.room_id),
+      unread_count: parseNumberFallback(row.unread_count),
+      member_count: parseNumberFallback(row.member_count),
+      members_preview: normalizeMembersPreview(row.members_preview),
+      my_membership: {
+        id: row.membership_id,
+        room_id: row.room_id,
+        member_id: memberId,
+        nickname: row.nickname,
+        role: (row.membership_role === 'admin' ? 'admin' : 'member') as ChatRoomMemberRole,
+        joined_at: '',
+        last_read_at: row.last_read_at,
+        notifications_enabled: row.notifications_enabled ?? true,
+        hidden_at: row.hidden_at,
+      },
+    }))
+    .sort((a, b) => {
+      const aTime = a.last_message?.created_at ?? a.created_at;
+      const bTime = b.last_message?.created_at ?? b.created_at;
+      return new Date(bTime).getTime() - new Date(aTime).getTime();
+    });
+}
+
 /** Fetch rooms the current member belongs to, with last message */
 export async function fetchChatRooms(memberId: string) {
+  try {
+    const { data, error } = await supabase.rpc('get_chat_rooms_for_member', {
+      p_member_id: memberId,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    if (Array.isArray(data)) {
+      return mapChatRoomsRpcRows(data as ChatRoomsRpcRow[], memberId);
+    }
+  } catch (err) {
+    console.warn('Chat rooms RPC unavailable; falling back to legacy fetch.', err);
+  }
+
+  return fetchChatRoomsLegacy(memberId);
+}
+
+async function fetchChatRoomsLegacy(memberId: string) {
   // Get rooms + membership
   const { data: memberships, error: membershipError } = await supabase
     .from('chat_room_members')

@@ -84,10 +84,45 @@ interface ChoirMemberNameRow {
 
 const MAX_ITEMS = 18;
 const STORAGE_KEY_PREFIX = 'main_notifications_last_seen_at:';
+const NOTIFICATIONS_CACHE_PREFIX = 'genova.main-notifications.v1';
+const NOTIFICATIONS_STALE_TIME_MS = 2 * 60_000;
+const NOTIFICATIONS_GC_TIME_MS = 30 * 60_000;
+const NOTIFICATIONS_IDLE_REFRESH_DELAY_MS = 1_500;
+const NOTIFICATIONS_INVALIDATE_DEBOUNCE_MS = 750;
 const EMPTY_NOTIFICATIONS: MainNotificationItem[] = [];
 
 function getNotificationsQueryKey(memberId: string | null | undefined, scopeKey: string) {
   return ['main', 'notifications', memberId ?? 'guest', scopeKey] as const;
+}
+
+function getNotificationsCacheKey(memberId: string | null | undefined, scopeKey: string) {
+  return `${NOTIFICATIONS_CACHE_PREFIX}:${memberId ?? 'guest'}:${scopeKey}`;
+}
+
+function readNotificationsCache(memberId: string | null | undefined, scopeKey: string) {
+  if (!memberId || typeof window === 'undefined') return null;
+
+  try {
+    const raw = window.localStorage.getItem(getNotificationsCacheKey(memberId, scopeKey));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { items?: unknown };
+    return Array.isArray(parsed.items) ? parsed.items as MainNotificationItem[] : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeNotificationsCache(memberId: string | null | undefined, scopeKey: string, items: MainNotificationItem[]) {
+  if (!memberId || typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(
+      getNotificationsCacheKey(memberId, scopeKey),
+      JSON.stringify({ cachedAt: Date.now(), items }),
+    );
+  } catch {
+    // Cache write failures should never affect navigation.
+  }
 }
 
 function toDateSafe(value: string | null | undefined) {
@@ -504,7 +539,9 @@ export function MainNotificationsBell() {
   const { member, isAdmin, isSectionLeader, isChorist } = useAuth();
   const queryClient = useQueryClient();
   const containerRef = useRef<HTMLDivElement>(null);
+  const invalidateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isOpen, setIsOpen] = useState(false);
+  const [refreshReadyScope, setRefreshReadyScope] = useState<string | null>(null);
   const [seenAtByMember, setSeenAtByMember] = useState<Record<string, number>>({});
 
   const memberId = member?.id ?? null;
@@ -516,6 +553,7 @@ export function MainNotificationsBell() {
     : canReviewSubmissions
       ? `leader:${reviewerVoiceGroup ?? 'none'}`
       : 'member';
+  const notificationCacheScope = memberId ? `${memberId}:${notificationScopeKey}` : 'guest';
   const storageKey = memberId ? `${STORAGE_KEY_PREFIX}${memberId}` : null;
 
   const persistedLastSeenAt = useMemo(() => {
@@ -529,19 +567,34 @@ export function MainNotificationsBell() {
 
   const lastSeenAt = memberId ? (seenAtByMember[memberId] ?? persistedLastSeenAt) : 0;
 
+  useEffect(() => {
+    if (!memberId) return;
+
+    const timeoutId = setTimeout(
+      () => setRefreshReadyScope(notificationCacheScope),
+      NOTIFICATIONS_IDLE_REFRESH_DELAY_MS,
+    );
+
+    return () => clearTimeout(timeoutId);
+  }, [memberId, notificationCacheScope]);
+
   const notificationsQuery = useQuery({
     queryKey: getNotificationsQueryKey(memberId, notificationScopeKey),
-    queryFn: () =>
-      fetchMainNotifications({
+    queryFn: async () => {
+      const items = await fetchMainNotifications({
         memberId: memberId!,
         includeProfileChangeReviews: isChorist(),
         canReviewSubmissions,
         isChef,
         reviewerVoiceGroup,
-      }),
-    enabled: Boolean(memberId),
-    staleTime: 45_000,
-    gcTime: 5 * 60_000,
+      });
+      writeNotificationsCache(memberId, notificationScopeKey, items);
+      return items;
+    },
+    enabled: Boolean(memberId && (isOpen || refreshReadyScope === notificationCacheScope)),
+    initialData: () => readNotificationsCache(memberId, notificationScopeKey) ?? undefined,
+    staleTime: NOTIFICATIONS_STALE_TIME_MS,
+    gcTime: NOTIFICATIONS_GC_TIME_MS,
   });
 
   useEffect(() => {
@@ -550,7 +603,17 @@ export function MainNotificationsBell() {
     }
 
     const invalidate = () => {
-      void queryClient.invalidateQueries({ queryKey: getNotificationsQueryKey(memberId, notificationScopeKey) });
+      if (invalidateTimeoutRef.current) {
+        clearTimeout(invalidateTimeoutRef.current);
+      }
+
+      invalidateTimeoutRef.current = setTimeout(() => {
+        if (isOpen || refreshReadyScope === notificationCacheScope) {
+          void queryClient.invalidateQueries({ queryKey: getNotificationsQueryKey(memberId, notificationScopeKey) });
+        } else {
+          setRefreshReadyScope(notificationCacheScope);
+        }
+      }, NOTIFICATIONS_INVALIDATE_DEBOUNCE_MS);
     };
 
     const channel = supabase
@@ -591,9 +654,13 @@ export function MainNotificationsBell() {
       .subscribe();
 
     return () => {
+      if (invalidateTimeoutRef.current) {
+        clearTimeout(invalidateTimeoutRef.current);
+        invalidateTimeoutRef.current = null;
+      }
       supabase.removeChannel(channel);
     };
-  }, [canReviewSubmissions, memberId, notificationScopeKey, queryClient]);
+  }, [canReviewSubmissions, isOpen, memberId, notificationCacheScope, notificationScopeKey, queryClient, refreshReadyScope]);
 
   useEffect(() => {
     if (!isOpen) {

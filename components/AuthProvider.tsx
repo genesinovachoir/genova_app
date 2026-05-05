@@ -4,6 +4,8 @@ import { createContext, useContext, useEffect, useState, useCallback } from 'rea
 import { Session, User } from '@supabase/supabase-js';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase, ChoirMember, UserRole } from '@/lib/supabase';
+import { clearAssignmentCaches } from '@/lib/assignment-cache';
+import { clearChatCaches } from '@/lib/chat-cache';
 import { clearRepertoireMetadataCaches } from '@/lib/repertuvar/cache';
 import { clearRuntimeDriveFileCache } from '@/lib/repertuvar/offline';
 import { REPERTOIRE_QUERY_ROOT_KEY } from '@/lib/repertuvar/queries';
@@ -125,6 +127,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session?.user) {
         fetchMemberData(session.user.id);
       } else {
+        clearAssignmentCaches();
+        clearChatCaches();
         clearRepertoireMetadataCaches();
         queryClient.removeQueries({ queryKey: REPERTOIRE_QUERY_ROOT_KEY });
         void clearRuntimeDriveFileCache().catch(() => {});
@@ -148,6 +152,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    clearAssignmentCaches();
+    clearChatCaches();
     clearRepertoireMetadataCaches();
     queryClient.removeQueries({ queryKey: REPERTOIRE_QUERY_ROOT_KEY });
     void clearRuntimeDriveFileCache().catch(() => {

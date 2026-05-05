@@ -64,12 +64,16 @@ export function MessageInput({
 
   // When entering edit mode, populate the textarea with existing content
   useEffect(() => {
-    if (editingMessage?.content) {
-      setText(editingMessage.content);
-      // Focus the textarea
-      setTimeout(() => textareaRef.current?.focus(), 100);
-    }
-  }, [editingMessage]);
+    const editContent = editingMessage?.content;
+    if (!editContent) return;
+
+    const timer = setTimeout(() => {
+      setText(editContent);
+      textareaRef.current?.focus();
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [editingMessage?.content]);
 
   useEffect(() => {
     if (replyingTo) {
@@ -91,24 +95,47 @@ export function MessageInput({
       previewDebounceRef.current = null;
     }
 
+    let stateTimer: ReturnType<typeof setTimeout> | null = null;
+    let isCancelled = false;
+    const schedulePreviewState = (callback: () => void) => {
+      stateTimer = setTimeout(() => {
+        if (isCancelled) return;
+        callback();
+      }, 0);
+    };
+    const cleanupPreviewTimers = () => {
+      isCancelled = true;
+      if (stateTimer) clearTimeout(stateTimer);
+      if (previewDebounceRef.current) {
+        clearTimeout(previewDebounceRef.current);
+        previewDebounceRef.current = null;
+      }
+    };
+
     if (editingMessage) {
-      setLinkPreview(null);
-      setIsPreviewLoading(false);
-      return;
+      schedulePreviewState(() => {
+        setLinkPreview(null);
+        setIsPreviewLoading(false);
+      });
+      return cleanupPreviewTimers;
     }
 
     const detectedUrl = extractFirstUrl(text);
     if (!detectedUrl) {
-      setLinkPreview(null);
-      setIsPreviewLoading(false);
-      setIsPreviewDismissed(false);
+      schedulePreviewState(() => {
+        setLinkPreview(null);
+        setIsPreviewLoading(false);
+        setIsPreviewDismissed(false);
+      });
       dismissedUrlRef.current = null;
       lastDetectedUrl.current = null;
-      return;
+      return cleanupPreviewTimers;
     }
 
     if (dismissedUrlRef.current && dismissedUrlRef.current !== detectedUrl) {
-      setIsPreviewDismissed(false);
+      schedulePreviewState(() => {
+        setIsPreviewDismissed(false);
+      });
       dismissedUrlRef.current = null;
       lastDetectedUrl.current = null;
     }
@@ -121,8 +148,10 @@ export function MessageInput({
       return;
     }
 
-    let isCancelled = false;
-    setIsPreviewLoading(true);
+    schedulePreviewState(() => {
+      setIsPreviewLoading(true);
+    });
+
     previewDebounceRef.current = setTimeout(() => {
       void fetchLinkPreview(detectedUrl)
         .then((preview) => {
@@ -140,13 +169,7 @@ export function MessageInput({
         });
     }, 500);
 
-    return () => {
-      isCancelled = true;
-      if (previewDebounceRef.current) {
-        clearTimeout(previewDebounceRef.current);
-        previewDebounceRef.current = null;
-      }
-    };
+    return cleanupPreviewTimers;
   }, [text, editingMessage, extractFirstUrl, isPreviewDismissed]);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -226,6 +249,10 @@ export function MessageInput({
     // Reset input so same file can be selected again
     e.target.value = '';
   };
+
+  const handleOpenFilePicker = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
 
   const isEditing = !!editingMessage;
 
@@ -389,42 +416,50 @@ export function MessageInput({
             className="overflow-hidden border-t border-[var(--color-border)]"
           >
             <div className="flex items-center justify-around px-4 py-3">
-              {[
-                {
-                  icon: ImageIcon,
-                  label: 'Fotoğraf',
-                  color: '#4CAF50',
-                  onClick: () => fileInputRef.current?.click(),
-                },
-                {
-                  icon: Smile,
-                  label: 'Çıkartma',
-                  color: '#FF9800',
-                  onClick: onStickerOpen,
-                },
-                {
-                  icon: BarChart3,
-                  label: 'Anket',
-                  color: '#2196F3',
-                  onClick: onPollCreate,
-                },
-              ].map(({ icon: Icon, label, color, onClick }) => (
-                <button
-                  key={label}
-                  onClick={onClick}
-                  className="flex flex-col items-center gap-1.5"
+              <button
+                onClick={handleOpenFilePicker}
+                className="flex flex-col items-center gap-1.5"
+              >
+                <div
+                  className="flex h-12 w-12 items-center justify-center rounded-xl"
+                  style={{ backgroundColor: '#4CAF5020' }}
                 >
-                  <div
-                    className="flex h-12 w-12 items-center justify-center rounded-xl"
-                    style={{ backgroundColor: `${color}20` }}
-                  >
-                    <Icon size={22} style={{ color }} />
-                  </div>
-                  <span className="text-[0.65rem] font-medium text-[var(--color-text-medium)]">
-                    {label}
-                  </span>
-                </button>
-              ))}
+                  <ImageIcon size={22} style={{ color: '#4CAF50' }} />
+                </div>
+                <span className="text-[0.65rem] font-medium text-[var(--color-text-medium)]">
+                  Fotoğraf
+                </span>
+              </button>
+
+              <button
+                onClick={onStickerOpen}
+                className="flex flex-col items-center gap-1.5"
+              >
+                <div
+                  className="flex h-12 w-12 items-center justify-center rounded-xl"
+                  style={{ backgroundColor: '#FF980020' }}
+                >
+                  <Smile size={22} style={{ color: '#FF9800' }} />
+                </div>
+                <span className="text-[0.65rem] font-medium text-[var(--color-text-medium)]">
+                  Çıkartma
+                </span>
+              </button>
+
+              <button
+                onClick={onPollCreate}
+                className="flex flex-col items-center gap-1.5"
+              >
+                <div
+                  className="flex h-12 w-12 items-center justify-center rounded-xl"
+                  style={{ backgroundColor: '#2196F320' }}
+                >
+                  <BarChart3 size={22} style={{ color: '#2196F3' }} />
+                </div>
+                <span className="text-[0.65rem] font-medium text-[var(--color-text-medium)]">
+                  Anket
+                </span>
+              </button>
             </div>
           </motion.div>
         )}

@@ -13,6 +13,9 @@ interface ReactionBarProps {
 
 /** Groups reactions by emoji and renders them as small pills under a message bubble */
 export function ReactionBar({ reactions, currentMemberId, onReactionClick }: ReactionBarProps) {
+  const [showMembersEmoji, setShowMembersEmoji] = useState<string | null>(null);
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   if (!reactions || reactions.length === 0) return null;
 
   // Group by emoji
@@ -43,9 +46,6 @@ export function ReactionBar({ reactions, currentMemberId, onReactionClick }: Rea
       }
     >
   );
-
-  const [showMembersEmoji, setShowMembersEmoji] = useState<string | null>(null);
-  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   return (
     <>
@@ -201,4 +201,3 @@ function ReactionListModal({
     </motion.div>
   );
 }
-

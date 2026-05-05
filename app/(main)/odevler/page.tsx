@@ -19,6 +19,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { CreateAssignmentModal } from '@/components/CreateAssignmentModal';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ToastProvider';
+import { getAssignmentCacheKey, readAssignmentCache, writeAssignmentCache } from '@/lib/assignment-cache';
 import { createSlugLookup, getAssignmentPath } from '@/lib/internalPageLinks';
 
 type AssignmentChoirMember =
@@ -831,27 +832,47 @@ export default function Odevler() {
   const [assignmentToEditId, setAssignmentToEditId] = useState<string | null>(null);
   const [assignmentToDelete, setAssignmentToDelete] = useState<Assignment | null>(null);
   const [sortOption, setSortOption] = useState<'latest' | 'deadline'>('latest');
+  const assignmentsCacheKey = useMemo(
+    () => getAssignmentCacheKey('member-list', member?.id ?? null, roleKey, reviewerVoiceGroup),
+    [member?.id, reviewerVoiceGroup, roleKey],
+  );
+  const reviewerQueueCacheKey = useMemo(
+    () => getAssignmentCacheKey('reviewer-queue', member?.id ?? null, roleKey, reviewerVoiceGroup),
+    [member?.id, reviewerVoiceGroup, roleKey],
+  );
 
   const assignmentsQuery = useQuery({
     queryKey: ['assignments', member?.id ?? null, roleKey, reviewerVoiceGroup],
-    queryFn: () =>
-      fetchAssignments({
+    queryFn: async () => {
+      const data = await fetchAssignments({
         memberId: member?.id ?? null,
         isChef,
         isLeader,
         reviewerVoiceGroup,
-      }),
+      });
+      writeAssignmentCache(assignmentsCacheKey, data);
+      return data;
+    },
     enabled: !authLoading && !reviewerView,
+    initialData: () => readAssignmentCache<AssignmentListItem[]>(assignmentsCacheKey) ?? undefined,
+    staleTime: 30_000,
+    gcTime: 24 * 60 * 60_000,
   });
 
   const reviewerQueueQuery = useQuery({
     queryKey: ['reviewer-assignment-queue', roleKey, reviewerVoiceGroup],
-    queryFn: () =>
-      fetchReviewerQueue({
+    queryFn: async () => {
+      const data = await fetchReviewerQueue({
         isChef,
         reviewerVoiceGroup,
-      }),
+      });
+      writeAssignmentCache(reviewerQueueCacheKey, data);
+      return data;
+    },
     enabled: !authLoading && reviewerView,
+    initialData: () => readAssignmentCache<ReviewerQueueItem[]>(reviewerQueueCacheKey) ?? undefined,
+    staleTime: 30_000,
+    gcTime: 24 * 60 * 60_000,
   });
 
   const deleteMutation = useMutation({
@@ -861,7 +882,23 @@ export default function Odevler() {
       });
       return assignmentId;
     },
-    onSuccess: async () => {
+    onSuccess: async (assignmentId) => {
+      const cachedAssignments = readAssignmentCache<AssignmentListItem[]>(assignmentsCacheKey);
+      if (cachedAssignments) {
+        writeAssignmentCache(
+          assignmentsCacheKey,
+          cachedAssignments.filter((assignment) => assignment.id !== assignmentId),
+        );
+      }
+
+      const cachedReviewerQueue = readAssignmentCache<ReviewerQueueItem[]>(reviewerQueueCacheKey);
+      if (cachedReviewerQueue) {
+        writeAssignmentCache(
+          reviewerQueueCacheKey,
+          cachedReviewerQueue.filter((item) => item.assignment_id !== assignmentId),
+        );
+      }
+
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['assignments'] }),
         queryClient.invalidateQueries({ queryKey: ['reviewer-assignment-queue'] }),
@@ -999,7 +1036,9 @@ export default function Odevler() {
   const listCount = reviewerView ? reviewerAssignments.length : memberRows.length;
   const activeTabLabel = reviewerView ? 'Bekleyen' : 'Aktif';
   const completedTabLabel = reviewerView ? 'Tamamlanan' : 'Tamamlanan';
-  const isLoading = authLoading || (reviewerView ? reviewerQueueQuery.isPending : assignmentsQuery.isPending);
+  const isLoading = authLoading || (reviewerView
+    ? !reviewerQueueQuery.data && reviewerQueueQuery.isPending
+    : !assignmentsQuery.data && assignmentsQuery.isPending);
   const isError = reviewerView ? reviewerQueueQuery.isError : assignmentsQuery.isError;
   const listError = reviewerView ? reviewerQueueQuery.error : assignmentsQuery.error;
 

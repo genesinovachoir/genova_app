@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -34,6 +34,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ReviewNoteDialog } from '@/components/ReviewNoteDialog';
 import { useToast } from '@/components/ToastProvider';
 import { useBackOrHome } from '@/hooks/useBackOrHome';
+import { getAssignmentCacheKey, readAssignmentCache, writeAssignmentCache } from '@/lib/assignment-cache';
 import { uploadSubmission } from '@/lib/drive';
 import { sanitizeRichText } from '@/lib/richText';
 import { createSlugLookup, isUuidLike } from '@/lib/internalPageLinks';
@@ -393,15 +394,31 @@ async function fetchAssignmentDetail({
   const effectiveMemberId = (canReviewSubmissions && targetMemberId) ? targetMemberId : memberId;
 
   if (effectiveMemberId) {
-    const { data, error: mySubmissionError } = await supabase
-      .from('assignment_submissions')
-      .select(
-        'id, assignment_id, member_id, drive_file_id, drive_web_view_link, drive_download_link, file_name, mime_type, file_size_bytes, drive_member_folder_id, submitted_at, updated_at, status, submission_note, reviewer_note, approved_at, approved_by',
-      )
-      .eq('assignment_id', assignmentId)
-      .eq('member_id', effectiveMemberId)
-      .order('submitted_at', { ascending: false });
+    const [mySubmissionResult, historyResult, targetMemberResult] = await Promise.all([
+      supabase
+        .from('assignment_submissions')
+        .select(
+          'id, assignment_id, member_id, drive_file_id, drive_web_view_link, drive_download_link, file_name, mime_type, file_size_bytes, drive_member_folder_id, submitted_at, updated_at, status, submission_note, reviewer_note, approved_at, approved_by',
+        )
+        .eq('assignment_id', assignmentId)
+        .eq('member_id', effectiveMemberId)
+        .order('submitted_at', { ascending: false }),
+      supabase
+        .from('assignment_submission_history')
+        .select(
+          'id, assignment_id, member_id, source_submission_id, drive_file_id, drive_web_view_link, drive_download_link, file_name, mime_type, file_size_bytes, drive_member_folder_id, submitted_at, updated_at, status, submission_note, reviewer_note, approved_at, approved_by, archived_at, archive_reason',
+        )
+        .eq('assignment_id', assignmentId)
+        .eq('member_id', effectiveMemberId)
+        .order('archived_at', { ascending: false }),
+      supabase
+        .from('choir_members')
+        .select('first_name, last_name, photo_url')
+        .eq('id', effectiveMemberId)
+        .single(),
+    ]);
 
+    const { data, error: mySubmissionError } = mySubmissionResult;
     if (mySubmissionError) {
       console.error('Submission fetch failed:', mySubmissionError);
     } else {
@@ -409,14 +426,7 @@ async function fetchAssignmentDetail({
       mySubmissionRow = mySubmissionRows[0] ?? null;
     }
 
-    const { data: historyData, error: historyError } = await supabase
-      .from('assignment_submission_history')
-      .select(
-        'id, assignment_id, member_id, source_submission_id, drive_file_id, drive_web_view_link, drive_download_link, file_name, mime_type, file_size_bytes, drive_member_folder_id, submitted_at, updated_at, status, submission_note, reviewer_note, approved_at, approved_by, archived_at, archive_reason',
-      )
-      .eq('assignment_id', assignmentId)
-      .eq('member_id', effectiveMemberId)
-      .order('archived_at', { ascending: false });
+    const { data: historyData, error: historyError } = historyResult;
     if (historyError) {
       console.error('Submission history fetch failed:', historyError);
     } else {
@@ -426,13 +436,7 @@ async function fetchAssignmentDetail({
       }
     }
 
-    // Also fetch target member info for display
-    const { data: targetMemberData } = await supabase
-      .from('choir_members')
-      .select('first_name, last_name, photo_url')
-      .eq('id', effectiveMemberId)
-      .single();
-    
+    const { data: targetMemberData } = targetMemberResult;
     if (targetMemberData) {
       designatedMember = {
         first_name: targetMemberData.first_name,
@@ -804,11 +808,23 @@ export default function AssignmentDetailPage() {
     reviewerVoiceGroup,
     targetMemberId,
   ] as const;
+  const detailCacheKey = useMemo(
+    () => getAssignmentCacheKey(
+      'detail',
+      assignmentIdentifier,
+      assignmentIdHint,
+      member?.id ?? null,
+      roleKey,
+      reviewerVoiceGroup,
+      targetMemberId,
+    ),
+    [assignmentIdentifier, assignmentIdHint, member?.id, reviewerVoiceGroup, roleKey, targetMemberId],
+  );
 
   const detailQuery = useQuery({
     queryKey: detailQueryKey,
-    queryFn: () =>
-      fetchAssignmentDetail({
+    queryFn: async () => {
+      const data = await fetchAssignmentDetail({
         assignmentIdentifier,
         assignmentIdHint,
         memberId: member?.id ?? null,
@@ -816,10 +832,22 @@ export default function AssignmentDetailPage() {
         reviewerVoiceGroup,
         isChef,
         targetMemberId,
-      }),
+      });
+      writeAssignmentCache(detailCacheKey, data);
+      return data;
+    },
     enabled: Boolean(assignmentIdentifier) && !authLoading,
+    initialData: () => readAssignmentCache<AssignmentDetailData>(detailCacheKey) ?? undefined,
+    staleTime: 30_000,
+    gcTime: 24 * 60 * 60_000,
   });
   const resolvedAssignmentId = detailQuery.data?.assignmentId ?? null;
+
+  useEffect(() => {
+    if (detailQuery.data) {
+      writeAssignmentCache(detailCacheKey, detailQuery.data);
+    }
+  }, [detailCacheKey, detailQuery.data]);
 
   const uploadMutation = useMutation({
     mutationFn: async ({ file, note }: { file: File; note?: string }) => {
@@ -1104,7 +1132,7 @@ export default function AssignmentDetailPage() {
           <ArrowLeft size={18} />
           <span className="text-xs font-medium uppercase tracking-[0.1em]">Geri</span>
         </button>
-        {authLoading || detailQuery.isPending ? (
+        {authLoading || (!detailQuery.data && detailQuery.isPending) ? (
           <div className="flex items-center justify-center py-20">
             <Loader2 className="animate-spin text-[var(--color-accent)]" size={28} />
           </div>

@@ -4,6 +4,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, MoreVertical, Loader2, ChevronDown } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/components/AuthProvider';
 import { useChatStore } from '@/store/useChatStore';
 import { useChatRealtime } from '@/hooks/useChatRealtime';
@@ -26,6 +27,16 @@ import {
   fetchStarredMessages,
 } from '@/lib/chat';
 import type { ChatMessage, ChatRoomMember, LinkPreviewData } from '@/lib/chat';
+import {
+  markPendingRoomMessageFailed,
+  mergeChatMessages,
+  readCachedChatRooms,
+  readCachedRoomSnapshot,
+  readPendingRoomMessages,
+  removePendingRoomMessage,
+  upsertPendingRoomMessage,
+  writeCachedRoomSnapshot,
+} from '@/lib/chat-cache';
 import { MessageBubble } from './MessageBubble';
 import { MessageInput } from './MessageInput';
 import { MessageContextMenu } from './MessageContextMenu';
@@ -57,6 +68,42 @@ function extractRoomReference(row: RoomMembershipRow | null): RoomReferenceRow |
   return row.chat_rooms ?? null;
 }
 
+async function loadRoomSnapshot(memberId: string, roomId: string) {
+  const [msgs, members] = await Promise.all([
+    fetchMessages(roomId),
+    fetchRoomMembers(roomId),
+  ]);
+  const reversedMsgs = msgs.reverse();
+
+  const msgIds = reversedMsgs.map((m) => m.id);
+  const [reactionsMap, starredData] = await Promise.all([
+    fetchReactionsForMessages(msgIds),
+    fetchStarredMessages(memberId, roomId),
+  ]);
+
+  return {
+    messages: reversedMsgs.map((message) => ({
+      ...message,
+      reactions: reactionsMap[message.id] ?? [],
+    })),
+    roomMembers: members,
+    starredMessageIds: starredData.map((message: any) => message.id as string),
+    hasMore: msgs.length >= 40,
+  };
+}
+
+function readInitialRoomSnapshot(memberId: string, roomId: string) {
+  const cached = readCachedRoomSnapshot(memberId, roomId);
+  if (!cached) return undefined;
+
+  return {
+    messages: mergeChatMessages(cached.messages, readPendingRoomMessages(memberId, roomId)),
+    roomMembers: cached.roomMembers,
+    starredMessageIds: cached.starredMessageIds,
+    hasMore: cached.hasMore,
+  };
+}
+
 export function ChatRoom({ slug }: ChatRoomProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -64,6 +111,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
   const { member, isLoading: isAuthLoading } = useAuth();
   const setActiveRoomId = useChatStore((state) => state.setActiveRoomId);
   const setRoomInfoOpen = useChatStore((state) => state.setRoomInfoOpen);
+  const setRooms = useChatStore((state) => state.setRooms);
   
   // Specific selectors to avoid full-store re-renders
   const messagesByRoom = useChatStore((state) => state.messagesByRoom);
@@ -80,7 +128,6 @@ export function ChatRoom({ slug }: ChatRoomProps) {
   const [resolvedRoomId, setResolvedRoomId] = useState<string | null>(null);
   const [isResolvingRoom, setIsResolvingRoom] = useState(true);
   const [roomNotFound, setRoomNotFound] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [roomMembers, setRoomMembers] = useState<ChatRoomMember[]>([]);
@@ -96,11 +143,48 @@ export function ChatRoom({ slug }: ChatRoomProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialLoad = useRef(true);
+  const retriedPendingRoomRef = useRef<string | null>(null);
 
   const roomId = resolvedRoomId;
-  const messages = roomId ? messagesByRoom[roomId] ?? [] : [];
   const room = roomId ? rooms.find((r) => r.id === roomId) : undefined;
   const { sendTyping } = useChatRealtime(member?.id ?? null, roomId);
+
+  const roomSnapshotQuery = useQuery({
+    queryKey: ['chat', 'room-snapshot', member?.id ?? 'guest', roomId ?? 'none'],
+    queryFn: async () => {
+      if (!member?.id || !roomId) {
+        return {
+          messages: [] as ChatMessage[],
+          roomMembers: [] as ChatRoomMember[],
+          starredMessageIds: [] as string[],
+          hasMore: false,
+        };
+      }
+
+      const fresh = await loadRoomSnapshot(member.id, roomId);
+      const pendingMessages = readPendingRoomMessages(member.id, roomId);
+      const snapshot = {
+        ...fresh,
+        messages: mergeChatMessages(fresh.messages, pendingMessages),
+      };
+      writeCachedRoomSnapshot(member.id, roomId, snapshot);
+      return snapshot;
+    },
+    enabled: Boolean(member?.id && roomId),
+    initialData: () => (
+      member?.id && roomId
+        ? readInitialRoomSnapshot(member.id, roomId)
+        : undefined
+    ),
+    staleTime: 10_000,
+    gcTime: 24 * 60 * 60_000,
+  });
+
+  const messages = useMemo(() => {
+    if (!roomId) return [];
+    return messagesByRoom[roomId] ?? roomSnapshotQuery.data?.messages ?? [];
+  }, [messagesByRoom, roomId, roomSnapshotQuery.data?.messages]);
+  const isLoading = !roomSnapshotQuery.data && roomSnapshotQuery.isPending;
 
   useEffect(() => {
     let cancelled = false;
@@ -129,6 +213,20 @@ export function ChatRoom({ slug }: ChatRoomProps) {
       if (!member?.id) {
         if (!cancelled) {
           setRoomNotFound(true);
+          setIsResolvingRoom(false);
+        }
+        return;
+      }
+
+      const cachedRooms = readCachedChatRooms(member.id);
+      const fromCache = cachedRooms?.find((r) => r.slug === slug || r.id === slug);
+      if (cachedRooms && fromCache) {
+        setRooms(cachedRooms);
+        if (!cancelled) {
+          setResolvedRoomId(fromCache.id);
+          if (fromCache.slug && fromCache.slug !== slug) {
+            router.replace(`/chat/${fromCache.slug}`);
+          }
           setIsResolvingRoom(false);
         }
         return;
@@ -203,7 +301,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
     return () => {
       cancelled = true;
     };
-  }, [slug, router, member?.id, isAuthLoading]);
+  }, [slug, router, member?.id, isAuthLoading, setRooms]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -229,47 +327,68 @@ export function ChatRoom({ slug }: ChatRoomProps) {
     router.replace(nextUrl);
   }, [pathname, router, searchParams, setRoomInfoOpen]);
 
-  // Load initial messages + reactions
+  useEffect(() => {
+    if (!roomId || !roomSnapshotQuery.data) return;
+
+    useChatStore.getState().setMessages(roomId, roomSnapshotQuery.data.messages);
+    useChatStore.getState().setStarredMessageIds(roomSnapshotQuery.data.starredMessageIds);
+    setRoomMembers(roomSnapshotQuery.data.roomMembers);
+    setHasMore(roomSnapshotQuery.data.hasMore);
+    initialLoad.current = true;
+  }, [roomId, roomSnapshotQuery.data]);
+
   useEffect(() => {
     if (!member?.id || !roomId) return;
-    const load = async () => {
-      setIsLoading(true);
-      try {
-        const [msgs, members] = await Promise.all([
-          fetchMessages(roomId),
-          fetchRoomMembers(roomId),
-        ]);
-        const reversedMsgs = msgs.reverse();
 
-        const msgIds = reversedMsgs.map((m) => m.id);
-        const [reactionsMap, starredData] = await Promise.all([
-          fetchReactionsForMessages(msgIds),
-          fetchStarredMessages(member.id, roomId)
-        ]);
-        
-        const msgsWithReactions = reversedMsgs.map((m) => ({
-          ...m,
-          reactions: reactionsMap[m.id] ?? [],
-        }));
-
-        useChatStore.getState().setMessages(roomId, msgsWithReactions);
-        useChatStore.getState().setStarredMessageIds(starredData.map((m: any) => m.id));
-        setRoomMembers(members);
-        setHasMore(msgs.length >= 40);
-        await markRoomAsRead(roomId, member.id);
-        useChatStore.getState().clearUnread(roomId);
-
-        // Broadcast read receipt
-        // (handled via realtime broadcast to notify other users)
-      } catch (err) {
-        console.error('Load failed:', err);
-      } finally {
-        setIsLoading(false);
-        initialLoad.current = true;
-      }
-    };
-    void load();
+    void markRoomAsRead(roomId, member.id)
+      .then(() => useChatStore.getState().clearUnread(roomId))
+      .catch((err) => console.error('Failed to mark room as read:', err));
   }, [roomId, member?.id]);
+
+  useEffect(() => {
+    if (!member?.id || !roomId) return;
+    if (retriedPendingRoomRef.current === roomId) return;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+
+    const queued = readPendingRoomMessages(member.id, roomId)
+      .filter((message) => message.message_type === 'text' && message.content);
+    if (queued.length === 0) return;
+
+    retriedPendingRoomRef.current = roomId;
+    for (const queuedMessage of queued) {
+      const metadataJson = { ...queuedMessage.metadata_json };
+      delete metadataJson._status;
+      delete metadataJson._failed;
+
+      void sendMessage(roomId, member.id, queuedMessage.content ?? '', {
+        replyToId: queuedMessage.reply_to_id,
+        metadataJson,
+      })
+        .then((real) => {
+          removePendingRoomMessage(member.id, roomId, queuedMessage.id);
+          useChatStore.getState().updateMessage(roomId, queuedMessage.id, {
+            id: real.id,
+            created_at: real.created_at,
+            metadata_json: real.metadata_json,
+            reply_to: real.reply_to ?? queuedMessage.reply_to,
+          });
+        })
+        .catch(() => {
+          markPendingRoomMessageFailed(member.id, roomId, queuedMessage.id);
+        });
+    }
+  }, [member?.id, roomId]);
+
+  useEffect(() => {
+    if (!member?.id || !roomId || messages.length === 0) return;
+
+    writeCachedRoomSnapshot(member.id, roomId, {
+      messages,
+      roomMembers,
+      starredMessageIds,
+      hasMore,
+    });
+  }, [hasMore, member?.id, messages, roomId, roomMembers, starredMessageIds]);
 
   // Scroll to bottom
   const lastMessageId = messages[messages.length - 1]?.id;
@@ -309,6 +428,14 @@ export function ChatRoom({ slug }: ChatRoomProps) {
           .map((m) => ({ ...m, reactions: reactionsMap[m.id] ?? [] }));
 
         useChatStore.getState().prependMessages(roomId, olderWithReactions);
+        if (member?.id) {
+          writeCachedRoomSnapshot(member.id, roomId, {
+            messages: mergeChatMessages(olderWithReactions, messages),
+            roomMembers,
+            starredMessageIds,
+            hasMore: older.length >= 40,
+          });
+        }
         requestAnimationFrame(() => {
           if (scrollRef.current)
             scrollRef.current.scrollTop =
@@ -320,7 +447,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [isLoadingMore, hasMore, messages, roomId]);
+  }, [isLoadingMore, hasMore, messages, member?.id, roomId, roomMembers, starredMessageIds]);
 
   useEffect(() => {
     const c = scrollRef.current;
@@ -381,7 +508,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
                 : null,
             }
           : null,
-        metadata_json: metadataJson,
+        metadata_json: { ...metadataJson, _status: 'pending' },
         is_edited: false,
         is_deleted: false,
         created_at: new Date().toISOString(),
@@ -394,28 +521,38 @@ export function ChatRoom({ slug }: ChatRoomProps) {
         },
       };
       useChatStore.getState().addMessage(roomId, opt);
+      upsertPendingRoomMessage(member.id, roomId, opt);
       setReplyingTo(null);
       try {
         const real = await sendMessage(roomId, member.id, content, {
           replyToId: replyTo?.id ?? null,
           metadataJson,
         });
+        removePendingRoomMessage(member.id, roomId, tempId);
         useChatStore
           .getState()
           .updateMessage(roomId, tempId, {
             id: real.id,
             created_at: real.created_at,
+            metadata_json: real.metadata_json,
             reply_to: real.reply_to ?? opt.reply_to,
           });
+        writeCachedRoomSnapshot(member.id, roomId, {
+          messages: mergeChatMessages(useChatStore.getState().messagesByRoom[roomId] ?? [], [real]),
+          roomMembers,
+          starredMessageIds,
+          hasMore,
+        });
       } catch {
+        markPendingRoomMessageFailed(member.id, roomId, tempId);
         useChatStore
           .getState()
           .updateMessage(roomId, tempId, {
-            metadata_json: { _failed: true },
+            metadata_json: { ...metadataJson, _status: 'failed', _failed: true },
           });
       }
     },
-    [member, roomId, editingMessage, setEditingMessage]
+    [editingMessage, hasMore, member, roomId, roomMembers, setEditingMessage, setReplyingTo, starredMessageIds]
   );
 
   // Image upload handler
@@ -479,7 +616,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
         useChatStore.getState().removeOptimisticMessage(roomId, tempId);
       }
     },
-    [member, roomId]
+    [member, roomId, setReplyingTo]
   );
 
   const handleCopyMessage = useCallback((msg: ChatMessage) => {
@@ -557,7 +694,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
         console.error('Reaction failed:', err);
       }
     },
-    [member?.id, messages, roomId]
+    [member?.id, member?.first_name, member?.last_name, member?.photo_url, messages, roomId]
   );
 
   const handleToggleStar = useCallback(async (msg: ChatMessage) => {
@@ -621,8 +758,8 @@ export function ChatRoom({ slug }: ChatRoomProps) {
     return g;
   }, [messages]);
 
-  const typingInRoom = roomId ? typingUsers[roomId] ?? [] : [];
   const typingText = useMemo(() => {
+    const typingInRoom = roomId ? typingUsers[roomId] ?? [] : [];
     if (typingInRoom.length === 0) return null;
     const names = typingInRoom
       .map(
@@ -633,7 +770,7 @@ export function ChatRoom({ slug }: ChatRoomProps) {
       .filter(Boolean);
     if (names.length === 1) return `${names[0]} yazıyor...`;
     return `${names.length} kişi yazıyor...`;
-  }, [typingInRoom, roomMembers]);
+  }, [roomId, roomMembers, typingUsers]);
 
   const onlineCount = useMemo(
     () =>
