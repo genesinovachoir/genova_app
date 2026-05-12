@@ -120,7 +120,7 @@ export function CreateRoomModal() {
                       <button key={m.id} onClick={() => toggle(m.id)}
                         className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${isSel ? 'bg-[var(--color-accent-soft)]' : 'hover:bg-[var(--color-surface)]'}`}>
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--color-surface)]">
-                          {m.photo_url ? <img src={m.photo_url} className="h-full w-full rounded-full object-cover" /> :
+                          {m.photo_url ? <img src={m.photo_url} className="h-full w-full rounded-full object-cover" alt="" /> :
                             <span className="text-sm font-bold text-[var(--color-accent)]">{m.first_name[0]}</span>}
                         </div>
                         <div className="flex-1 text-left">

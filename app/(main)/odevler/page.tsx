@@ -845,7 +845,7 @@ export default function Odevler() {
   useEffect(() => {
     const saved = sessionStorage.getItem('odevler_activeTab');
     if (saved === 'aktif' || saved === 'tamamlanan') {
-      setActiveTab(saved);
+      setTimeout(() => setActiveTab(saved as 'aktif' | 'tamamlanan'), 0);
     }
   }, []);
 

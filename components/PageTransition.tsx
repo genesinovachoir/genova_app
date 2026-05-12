@@ -27,12 +27,12 @@ function getTabIndex(path: string) {
 export function PageTransition({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const direction = useNavigationStore((s) => s.direction);
-  const prevPathRef = useRef(pathname);
+  const [prevPath, setPrevPath] = useState(pathname);
 
   // Tab->tab geçişi mi?
   const isTabNav =
-    isTabRoute(pathname) && isTabRoute(prevPathRef.current) && pathname !== prevPathRef.current;
-  const prevTabIdx = getTabIndex(prevPathRef.current);
+    isTabRoute(pathname) && isTabRoute(prevPath) && pathname !== prevPath;
+  const prevTabIdx = getTabIndex(prevPath);
   const currTabIdx = getTabIndex(pathname);
 
   // Tab geçişinde yön tab sırasına göre belirle, diğer durumlarda store'dan al
@@ -43,9 +43,9 @@ export function PageTransition({ children }: { children: React.ReactNode }) {
     slideDirection = direction === 'forward' ? 1 : -1;
   }
 
-  // Ref'i güncelle
-  if (pathname !== prevPathRef.current) {
-    prevPathRef.current = pathname;
+  // Path değiştiyse, derived state'i (prevPath) güncelle
+  if (pathname !== prevPath) {
+    setPrevPath(pathname);
   }
 
   const offsetX = 18; // % — kısa ve hızlı hissettiren offset
