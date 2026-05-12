@@ -712,18 +712,22 @@ export default function Dashboard() {
                   Gelinmeyen prova: <span className="font-bold text-[var(--color-text-high)]">{missedCount}</span>
                 </p>
               </div>
-              <div className="flex items-center gap-2.5">
-                <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
-                <p className="whitespace-nowrap">
-                  Yapılan ödev: <span className="font-bold text-[var(--color-text-high)]">{approvedAssignments}</span>
-                </p>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <span className="h-2 w-2 shrink-0 rounded-full bg-orange-400" />
-                <p className="whitespace-nowrap">
-                  Yapılmayan ödev: <span className="font-bold text-[var(--color-text-high)]">{Math.max(0, totalAssignments - approvedAssignments)}</span>
-                </p>
-              </div>
+              {!(isAdmin() || isSectionLeader()) && (
+                <>
+                  <div className="flex items-center gap-2.5">
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+                    <p className="whitespace-nowrap">
+                      Yapılan ödev: <span className="font-bold text-[var(--color-text-high)]">{approvedAssignments}</span>
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-orange-400" />
+                    <p className="whitespace-nowrap">
+                      Yapılmayan ödev: <span className="font-bold text-[var(--color-text-high)]">{Math.max(0, totalAssignments - approvedAssignments)}</span>
+                    </p>
+                  </div>
+                </>
+              )}
               <div className="flex items-center gap-2.5 pt-0.5">
                 <span className="h-2 w-2 shrink-0 rounded-full bg-sky-300" />
                 <p className="whitespace-nowrap">

@@ -177,64 +177,67 @@ export default function AnnouncementPage() {
   return (
     <SwipeBack fallback="/">
     <main className="min-h-screen bg-[var(--color-background)] px-5 pb-10 pt-[max(env(safe-area-inset-top),1.5rem)]">
-      <div className="mb-6 flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 mt-1">
+          <span className="page-kicker truncate">Duyuru</span>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          {canEditAnnouncement || canDeleteAnnouncement ? (
+            <>
+              {canEditAnnouncement ? (
+                <>
+                  <button
+                    onClick={() => toggleHideMutation.mutate(!announcement.is_hidden)}
+                    disabled={toggleHideMutation.isPending}
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border backdrop-blur-md transition-all active:scale-95 disabled:opacity-50 ${
+                      announcement.is_hidden
+                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
+                        : 'border-white/10 bg-white/5 text-[var(--color-text-medium)] hover:bg-white/10 hover:text-[var(--color-text-high)]'
+                    }`}
+                    title={announcement.is_hidden ? 'Göster' : 'Gizle'}
+                  >
+                    {toggleHideMutation.isPending ? (
+                      <Loader2 size={13} className="animate-spin" />
+                    ) : announcement.is_hidden ? (
+                      <Eye size={13} />
+                    ) : (
+                      <EyeOff size={13} />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setEditingAnn(announcement)}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95 disabled:opacity-50"
+                  >
+                    <Edit2 size={13} />
+                  </button>
+                </>
+              ) : null}
+              {canDeleteAnnouncement ? (
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  disabled={deleteAnnouncementMutation.isPending}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-rose-500/35 bg-rose-500/10 text-rose-300 backdrop-blur-md transition-all hover:bg-rose-500/20 active:scale-95 disabled:opacity-50"
+                  title="Sil"
+                >
+                  {deleteAnnouncementMutation.isPending ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={13} />
+                  )}
+                </button>
+              ) : null}
+            </>
+          ) : null}
+
           <button
             onClick={handleBack}
-            className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
+            className="flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
           >
             <ArrowLeft size={16} />
             <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
           </button>
-          <span className="page-kicker">Duyuru</span>
         </div>
-
-        {canEditAnnouncement || canDeleteAnnouncement ? (
-          <div className="flex items-center gap-2">
-            {canEditAnnouncement ? (
-              <>
-                <button
-                  onClick={() => toggleHideMutation.mutate(!announcement.is_hidden)}
-                  disabled={toggleHideMutation.isPending}
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border backdrop-blur-md transition-all active:scale-95 disabled:opacity-50 ${
-                    announcement.is_hidden
-                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
-                      : 'border-white/10 bg-white/5 text-[var(--color-text-medium)] hover:bg-white/10 hover:text-[var(--color-text-high)]'
-                  }`}
-                  title={announcement.is_hidden ? 'Göster' : 'Gizle'}
-                >
-                  {toggleHideMutation.isPending ? (
-                    <Loader2 size={13} className="animate-spin" />
-                  ) : announcement.is_hidden ? (
-                    <Eye size={13} />
-                  ) : (
-                    <EyeOff size={13} />
-                  )}
-                </button>
-                <button
-                  onClick={() => setEditingAnn(announcement)}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95 disabled:opacity-50"
-                >
-                  <Edit2 size={13} />
-                </button>
-              </>
-            ) : null}
-            {canDeleteAnnouncement ? (
-              <button
-                onClick={() => setShowDeleteConfirm(true)}
-                disabled={deleteAnnouncementMutation.isPending}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-rose-500/35 bg-rose-500/10 text-rose-300 backdrop-blur-md transition-all hover:bg-rose-500/20 active:scale-95 disabled:opacity-50"
-                title="Sil"
-              >
-                {deleteAnnouncementMutation.isPending ? (
-                  <Loader2 size={13} className="animate-spin" />
-                ) : (
-                  <Trash2 size={13} />
-                )}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
       </div>
 
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>

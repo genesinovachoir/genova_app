@@ -1575,16 +1575,20 @@ export default function AssignmentDetailPage() {
   return (
     <SwipeBack fallback="/odevler">
     <main className="relative min-h-screen bg-[var(--color-background)] pb-[max(2rem,env(safe-area-inset-bottom))]">
-      <div className="absolute right-5 top-[max(env(safe-area-inset-top),1.5rem)] z-10">
-        <button
-          onClick={handleBack}
-          className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
-        >
-          <ArrowLeft size={16} />
-          <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">{backLabel}</span>
-        </button>
-      </div>
+
       <div className="space-y-6 px-5 pt-[max(env(safe-area-inset-top),1.5rem)]">
+        <div className="mb-2 flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <span className="page-kicker truncate">{targetMemberId ? 'Ödev Akışı' : 'tempoyu koru'}</span>
+          </div>
+          <button
+            onClick={handleBack}
+            className="flex shrink-0 h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
+          >
+            <ArrowLeft size={16} />
+            <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">{backLabel}</span>
+          </button>
+        </div>
         {authLoading || (!detailQuery.data && detailQuery.isPending) ? (
           <div className="flex items-center justify-center py-20">
             <Loader2 className="animate-spin text-[var(--color-accent)]" size={28} />
@@ -1598,8 +1602,7 @@ export default function AssignmentDetailPage() {
         <>
           {!targetMemberId && (
             <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="py-2">
-              <span className="page-kicker">tempoyu koru</span>
-              <h2 className="mt-3 font-serif text-[1.9rem] leading-tight tracking-[-0.05em] sm:text-[2.5rem]">{assignment.title}</h2>
+              <h2 className="font-serif text-[1.9rem] leading-tight tracking-[-0.05em] sm:text-[2.5rem]">{assignment.title}</h2>
               <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2.5 text-xs">
                 {assignment.deadline ? (
                   <div className="flex items-center gap-1.5 text-[var(--color-text-medium)]">
@@ -1649,9 +1652,11 @@ export default function AssignmentDetailPage() {
 
           <section className="mt-4 -mx-1">
             <div className="space-y-6">
-              <div className="px-5 sm:px-6">
-                <span className="page-kicker">Ödev Akışı</span>
-              </div>
+              {!targetMemberId && (
+                <div className="px-5 sm:px-6">
+                  <span className="page-kicker">Ödev Akışı</span>
+                </div>
+              )}
 
               <div className="relative ml-9 space-y-8 border-l border-[var(--color-border-strong)] pb-4 md:ml-10">
                 {/* 1. Ödevi Veren (Şef / Assignment Creator) */}

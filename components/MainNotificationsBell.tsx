@@ -17,6 +17,8 @@ import {
   FileText,
   MessageSquare,
   AlertCircle,
+  AlertTriangle,
+  Heart,
   Star,
   Info,
 } from 'lucide-react';
@@ -523,10 +525,12 @@ const ICON_MAP: Record<string, React.ElementType> = {
   megaphone: Megaphone,
   calendar: CalendarDays,
   file: FileText,
+  music: Music4,
   message: MessageSquare,
-  alert: AlertCircle,
+  alert: AlertTriangle,
   star: Star,
   info: Info,
+  heart: Heart,
 };
 
 function getItemIcon(item: MainNotificationItem) {

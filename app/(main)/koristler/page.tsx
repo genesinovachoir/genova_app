@@ -297,19 +297,10 @@ export default function KoristlerPage() {
         animate={{ opacity: 1, y: 0 }}
         className="glass-panel p-6 sm:p-7"
       >
-        <div className="mb-5 flex justify-end">
-          <button
-            onClick={handleBack}
-            className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
-          >
-            <ArrowLeft size={16} />
-            <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
-          </button>
-        </div>
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
             <div className="flex flex-col gap-1.5">
-              <span className="page-kicker">
+              <span className="page-kicker truncate">
                 {isSectionLeader() && !isAdmin() && member?.voice_group
                   ? `${member.voice_group.toUpperCase()} PERFORMANSI`
                   : 'KORO PERFORMANSI'
@@ -322,6 +313,13 @@ export default function KoristlerPage() {
               )}
             </div>
           </div>
+          <button
+            onClick={handleBack}
+            className="flex shrink-0 h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
+          >
+            <ArrowLeft size={16} />
+            <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
+          </button>
         </div>
 
         <div className="mt-6 grid grid-cols-3 divide-x divide-[var(--color-border-strong)]/30">

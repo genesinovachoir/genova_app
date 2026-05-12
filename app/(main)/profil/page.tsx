@@ -274,7 +274,8 @@ export default function Profil() {
         {member?.school_name && <><Div /><InfoRow icon={<Building2 size={15} />} label="Okul" value={member.school_name} /></>}
         {member?.department_name && <><Div /><InfoRow icon={<GraduationCap size={15} />} label="Bölüm" value={member.department_name} /></>}
         {member?.join_date && <><Div /><InfoRow icon={<Clock size={15} />} label="Katılım Tarihi" value={formatDate(member.join_date)} /></>}
-        {favoriteSongLabel && <><Div /><InfoRow icon={<Music size={15} />} label="En Sevdiğim Eser" value={favoriteSongLabel} /></>}
+        <Div />
+        <InfoRow icon={<Music size={15} />} label="En Sevdiğim Eser" value={favoriteSongLabel || 'Belirtilmemiş'} />
       </motion.div>
     </main>
   );
