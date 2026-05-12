@@ -32,6 +32,7 @@ async function removeExistingChannelsForTopic(topic: string) {
 export function useChatRealtime(memberId: string | null, roomId: string | null) {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const typingTimeoutsRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const isSubscribedRef = useRef(false);
   // Removed useChatStore subscription variables to prevent re-renders
 
   // Handle incoming new messages from Postgres Changes
