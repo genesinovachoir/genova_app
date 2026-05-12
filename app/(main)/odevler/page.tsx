@@ -24,6 +24,7 @@ import { CreateAssignmentModal } from '@/components/CreateAssignmentModal';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/ToastProvider';
 import { getAssignmentCacheKey, readAssignmentCache, writeAssignmentCache } from '@/lib/assignment-cache';
+import { formatAssignmentScopeLabel } from '@/lib/assignment-scope';
 import { createSlugLookup, getAssignmentPath } from '@/lib/internalPageLinks';
 
 type AssignmentChoirMember =
@@ -136,6 +137,8 @@ interface ReviewerAssignmentSummary {
   submitted: number;
   completed: number;
   target_voice_group: string | null;
+  target_voice_groups: string[];
+  target_scope_label: string;
 }
 
 interface ChoirMemberRoleRow {
@@ -164,7 +167,8 @@ function formatDeadline(deadline: string | null): { text: string; isUrgent: bool
   const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
 
   if (days < 0) {
-    return { text: 'Süresi doldu', isUrgent: true };
+    const dateStr = date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+    return { text: `Süresi doldu (${dateStr})`, isUrgent: true };
   }
   if (days === 0) {
     return { text: 'Bugün', isUrgent: true };
@@ -960,8 +964,20 @@ export default function Odevler() {
         submitted: 0,
         completed: 0,
         target_voice_group: item.target_voice_group,
+        target_voice_groups: [],
+        target_scope_label: formatAssignmentScopeLabel({
+          targetVoiceGroup: item.target_voice_group,
+          targetVoiceGroups: [],
+        }),
       };
 
+      if (item.member_voice_group && !existing.target_voice_groups.includes(item.member_voice_group)) {
+        existing.target_voice_groups.push(item.member_voice_group);
+      }
+      existing.target_scope_label = formatAssignmentScopeLabel({
+        targetVoiceGroup: existing.target_voice_group,
+        targetVoiceGroups: existing.target_voice_groups,
+      });
       existing.total += 1;
       if (item.submission_status !== 'missing') {
         existing.submitted += 1;
@@ -1259,7 +1275,7 @@ export default function Odevler() {
                           <div className="flex items-center gap-1">
                             <Users size={10} className="text-[var(--color-accent)]" />
                             <span className="font-bold text-[var(--color-text-high)]/80">
-                              {item.target_voice_group || 'Tüm Koro'}
+                              {item.target_scope_label}
                             </span>
                           </div>
                           <div className="flex items-center gap-3">

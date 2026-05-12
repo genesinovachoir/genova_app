@@ -1,11 +1,12 @@
-import { POST as reviewPost, runtime, dynamic } from '../review/route';
+import { POST as reviewPost } from '../review/route';
 
 interface WithdrawBody {
   submissionId?: string;
   reviewerNote?: string | null;
 }
 
-export { runtime, dynamic };
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
   const body = (await request.json()) as WithdrawBody;

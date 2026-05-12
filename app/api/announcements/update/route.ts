@@ -80,17 +80,20 @@ export async function POST(request: Request) {
     const icon = typeof body.icon === 'string' && ANNOUNCEMENT_ICONS.has(body.icon) ? body.icon : 'megaphone';
     const requestedTargetUsers = toUniqueStringArray(body.target_users);
     const targetVoiceGroups = toUniqueStringArray(body.target_voice_groups).filter((group) => VOICE_GROUPS.has(group));
+    const hasVisibilityUpdate = typeof body.is_hidden === 'boolean';
+    const hasAnnouncementDetailsUpdate =
+      body.title !== undefined ||
+      body.description !== undefined ||
+      body.icon !== undefined ||
+      body.target_users !== undefined ||
+      body.target_voice_groups !== undefined;
 
     if (!announcementId) {
       return new NextResponse('announcement_id zorunlu.', { status: 400 });
     }
 
-    if (!title || !description || description === '<p></p>') {
-      return new NextResponse('Duyuru başlığı ve içeriği zorunludur.', { status: 400 });
-    }
-
-    if (requestedTargetUsers.length === 0) {
-      return new NextResponse('En az bir hedef kullanıcı seçmelisiniz.', { status: 400 });
+    if (!hasVisibilityUpdate && !hasAnnouncementDetailsUpdate) {
+      return new NextResponse('Güncellenecek alan bulunamadı.', { status: 400 });
     }
 
     const serviceClient = createSupabaseServiceClient();
@@ -142,6 +145,36 @@ export async function POST(request: Request) {
 
     if (!isChef && announcement.created_by !== actorMember.id) {
       return new NextResponse('Sadece kendi oluşturduğunuz duyuruyu güncelleyebilirsiniz.', { status: 403 });
+    }
+
+    if (!hasAnnouncementDetailsUpdate) {
+      const { data: updatedAnnouncement, error: updateError } = await serviceClient
+        .from('announcements')
+        .update({ is_hidden: body.is_hidden })
+        .eq('id', announcementId)
+        .select('id, title')
+        .maybeSingle();
+
+      if (updateError) {
+        return new NextResponse(updateError.message, { status: 500 });
+      }
+
+      if (!updatedAnnouncement?.id) {
+        return new NextResponse('Duyuru güncellenemedi.', { status: 500 });
+      }
+
+      return NextResponse.json({
+        id: updatedAnnouncement.id,
+        title: updatedAnnouncement.title,
+      });
+    }
+
+    if (!title || !description || description === '<p></p>') {
+      return new NextResponse('Duyuru başlığı ve içeriği zorunludur.', { status: 400 });
+    }
+
+    if (requestedTargetUsers.length === 0) {
+      return new NextResponse('En az bir hedef kullanıcı seçmelisiniz.', { status: 400 });
     }
 
     const targetMemberIds = Array.from(new Set([...requestedTargetUsers, actorMember.id]));

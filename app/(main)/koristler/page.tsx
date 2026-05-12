@@ -14,6 +14,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from '@/components/AuthProvider';
 import { supabase } from '@/lib/supabase';
+import { createRealtimeTopic } from '@/lib/realtime';
 import { useBackOrHome } from '@/hooks/useBackOrHome';
 import { SwipeBack } from '@/components/SwipeBack';
 import {
@@ -209,7 +210,7 @@ export default function KoristlerPage() {
     };
 
     const channel = supabase
-      .channel(`koristler-overview:${member.id}`)
+      .channel(createRealtimeTopic(`koristler-overview:${member.id}`))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'choir_members' }, invalidate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rehearsals' }, invalidate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rehearsal_invitees' }, invalidate)

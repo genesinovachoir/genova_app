@@ -29,6 +29,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/ToastProvider';
 import { supabase, type Announcement, type Attendance, type Rehearsal } from '@/lib/supabase';
 import { sanitizeRichText } from '@/lib/richText';
+import { createRealtimeTopic } from '@/lib/realtime';
 import { CreateAnnouncementModal } from '@/components/CreateAnnouncementModal';
 
 const ICON_MAP: Record<string, ElementType> = {
@@ -250,7 +251,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const channel = supabase
-      .channel('dashboard-announcements')
+      .channel(createRealtimeTopic('dashboard-announcements'))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
         void queryClient.invalidateQueries({ queryKey: DASHBOARD_ANNOUNCEMENTS_KEY });
       })
@@ -272,7 +273,7 @@ export default function Dashboard() {
     };
 
     const channel = supabase
-      .channel(`dashboard:${member.id}`)
+      .channel(createRealtimeTopic(`dashboard:${member.id}`))
       .on(
         'postgres_changes',
         {

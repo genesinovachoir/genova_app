@@ -541,16 +541,16 @@ export default function Repertuvar() {
 
                     {/* Info */}
                     <div className="flex min-w-0 flex-col justify-between">
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <h3 className="font-serif text-xl tracking-[-0.05em] leading-tight">{song.title}</h3>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-serif text-xl tracking-[-0.05em] leading-tight truncate">{song.title}</h3>
                           {song.composer && (
-                            <p className="mt-1.5 text-sm text-[var(--color-text-medium)]">{song.composer}</p>
+                            <p className="mt-1.5 text-sm text-[var(--color-text-medium)] truncate">{song.composer}</p>
                           )}
                         </div>
                         {/* Chef actions */}
                         {isChef && (
-                          <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
+                          <div className="flex gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
                             <button
                               onClick={() => setEditSong(song)}
                               title="Düzenle"

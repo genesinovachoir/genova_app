@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from '@/components/AuthProvider';
 import { supabase } from '@/lib/supabase';
+import { createRealtimeTopic } from '@/lib/realtime';
 import {
   loadPerformanceOverview,
   PERFORMANCE_ROOT_QUERY_KEY,
@@ -92,7 +93,7 @@ export function KoristPerformanceSection() {
     };
 
     const channel = supabase
-      .channel(`korist-performance:${member.id}`)
+      .channel(createRealtimeTopic(`korist-performance:${member.id}`))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'choir_members' }, invalidate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rehearsals' }, invalidate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rehearsal_invitees' }, invalidate)

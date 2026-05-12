@@ -22,6 +22,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from '@/components/AuthProvider';
 import { supabase } from '@/lib/supabase';
+import { createRealtimeTopic } from '@/lib/realtime';
 import { sanitizeRichText } from '@/lib/richText';
 import { useBackOrHome } from '@/hooks/useBackOrHome';
 import { SwipeBack } from '@/components/SwipeBack';
@@ -337,7 +338,7 @@ export default function KoristDetailPage() {
     };
 
     const channel = supabase
-      .channel(`korist-detail:${currentMember.id}`)
+      .channel(createRealtimeTopic(`korist-detail:${currentMember.id}`))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'choir_members' }, invalidate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rehearsals' }, invalidate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rehearsal_invitees' }, invalidate)

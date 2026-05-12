@@ -40,6 +40,7 @@ import { SwipeBack } from '@/components/SwipeBack';
 import { useToast } from '@/components/ToastProvider';
 import { useBackOrHome } from '@/hooks/useBackOrHome';
 import { getAssignmentCacheKey, readAssignmentCache, writeAssignmentCache } from '@/lib/assignment-cache';
+import { formatAssignmentScopeLabel } from '@/lib/assignment-scope';
 import { uploadSubmission } from '@/lib/drive';
 import { sanitizeRichText } from '@/lib/richText';
 import { createSlugLookup, isUuidLike } from '@/lib/internalPageLinks';
@@ -1534,11 +1535,16 @@ export default function AssignmentDetailPage() {
   const reviewerCompletedCount = reviewerReviewedCount;
   const completionPercentage =
     reviewerTotalCount > 0 ? Math.round((reviewerCompletedCount / reviewerTotalCount) * 100) : 0;
-  const completionScopeLabel = isChef
+  const fallbackCompletionScopeLabel = isChef
     ? 'Toplam Koro'
     : reviewerVoiceGroup
       ? `${reviewerVoiceGroup} Partisi`
       : 'Kendi Partisi';
+  const completionScopeLabel = formatAssignmentScopeLabel({
+    targetVoiceGroup: assignment?.target_voice_group ?? null,
+    targetVoiceGroups: (targetMembers ?? []).map((target) => target.voice_group),
+    allChoirLabel: fallbackCompletionScopeLabel,
+  });
   const detailErrorMessage = getReadableErrorMessage(detailQuery.error);
 
   return (
