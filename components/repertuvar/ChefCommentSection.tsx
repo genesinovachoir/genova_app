@@ -44,7 +44,7 @@ interface SongChefComment {
   choir_members: CommentAuthor | null;
 }
 
-interface RawSongChefComment extends Omit<SongChefComment, 'choir_members'> {
+interface RawSongChefComment extends Omit<SongChefComment, 'choir_members' | 'is_hidden'> {
   choir_members?: CommentAuthor | CommentAuthor[] | null;
   is_hidden?: boolean;
 }
