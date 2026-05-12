@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Megaphone, CalendarDays, FileText, Music4, AlertTriangle, Info, Heart, Loader2, ArrowLeft, Plus, EyeOff } from 'lucide-react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { supabase, type Announcement } from '@/lib/supabase';
+import { createRealtimeTopic } from '@/lib/realtime';
 import { useAuth } from '@/components/AuthProvider';
 import { CreateAnnouncementModal } from '@/components/CreateAnnouncementModal';
 import { useToast } from '@/components/ToastProvider';
@@ -66,24 +67,40 @@ export default function AnnouncementsPage() {
     return isAdmin() || (isSectionLeader() && ann.created_by === member?.id);
   });
 
+  useEffect(() => {
+    const channel = supabase
+      .channel(createRealtimeTopic('announcements-page'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
+        void queryClient.invalidateQueries({ queryKey: ANNOUNCEMENTS_QUERY_KEY });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
+
   return (
     <SwipeBack fallback="/">
-    <main className="min-h-screen bg-[var(--color-background)] px-5 pb-10 pt-[max(env(safe-area-inset-top),1.5rem)]">
+    <main className="relative min-h-screen bg-[var(--color-background)] px-5 pb-10 pt-[max(env(safe-area-inset-top),1.5rem)]">
+      <div className="absolute right-5 top-[max(env(safe-area-inset-top),1.5rem)] z-10">
+        <button
+          onClick={handleBack}
+          className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
+        >
+          <ArrowLeft size={16} />
+          <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
+        </button>
+      </div>
+
       <motion.section initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className="flex h-full flex-col">
-        <div className="mb-6 flex flex-col gap-4">
-          <button
-            onClick={handleBack}
-            className="inline-flex w-fit items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] active:scale-95"
-          >
-            <ArrowLeft size={18} />
-            <span className="text-xs font-medium uppercase tracking-[0.1em]">Geri</span>
-          </button>
-          <div className="flex items-center justify-between gap-3">
-            <h1 className="font-serif text-[24px] leading-none tracking-[-0.03em] text-[var(--color-text-high)]">Tüm Duyurular</h1>
+        <div className="mb-6 mt-1 flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-3 pr-[85px]">
+            <h1 className="font-serif text-[24px] leading-none tracking-[-0.03em] text-[var(--color-text-high)] shrink-0">Tüm Duyurular</h1>
             {(isAdmin() || isSectionLeader()) && (
               <button
                 onClick={() => setShowCreateModal(true)}
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-all hover:bg-[var(--color-accent)] hover:text-[var(--color-background)] active:scale-95"
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-all hover:bg-[var(--color-accent)] hover:text-[var(--color-background)] active:scale-95 shrink-0"
               >
                 <Plus size={16} />
               </button>

@@ -1,16 +1,18 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { use } from 'react';
 import dynamic from 'next/dynamic';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
 import { SwipeBack } from '@/components/SwipeBack';
 import { useAuth } from '@/components/AuthProvider';
 import { LottieIcon } from '@/components/LottieIcon';
 import { useBackOrHome } from '@/hooks/useBackOrHome';
 import { createSlugLookup, isUuidLike } from '@/lib/internalPageLinks';
+import { supabase } from '@/lib/supabase';
+import { createRealtimeTopic } from '@/lib/realtime';
 import {
   getRepertoireCatalogCacheScope,
   getRepertoireRoleScope,
@@ -44,7 +46,29 @@ export default function SongDetailPage({ params }: { params: Promise<{ id: strin
   const { id } = use(params);
   const identifier = decodeURIComponent(id);
   const handleBack = useBackOrHome();
+  const queryClient = useQueryClient();
   const { isAdmin, isSectionLeader, member, isLoading: authLoading } = useAuth();
+
+  useEffect(() => {
+    if (!identifier) return;
+
+    const invalidate = () => {
+      void queryClient.invalidateQueries({ queryKey: ['repertoire-catalog'] });
+    };
+
+    const channel = supabase
+      .channel(createRealtimeTopic(`repertoire-detail:${identifier}`))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'repertoire' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'repertoire_tags' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'repertoire_song_tags' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'repertoire_files' }, invalidate)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [identifier, queryClient]);
+
   const isChef = isAdmin();
   const isLeader = isSectionLeader();
   const isChoristUser = !isLeader;
@@ -113,15 +137,17 @@ export default function SongDetailPage({ params }: { params: Promise<{ id: strin
   return (
     <SwipeBack fallback="/repertuvar">
     <main className="min-h-screen bg-[var(--color-background)] pb-[max(2rem,env(safe-area-inset-bottom))]">
-      <div className="border-b border-[var(--color-border)] bg-[var(--color-background)]/90 px-5 pb-4 pt-[max(env(safe-area-inset-top),1.25rem)] backdrop-blur-sm">
-        <button
-          onClick={handleBack}
-          className="mb-5 inline-flex items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] active:scale-95"
-        >
-          <ArrowLeft size={18} />
-          <span className="text-xs font-medium uppercase tracking-[0.1em]">Geri</span>
-        </button>
-        <div>
+      <div className="relative border-b border-[var(--color-border)] bg-[var(--color-background)]/90 px-5 pb-4 pt-[max(env(safe-area-inset-top),1.5rem)] backdrop-blur-sm">
+        <div className="absolute right-5 top-[max(env(safe-area-inset-top),1.5rem)] z-10">
+          <button
+            onClick={handleBack}
+            className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
+          >
+            <ArrowLeft size={16} />
+            <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
+          </button>
+        </div>
+        <div className="pr-20">
           <span className="page-kicker">Repertuvar</span>
           <div className="flex items-start justify-between gap-4">
             <h1 className="mt-2 font-serif text-3xl leading-tight tracking-[-0.05em]">

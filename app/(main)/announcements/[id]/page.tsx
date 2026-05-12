@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ArrowLeft, Edit2, Eye, EyeOff, Loader2, Megaphone, CalendarDays, FileText, Music4, AlertTriangle, Info, Heart } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import { motion } from 'motion/react';
@@ -11,6 +11,7 @@ import { CreateAnnouncementModal } from '@/components/CreateAnnouncementModal';
 import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/ToastProvider';
 import { sanitizeRichText } from '@/lib/richText';
+import { createRealtimeTopic } from '@/lib/realtime';
 import { supabase, type Announcement } from '@/lib/supabase';
 import { useBackOrHome } from '@/hooks/useBackOrHome';
 import { SwipeBack } from '@/components/SwipeBack';
@@ -109,6 +110,20 @@ export default function AnnouncementPage() {
     },
   });
 
+  useEffect(() => {
+    if (!id) return;
+    const channel = supabase
+      .channel(createRealtimeTopic(`announcement-detail:${id}`))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements', filter: `id=eq.${id}` }, () => {
+        void queryClient.invalidateQueries({ queryKey: ['announcement', id] });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [id, queryClient]);
+
   if (announcementQuery.isPending) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--color-background)]">
@@ -119,12 +134,17 @@ export default function AnnouncementPage() {
 
   if (announcementQuery.isError || !announcementQuery.data) {
     return (
-      <main className="min-h-screen bg-[var(--color-background)] px-5 pb-10 pt-[max(env(safe-area-inset-top),1.5rem)]">
-        <button onClick={handleBack} className="mb-8 inline-flex items-center gap-2 text-[var(--color-text-medium)]">
-          <ArrowLeft size={18} />
-          <span className="text-xs uppercase tracking-[0.1em]">Geri</span>
-        </button>
-        <p className="text-center text-[var(--color-text-medium)]">Duyuru bulunamadı.</p>
+      <main className="relative min-h-screen bg-[var(--color-background)] px-5 pb-10 pt-[max(env(safe-area-inset-top),1.5rem)]">
+        <div className="absolute right-5 top-[max(env(safe-area-inset-top),1.5rem)] z-10">
+          <button
+            onClick={handleBack}
+            className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
+          >
+            <ArrowLeft size={16} />
+            <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
+          </button>
+        </div>
+        <p className="text-center text-[var(--color-text-medium)] mt-12">Duyuru bulunamadı.</p>
       </main>
     );
   }
@@ -135,25 +155,17 @@ export default function AnnouncementPage() {
 
   return (
     <SwipeBack fallback="/">
-    <main className="min-h-screen bg-[var(--color-background)] px-5 pb-10 pt-[max(env(safe-area-inset-top),1.5rem)]">
-      <div className="mb-8 flex items-center justify-between">
-        <button
-          onClick={handleBack}
-          className="inline-flex items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] active:scale-95"
-        >
-          <ArrowLeft size={18} />
-          <span className="text-xs font-medium uppercase tracking-[0.1em]">Geri Dön</span>
-        </button>
-
+    <main className="relative min-h-screen bg-[var(--color-background)] px-5 pb-10 pt-[max(env(safe-area-inset-top),1.5rem)]">
+      <div className="absolute right-5 top-[max(env(safe-area-inset-top),1.5rem)] z-10 flex items-center gap-2">
         {canEditDelete ? (
           <div className="flex items-center gap-2">
             <button
               onClick={() => toggleHideMutation.mutate(!announcement.is_hidden)}
               disabled={toggleHideMutation.isPending}
-              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] border transition-colors active:scale-90 disabled:opacity-50 ${
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border backdrop-blur-md transition-all active:scale-95 disabled:opacity-50 ${
                 announcement.is_hidden
                   ? 'border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
-                  : 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] hover:bg-white/10 hover:text-[var(--color-text-high)]'
+                  : 'border-white/10 bg-white/5 text-[var(--color-text-medium)] hover:bg-white/10 hover:text-[var(--color-text-high)]'
               }`}
               title={announcement.is_hidden ? 'Göster' : 'Gizle'}
             >
@@ -167,16 +179,23 @@ export default function AnnouncementPage() {
             </button>
             <button
               onClick={() => setEditingAnn(announcement)}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-90 disabled:opacity-50"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95 disabled:opacity-50"
             >
               <Edit2 size={13} />
             </button>
           </div>
         ) : null}
+        <button
+          onClick={handleBack}
+          className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
+        >
+          <ArrowLeft size={16} />
+          <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
+        </button>
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
-        <div className="mb-5 flex items-center gap-3">
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="pt-2">
+        <div className="mb-5 flex items-center gap-3 pr-24">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
             <Icon size={18} />
           </div>

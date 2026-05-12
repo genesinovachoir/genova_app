@@ -9,6 +9,7 @@ import { clearChatCaches } from '@/lib/chat-cache';
 import { clearRepertoireMetadataCaches } from '@/lib/repertuvar/cache';
 import { clearRuntimeDriveFileCache } from '@/lib/repertuvar/offline';
 import { REPERTOIRE_QUERY_ROOT_KEY } from '@/lib/repertuvar/queries';
+import { createRealtimeTopic } from '@/lib/realtime';
 
 type MemberWithRelations = ChoirMember & {
   schools?: { name: string } | null;
@@ -139,6 +140,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => subscription.unsubscribe();
   }, [fetchMemberData, queryClient]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    let channel = supabase
+      .channel(createRealtimeTopic(`auth-member:${user.id}`))
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'choir_members',
+          filter: `auth_user_id=eq.${user.id}`,
+        },
+        () => {
+          fetchMemberData(user.id);
+        },
+      );
+
+    if (member?.id) {
+      channel = channel.on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'choir_member_roles',
+          filter: `member_id=eq.${member.id}`,
+        },
+        () => {
+          fetchMemberData(user.id);
+        },
+      );
+    }
+
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id, member?.id, fetchMemberData]);
 
   const isAdmin = () => roles.includes('Şef');
   const isSectionLeader = () => roles.includes('Partisyon Şefi') || roles.includes('Şef');

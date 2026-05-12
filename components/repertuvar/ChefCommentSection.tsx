@@ -174,7 +174,7 @@ function ProtectedCommentAudioPlayer({
   });
 
   return (
-    <div className="mt-2 rounded-[10px] border border-[var(--color-border)] bg-white/5 p-2">
+    <div className="mt-2 rounded-[10px] border border-[var(--color-border)] bg-black/5 dark:bg-white/5 p-2">
       {url ? (
         <audio controls preload="none" className="w-full" src={url} />
       ) : loading ? (
@@ -479,10 +479,11 @@ export function ChefCommentSection({
         .from('repertoire_song_comments')
         .update({ is_hidden: hidden })
         .eq('id', commentId);
-      if (error) throw error;
+      if (error) throw new Error(error.message || 'Güncelleme başarısız oldu.');
       return { commentId, hidden };
     },
-    onSuccess: async () => {
+    onSuccess: async (_result) => {
+      toast.success(_result.hidden ? 'Yorum gizlendi.' : 'Yorum tekrar gösterildi.', 'Şef notu');
       await queryClient.invalidateQueries({ queryKey: ['repertoire-song-comments', songId] });
     },
     onError: (error) => {
@@ -596,7 +597,7 @@ export function ChefCommentSection({
 
               return (
                 <article key={comment.id} className={`group relative pl-6 pr-5 sm:pr-6 ${comment.is_hidden ? 'opacity-40' : ''}`}>
-                  <div className="absolute left-0 top-0 flex h-8 w-8 shrink-0 -translate-x-1/2 overflow-hidden rounded-full border border-[var(--color-border-strong)] bg-black/60 shadow-xl backdrop-blur-md">
+                  <div className="absolute left-0 top-0 flex h-8 w-8 shrink-0 -translate-x-1/2 overflow-hidden rounded-full border border-[var(--color-border-strong)] bg-black/10 dark:bg-black/60 shadow-xl backdrop-blur-md">
                     {photoUrl ? (
                       <img src={photoUrl} alt={fullName} className="h-full w-full object-cover" />
                     ) : (
@@ -610,7 +611,7 @@ export function ChefCommentSection({
                     <div className="flex flex-col gap-2">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <p className="text-[13px] font-semibold text-[var(--color-text-high)]">{fullName}</p>
-                        <span className="rounded-full border border-[var(--color-border)] bg-white/5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-medium)]">
+                        <span className="rounded-full border border-[var(--color-border)] bg-black/5 dark:bg-white/5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-medium)]">
                           {comment.target_voice_group ?? 'Tüm Koro'}
                         </span>
                         <span className="text-[11px] text-[var(--color-text-medium)]">{formatCommentDate(comment.created_at)}</span>
@@ -626,7 +627,7 @@ export function ChefCommentSection({
                               <button
                                 type="button"
                                 onClick={() => startEdit(comment)}
-                                className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--color-accent)] transition-colors hover:bg-white/5"
+                                className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--color-accent)] transition-colors hover:bg-black/5 dark:bg-white/5"
                                 title="Düzenle"
                               >
                                 <Pencil size={10} strokeWidth={2.5} />
@@ -640,7 +641,7 @@ export function ChefCommentSection({
                                 className={`flex h-5 w-5 items-center justify-center rounded-md transition-colors disabled:opacity-50 ${
                                   comment.is_hidden
                                     ? 'text-amber-400 hover:bg-amber-500/10'
-                                    : 'text-[var(--color-text-medium)] hover:bg-white/5 hover:text-amber-400'
+                                    : 'text-[var(--color-text-medium)] hover:bg-black/5 dark:bg-white/5 hover:text-amber-400'
                                 }`}
                                 title={comment.is_hidden ? 'Göster' : 'Gizle'}
                               >
@@ -675,7 +676,7 @@ export function ChefCommentSection({
                             type="button"
                             onClick={cancelEdit}
                             disabled={updateMutation.isPending}
-                            className="flex h-7 w-7 items-center justify-center rounded-md bg-white/5 text-[var(--color-text-medium)] transition-colors hover:bg-white/10 disabled:opacity-50"
+                            className="flex h-7 w-7 items-center justify-center rounded-md bg-black/5 dark:bg-white/5 text-[var(--color-text-medium)] transition-colors hover:bg-black/10 dark:bg-white/10 disabled:opacity-50"
                             title="Vazgeç"
                           >
                             <X size={14} strokeWidth={2.5} />
@@ -717,7 +718,7 @@ export function ChefCommentSection({
 
           {canComment ? (
             <div className="relative mt-4 pl-6 pr-5 sm:pr-6">
-              <div className="absolute left-0 top-0 flex h-8 w-8 shrink-0 -translate-x-1/2 overflow-hidden rounded-full border border-[var(--color-border-strong)] bg-black/60 shadow-xl backdrop-blur-md">
+              <div className="absolute left-0 top-0 flex h-8 w-8 shrink-0 -translate-x-1/2 overflow-hidden rounded-full border border-[var(--color-border-strong)] bg-black/10 dark:bg-black/60 shadow-xl backdrop-blur-md">
                 {composerPhotoUrl ? (
                   <img src={composerPhotoUrl} alt={composerName} className="h-full w-full object-cover" />
                 ) : (
@@ -746,7 +747,7 @@ export function ChefCommentSection({
                     className={`relative flex h-7 w-7 items-center justify-center rounded-md border transition-colors ${
                       isRecording
                         ? 'border-rose-500/50 bg-rose-500/15 text-rose-300'
-                        : 'border-[var(--color-border)] bg-white/5 text-[var(--color-text-medium)] hover:bg-white/10'
+                        : 'border-[var(--color-border)] bg-black/5 dark:bg-white/5 text-[var(--color-text-medium)] hover:bg-black/10 dark:bg-white/10'
                     } disabled:opacity-50`}
                     title={isRecording ? 'Kaydı durdur' : 'Mikrofonla kaydet'}
                   >
@@ -763,7 +764,7 @@ export function ChefCommentSection({
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={submitMutation.isPending}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--color-border)] bg-white/5 text-[var(--color-text-medium)] transition-colors hover:bg-white/10 disabled:opacity-50"
+                    className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--color-border)] bg-black/5 dark:bg-white/5 text-[var(--color-text-medium)] transition-colors hover:bg-black/10 dark:bg-white/10 disabled:opacity-50"
                     title="Cihazdan ses dosyası seç"
                   >
                     <Paperclip size={13} strokeWidth={2.4} />
@@ -774,7 +775,7 @@ export function ChefCommentSection({
                       type="button"
                       onClick={() => clearAudioSelection()}
                       disabled={submitMutation.isPending}
-                      className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--color-border)] bg-white/5 text-[var(--color-text-medium)] transition-colors hover:bg-white/10 disabled:opacity-50"
+                      className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--color-border)] bg-black/5 dark:bg-white/5 text-[var(--color-text-medium)] transition-colors hover:bg-black/10 dark:bg-white/10 disabled:opacity-50"
                       title="Ses kaydını kaldır"
                     >
                       <X size={13} strokeWidth={2.4} />
@@ -792,7 +793,7 @@ export function ChefCommentSection({
                   </div>
                 </div>
                 {isRecording ? (
-                  <div className="h-1 overflow-hidden rounded-full bg-white/10">
+                  <div className="h-1 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
                     <div
                       className="h-full rounded-full bg-rose-400 transition-[width] duration-300 ease-out"
                       style={{ width: `${recordingProgressPercent}%` }}
@@ -809,7 +810,7 @@ export function ChefCommentSection({
                 />
 
                 {audioPreviewUrl ? (
-                  <div className="rounded-[10px] border border-[var(--color-border)] bg-white/5 p-2">
+                  <div className="rounded-[10px] border border-[var(--color-border)] bg-black/5 dark:bg-white/5 p-2">
                     <audio controls preload="none" className="w-full" src={audioPreviewUrl} />
                   </div>
                 ) : null}
@@ -821,7 +822,7 @@ export function ChefCommentSection({
                   </div>
                 ) : null}
                 {submitDisabledReason && (isRecording || Boolean(audioFile) || isRichTextMeaningful(editorHtml) || (!isChef && composerTargetVoiceGroup === null)) ? (
-                  <div className="flex items-center gap-2 rounded-[10px] border border-[var(--color-border)] bg-white/5 px-3 py-2">
+                  <div className="flex items-center gap-2 rounded-[10px] border border-[var(--color-border)] bg-black/5 dark:bg-white/5 px-3 py-2">
                     <AlertCircle size={12} className="text-[var(--color-text-medium)]" />
                     <p className="text-xs text-[var(--color-text-medium)]">{submitDisabledReason}</p>
                   </div>

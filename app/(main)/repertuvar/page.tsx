@@ -19,6 +19,7 @@ import { AddSongModal } from '@/components/AddSongModal';
 import { ProtectedDriveImage } from '@/components/ProtectedDriveImage';
 import { SongAssignmentModal } from '@/components/SongAssignmentModal';
 import { SongEditModal } from '@/components/SongEditModal';
+import { createRealtimeTopic } from '@/lib/realtime';
 import { createSlugLookup, getRepertoirePath } from '@/lib/internalPageLinks';
 import {
   getRepertoireCatalogCacheScope,
@@ -110,6 +111,26 @@ export default function Repertuvar() {
   const queryError = catalogQuery.error instanceof Error ? catalogQuery.error.message : null;
   const error = actionError ?? queryError;
   const isRefreshing = Boolean(catalogQuery.data && catalogQuery.isFetching);
+
+  useEffect(() => {
+    if (!member?.id) return;
+
+    const invalidate = () => {
+      void queryClient.invalidateQueries({ queryKey: REPERTOIRE_CATALOG_QUERY_ROOT_KEY });
+    };
+
+    const channel = supabase
+      .channel(createRealtimeTopic(`repertoire-page:${member.id}`))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'repertoire' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'repertoire_tags' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'repertoire_song_tags' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'repertoire_files' }, invalidate)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [member?.id, queryClient]);
 
   const updateCatalogData = useCallback((updater: (current: RepertoireCatalogData) => RepertoireCatalogData) => {
     queryClient.setQueryData<RepertoireCatalogData>(catalogQueryKey, (current) => {

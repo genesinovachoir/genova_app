@@ -15,6 +15,8 @@ import { FloatingMiniPlayer } from '@/components/FloatingMiniPlayer';
 import { useTabSwipe } from '@/hooks/useTabSwipe';
 import { getRepertoireRoleScope } from '@/lib/repertuvar/cache';
 import { getRepertoireCatalogQueryKey, loadRepertoireCatalog } from '@/lib/repertuvar/queries';
+import { supabase } from '@/lib/supabase';
+import { createRealtimeTopic } from '@/lib/realtime';
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { session, member, isLoading, isAdmin, isSectionLeader } = useAuth();
@@ -46,6 +48,29 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       gcTime: 24 * 60 * 60_000,
     });
   }, [isLoading, member?.id, queryClient, roleScope, session]);
+
+  useEffect(() => {
+    if (isLoading || !session) {
+      return;
+    }
+
+    const channel = supabase
+      .channel(createRealtimeTopic('global-updates'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
+        void queryClient.invalidateQueries({ queryKey: ['announcements'] });
+        void queryClient.invalidateQueries({ queryKey: ['dashboard', 'announcements'] });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rehearsals' }, () => {
+        void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+        void queryClient.invalidateQueries({ queryKey: ['rehearsals'] });
+        void queryClient.invalidateQueries({ queryKey: ['korist-performance'] });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isLoading, session, queryClient]);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined' || !('serviceWorker' in navigator)) {

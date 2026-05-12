@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useRouter } from 'next/navigation';
 import {
@@ -26,6 +26,7 @@ import { useToast } from '@/components/ToastProvider';
 import { getAssignmentCacheKey, readAssignmentCache, writeAssignmentCache } from '@/lib/assignment-cache';
 import { formatAssignmentScopeLabel } from '@/lib/assignment-scope';
 import { createSlugLookup, getAssignmentPath } from '@/lib/internalPageLinks';
+import { createRealtimeTopic } from '@/lib/realtime';
 
 type AssignmentChoirMember =
   | Assignment['choir_members']
@@ -839,6 +840,38 @@ export default function Odevler() {
   const roleKey = useMemo(() => (isChef ? 'chef' : isLeader ? 'leader' : 'member'), [isChef, isLeader]);
 
   const [activeTab, setActiveTab] = useState<'aktif' | 'tamamlanan'>('aktif');
+
+  // İlgili sekmeye geri dönüldüğünde hatırlaması için sessionStorage kullanıyoruz
+  useEffect(() => {
+    const saved = sessionStorage.getItem('odevler_activeTab');
+    if (saved === 'aktif' || saved === 'tamamlanan') {
+      setActiveTab(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    sessionStorage.setItem('odevler_activeTab', activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!member?.id) return;
+
+    const invalidate = () => {
+      void queryClient.invalidateQueries({ queryKey: ['assignments'] });
+    };
+
+    const channel = supabase
+      .channel(createRealtimeTopic(`odevler-page:${member.id}`))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'assignments' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'assignment_targets' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'assignment_submissions' }, invalidate)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [member?.id, queryClient]);
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [assignmentToEditId, setAssignmentToEditId] = useState<string | null>(null);
   const [assignmentToDelete, setAssignmentToDelete] = useState<Assignment | null>(null);
@@ -936,7 +969,13 @@ export default function Odevler() {
         queryClient.invalidateQueries({ queryKey: ['assignments'] }),
         queryClient.invalidateQueries({ queryKey: ['reviewer-assignment-queue'] }),
       ]);
-      toast.success(locked ? 'Ödev kilitlendi ve tamamlanana taşındı.' : 'Ödev tekrar aktive edildi.');
+      toast.success(
+        locked
+          ? activeTab === 'tamamlanan'
+            ? 'Ödev yeni teslimlere kapatıldı (Kilitlendi).'
+            : 'Ödev kilitlendi ve tamamlananlara taşındı.'
+          : 'Ödev tekrar aktive edildi.'
+      );
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Ödev kilit durumu güncellenemedi.', 'İşlem başarısız');
@@ -1310,7 +1349,7 @@ export default function Odevler() {
                             }}
                             disabled={lockMutation.isPending}
                             className="flex h-8 w-8 items-center justify-center rounded-[4px] text-[var(--color-text-medium)] transition-colors hover:bg-white/10 hover:text-[var(--color-accent)] disabled:opacity-50"
-                            title={item.assignment_is_locked ? 'Kilidi Aç' : 'Ödevi Kilitle'}
+                            title={item.assignment_is_locked ? 'Kilidi Aç (Teslim Almaya Başla)' : 'Teslimleri Kapat (Ödevi Kilitle)'}
                           >
                             {lockMutation.isPending && lockMutation.variables?.assignmentId === item.assignment_id ? (
                               <Loader2 size={14} className="animate-spin text-[var(--color-accent)]" />

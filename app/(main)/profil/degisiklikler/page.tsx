@@ -368,14 +368,15 @@ export default function ProfilDegisiklikler() {
   const done = requests.filter((request) => request.status !== 'pending').sort(sortByDecisionDesc);
 
   return (
-    <main className="page-shell pb-28 space-y-4 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
-      <div className="flex items-center gap-3 px-1 pt-2">
-        <Link
-          href="/profil"
-          className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-soft-bg)] text-[var(--color-text-medium)] hover:text-[var(--color-text-high)] transition-colors"
-        >
+    <main className="relative page-shell pb-28 space-y-4 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
+      <div className="absolute right-5 top-[max(env(safe-area-inset-top),1.5rem)] z-10">
+        <Link href="/profil" className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95">
           <ArrowLeft size={16} />
+          <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
         </Link>
+      </div>
+
+      <div className="flex items-center gap-3 px-1 pt-2 pr-20">
         <span className="font-serif text-xl tracking-tight font-medium text-[var(--color-text-high)]">
           {isChefView ? 'Profil Değişiklik Talepleri' : 'Profil Değişiklik Taleplerim'}
         </span>

@@ -554,15 +554,17 @@ export default function DevamsizlikPage() {
   return (
     <SwipeBack fallback="/">
     <main className="min-h-screen bg-[var(--color-background)] pb-[max(2rem,env(safe-area-inset-bottom))]">
-      <div className="border-b border-[var(--color-border)] bg-[var(--color-background)]/90 px-5 pb-4 pt-[max(env(safe-area-inset-top),1.25rem)] backdrop-blur-sm">
-        <button
-          onClick={handleBack}
-          className="mb-4 inline-flex items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] active:scale-95"
-        >
-          <ArrowLeft size={18} />
-          <span className="text-xs font-medium uppercase tracking-[0.1em]">Geri</span>
-        </button>
-        <div>
+      <div className="relative border-b border-[var(--color-border)] bg-[var(--color-background)]/90 px-5 pb-4 pt-[max(env(safe-area-inset-top),1.5rem)] backdrop-blur-sm">
+        <div className="absolute right-5 top-[max(env(safe-area-inset-top),1.5rem)] z-10">
+          <button
+            onClick={handleBack}
+            className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
+          >
+            <ArrowLeft size={16} />
+            <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
+          </button>
+        </div>
+        <div className="pr-20">
           <span className="page-kicker">Devam Çizelgesi</span>
           <h1 className="mt-2 font-serif text-3xl tracking-[-0.05em]">Takvim</h1>
         </div>

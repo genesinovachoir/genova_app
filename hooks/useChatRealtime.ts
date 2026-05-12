@@ -308,6 +308,7 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
 
       channel.subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
+          isSubscribedRef.current = true;
           if (isCancelled || !channel) return;
           await channel.track({
             member_id: memberId,
@@ -321,6 +322,8 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
             event: 'read_receipt',
             payload: { member_id: memberId },
           });
+        } else {
+          isSubscribedRef.current = false;
         }
       });
 

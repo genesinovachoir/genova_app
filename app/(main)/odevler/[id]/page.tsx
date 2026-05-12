@@ -45,6 +45,7 @@ import { uploadSubmission } from '@/lib/drive';
 import { sanitizeRichText } from '@/lib/richText';
 import { createSlugLookup, isUuidLike } from '@/lib/internalPageLinks';
 import { useProtectedDriveFileUrl } from '@/hooks/useProtectedDriveFileUrl';
+import { createRealtimeTopic } from '@/lib/realtime';
 
 type ExtendedChoirMember = { first_name: string; last_name: string; photo_url?: string | null };
 
@@ -1170,6 +1171,28 @@ export default function AssignmentDetailPage() {
     reviewerVoiceGroup,
     targetMemberId,
   ] as const;
+
+  useEffect(() => {
+    if (!assignmentIdentifier) return;
+
+    const invalidate = () => {
+      void queryClient.invalidateQueries({ queryKey: detailQueryKey });
+      // Also invalidate the list just in case
+      void queryClient.invalidateQueries({ queryKey: ['assignments'] });
+    };
+
+    const channel = supabase
+      .channel(createRealtimeTopic(`odevler-detail:${assignmentIdentifier}`))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'assignments' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'assignment_targets' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'assignment_submissions' }, invalidate)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [assignmentIdentifier, queryClient]);
+
   const detailCacheKey = useMemo(
     () => getAssignmentCacheKey(
       'detail',
@@ -1549,15 +1572,17 @@ export default function AssignmentDetailPage() {
 
   return (
     <SwipeBack fallback="/odevler">
-    <main className="min-h-screen bg-[var(--color-background)] pb-[max(2rem,env(safe-area-inset-bottom))]">
-      <div className="space-y-6 px-5 pt-[max(env(safe-area-inset-top),1.25rem)]">
+    <main className="relative min-h-screen bg-[var(--color-background)] pb-[max(2rem,env(safe-area-inset-bottom))]">
+      <div className="absolute right-5 top-[max(env(safe-area-inset-top),1.5rem)] z-10">
         <button
           onClick={handleBack}
-          className="inline-flex items-center gap-2 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-text-high)] active:scale-95"
+          className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
         >
-          <ArrowLeft size={18} />
-          <span className="text-xs font-medium uppercase tracking-[0.1em]">Geri</span>
+          <ArrowLeft size={16} />
+          <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
         </button>
+      </div>
+      <div className="space-y-6 px-5 pt-[max(env(safe-area-inset-top),1.5rem)]">
         {authLoading || (!detailQuery.data && detailQuery.isPending) ? (
           <div className="flex items-center justify-center py-20">
             <Loader2 className="animate-spin text-[var(--color-accent)]" size={28} />
@@ -1603,7 +1628,7 @@ export default function AssignmentDetailPage() {
                       onClick={() => lockAssignmentMutation.mutate({ locked: !Boolean(assignment.is_locked) })}
                       disabled={lockAssignmentMutation.isPending}
                       className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-white/5 px-3 py-1 text-[0.62rem] font-bold uppercase tracking-[0.12em] text-[var(--color-text-high)] transition hover:bg-white/10 disabled:opacity-50"
-                      title={assignment.is_locked ? 'Ödevi tekrar aktif yap' : 'Ödevi kilitle'}
+                      title={assignment.is_locked ? 'Kilidi Aç (Teslim Almaya Başla)' : 'Teslimleri Kapat (Ödevi Kilitle)'}
                     >
                       {lockAssignmentMutation.isPending ? (
                         <Loader2 size={12} className="animate-spin" />
@@ -1906,11 +1931,6 @@ export default function AssignmentDetailPage() {
                                         ? 'REDDEDİLDİ'
                                         : 'BEKLEMEDE'}
                                   </span>
-                                  {mySubmission.is_reviewer_note_hidden ? (
-                                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-300">
-                                      KORİSTE GİZLİ
-                                    </span>
-                                  ) : null}
                                 </div>
 
                                 <div className="flex items-center gap-1">
@@ -1935,15 +1955,23 @@ export default function AssignmentDetailPage() {
                                         })
                                       }
                                       disabled={hideReviewMutation.isPending}
-                                      className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--color-text-medium)] transition-colors hover:bg-white/5 hover:text-[var(--color-text-high)] disabled:opacity-50"
-                                      title={mySubmission.is_reviewer_note_hidden ? 'Notu Koriste Göster' : 'Notu Koristten Gizle'}
+                                      className={`flex h-6 w-6 items-center justify-center rounded-full border transition-colors disabled:opacity-50 ${
+                                        mySubmission.is_reviewer_note_hidden
+                                          ? 'border-amber-500/45 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25'
+                                          : 'border-[var(--color-border-strong)] text-[var(--color-text-medium)] hover:bg-white/5 hover:text-[var(--color-text-high)]'
+                                      }`}
+                                      title={
+                                        mySubmission.is_reviewer_note_hidden
+                                          ? 'Not gizli (göstermek için tıkla)'
+                                          : 'Not görünür (gizlemek için tıkla)'
+                                      }
                                     >
                                       {hideReviewMutation.isPending ? (
                                         <Loader2 size={12} className="animate-spin" />
                                       ) : mySubmission.is_reviewer_note_hidden ? (
-                                        <Eye size={12} />
-                                      ) : (
                                         <EyeOff size={12} />
+                                      ) : (
+                                        <Eye size={12} />
                                       )}
                                     </button>
                                   ) : null}
@@ -1996,7 +2024,13 @@ export default function AssignmentDetailPage() {
                               </div>
                             ) : (
                               mySubmission.reviewer_note ? (
-                                <div className="mt-2 whitespace-pre-wrap text-sm text-[var(--color-text-high)]">
+                                <div
+                                  className={`mt-2 whitespace-pre-wrap text-sm ${
+                                    mySubmission.is_reviewer_note_hidden
+                                      ? 'text-amber-200/85 line-through decoration-amber-300/70'
+                                      : 'text-[var(--color-text-high)]'
+                                  }`}
+                                >
                                   {mySubmission.reviewer_note}
                                 </div>
                               ) : mySubmission.is_reviewer_note_hidden ? (
