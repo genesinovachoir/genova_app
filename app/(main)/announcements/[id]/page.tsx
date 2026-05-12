@@ -195,8 +195,8 @@ export default function AnnouncementPage() {
       </div>
 
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="pt-2">
-        <div className="mb-5 flex items-center gap-3 pr-24">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
+        <div className="mb-5 flex items-start gap-3 pr-[160px]">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)] mt-0.5">
             <Icon size={18} />
           </div>
           <div className="min-w-0 flex-1">

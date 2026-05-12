@@ -1934,7 +1934,7 @@ export default function AssignmentDetailPage() {
                                 </div>
 
                                 <div className="flex items-center gap-1">
-                                  {canReviewSubmissions && !isEditingReviewNote ? (
+                                  {canReviewSubmissions && !isEditingReviewNote && mySubmission.approved_by === member?.id ? (
                                     <button
                                       onClick={() => {
                                         setReviewNoteValue(mySubmission.reviewer_note || '');

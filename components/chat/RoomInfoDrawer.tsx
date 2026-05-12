@@ -239,7 +239,7 @@ export function RoomInfoDrawer({
           animate={{ x: 0 }}
           exit={{ x: '100%' }}
           transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-            className="fixed right-0 top-0 z-[151] flex h-full w-[85%] max-w-sm flex-col bg-[var(--color-background)]"
+            className="fixed right-0 top-0 z-[151] flex h-full w-[85%] max-w-sm flex-col border-l border-[var(--color-border)] bg-[#f5f3ec] dark:bg-black shadow-2xl"
           >
             {/* Header */}
             <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3 pt-[calc(env(safe-area-inset-top,0px)+12px)]">
