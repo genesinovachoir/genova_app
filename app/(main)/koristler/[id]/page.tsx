@@ -133,7 +133,9 @@ function HomeworkStatusPill({ status }: { status: PerformanceHomeworkEntry['stat
         ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
         : status === 'rejected'
           ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
-          : 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)]';
+          : status === 'active'
+            ? 'border-sky-500/30 bg-sky-500/10 text-sky-300'
+            : 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)]';
 
   const label =
     status === 'approved'
@@ -142,7 +144,9 @@ function HomeworkStatusPill({ status }: { status: PerformanceHomeworkEntry['stat
         ? 'Bekliyor'
         : status === 'rejected'
           ? 'Reddedildi'
-          : 'Eksik';
+          : status === 'active'
+            ? 'Aktif'
+            : 'Eksik';
 
   return <span className={`status-pill !min-h-0 !rounded-full !px-3 !py-1 !text-[0.58rem] ${className}`}>{label}</span>;
 }

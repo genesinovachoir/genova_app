@@ -76,7 +76,7 @@ export interface PerformanceRehearsalEntry {
 export interface PerformanceHomeworkEntry {
   assignment: Assignment;
   submission: AssignmentSubmission | null;
-  status: 'approved' | 'pending' | 'rejected' | 'missing';
+  status: 'approved' | 'pending' | 'rejected' | 'missing' | 'active';
 }
 
 export interface PerformanceOverview {
@@ -314,6 +314,7 @@ function buildMemberMetrics(
   rehearsalRows: Rehearsal[],
   inviteRows: RehearsalInviteRow[],
   attendanceRows: Attendance[],
+  assignments: AssignmentQueryRow[],
   assignmentTargetMap: Map<string, Set<string>>,
   submissionRows: AssignmentSubmission[],
   todayKey: string,
@@ -323,12 +324,20 @@ function buildMemberMetrics(
   const memberInviteeIds = new Set(
     inviteRows.filter((row) => row.member_id === member.id).map((row) => row.rehearsal_id),
   );
+  
+  const rehearsalsWithAttendance = new Set<string>();
+  for (const row of attendanceRows) {
+    rehearsalsWithAttendance.add(row.rehearsal_id);
+  }
+
   const relevantRehearsals = rehearsalRows.filter((rehearsal) => {
+    if (!memberInviteeIds.has(rehearsal.id)) return false;
+    
     const rehearsalDateKey = toDateKey(rehearsal.date);
-    if (!isPastOrToday(rehearsalDateKey, todayKey)) {
-      return false;
-    }
-    return memberInviteeIds.has(rehearsal.id);
+    const isPast = rehearsalDateKey < todayKey;
+    const isToday = rehearsalDateKey === todayKey;
+    
+    return isPast || (isToday && rehearsalsWithAttendance.has(rehearsal.id));
   });
 
   const attendanceByRehearsal = new Map<string, Attendance>();
@@ -386,42 +395,46 @@ function buildMemberMetrics(
   let pendingAssignments = 0;
   let rejectedAssignments = 0;
 
-  for (const [assignmentId, targetMemberIds] of assignmentTargetMap.entries()) {
-    if (!targetMemberIds.has(member.id)) {
+  for (const assignment of assignments) {
+    const targetMemberIds = assignmentTargetMap.get(assignment.id);
+    if (!targetMemberIds?.has(member.id)) {
       continue;
     }
 
-    const submission = latestSubmissionMap.get(`${assignmentId}:${member.id}`) ?? null;
-    totalAssignments += 1;
+    const submission = latestSubmissionMap.get(`${assignment.id}:${member.id}`) ?? null;
+    const isPastDue = assignment.deadline ? toDateKey(assignment.deadline) < todayKey : false;
+    
+    let shouldCountInTotal = false;
 
-    if (!submission) {
-      continue;
-    }
-
-    submittedAssignments += 1;
-
-    if (submission.status === 'approved') {
+    if (submission?.status === 'approved') {
+      shouldCountInTotal = true;
       approvedAssignments += 1;
-      continue;
-    }
-
-    if (submission.status === 'pending' || !submission.status) {
-      pendingAssignments += 1;
-      continue;
-    }
-
-    if (submission.status === 'rejected') {
+      submittedAssignments += 1;
+    } else if (submission?.status === 'rejected') {
+      shouldCountInTotal = true;
       rejectedAssignments += 1;
+      submittedAssignments += 1;
+    } else if (submission?.status === 'pending' || (submission && !submission.status)) {
+      // It's submitted but pending evaluation. Don't penalize yet.
+      pendingAssignments += 1;
+      submittedAssignments += 1;
+    } else if (!submission && isPastDue) {
+      // Missed assignment
+      shouldCountInTotal = true;
+    }
+
+    if (shouldCountInTotal) {
+      totalAssignments += 1;
     }
   }
 
-  const homeworkPercent = formatMetricPercent(approvedAssignments, totalAssignments);
-  const continuityPercent = calculateContinuityPercent(
+  const homeworkPercent = totalAssignments > 0 ? formatMetricPercent(approvedAssignments, totalAssignments) : null;
+  const continuityPercent = (relevantRehearsals.length + totalAssignments) > 0 ? calculateContinuityPercent(
     attendedRehearsals,
     relevantRehearsals.length,
     approvedAssignments,
     totalAssignments,
-  );
+  ) : null;
 
   return {
     show_homework_metrics: true,
@@ -636,6 +649,7 @@ function buildScopeSummary(dataset: PerformanceDataset): {
       rehearsals,
       inviteRows,
       attendanceRows,
+      assignments,
       assignmentTargetMap,
       submissionRows,
       todayKey,
@@ -685,13 +699,13 @@ function buildScopeSummary(dataset: PerformanceDataset): {
 
   summary.attendance_percent = formatMetricPercent(summary.attended_rehearsals, summary.total_rehearsals);
   if (show_homework_metrics) {
-    summary.homework_percent = formatMetricPercent(summary.approved_assignments ?? 0, summary.total_assignments ?? 0);
-    summary.continuity_percent = calculateContinuityPercent(
+    summary.homework_percent = (summary.total_assignments ?? 0) > 0 ? formatMetricPercent(summary.approved_assignments ?? 0, summary.total_assignments ?? 0) : null;
+    summary.continuity_percent = (summary.total_rehearsals + (summary.total_assignments ?? 0)) > 0 ? calculateContinuityPercent(
       summary.attended_rehearsals,
       summary.total_rehearsals,
       summary.approved_assignments ?? 0,
       summary.total_assignments ?? 0,
-    );
+    ) : null;
   }
 
   const groupNames = getOrderedVoiceGroups(members, show_homework_metrics);
@@ -734,13 +748,13 @@ function buildScopeSummary(dataset: PerformanceDataset): {
 
     groupSummary.attendance_percent = formatMetricPercent(groupSummary.attended_rehearsals, groupSummary.total_rehearsals);
     if (show_homework_metrics) {
-      groupSummary.homework_percent = formatMetricPercent(groupSummary.approved_assignments ?? 0, groupSummary.total_assignments ?? 0);
-      groupSummary.continuity_percent = calculateContinuityPercent(
+      groupSummary.homework_percent = (groupSummary.total_assignments ?? 0) > 0 ? formatMetricPercent(groupSummary.approved_assignments ?? 0, groupSummary.total_assignments ?? 0) : null;
+      groupSummary.continuity_percent = (groupSummary.total_rehearsals + (groupSummary.total_assignments ?? 0)) > 0 ? calculateContinuityPercent(
         groupSummary.attended_rehearsals,
         groupSummary.total_rehearsals,
         groupSummary.approved_assignments ?? 0,
         groupSummary.total_assignments ?? 0,
-      );
+      ) : null;
     }
 
     return groupSummary;
@@ -840,13 +854,17 @@ export async function loadPerformanceMemberDetail(
           .filter((assignment) => (assignmentTargetMap.get(assignment.id) ?? new Set<string>()).has(targetMemberId))
           .map((assignment) => {
             const submission = latestSubmissionMap.get(`${assignment.id}:${targetMemberId}`) ?? null;
+            const isPastDue = assignment.deadline ? toDateKey(assignment.deadline) < todayKey : false;
             let status: PerformanceHomeworkEntry['status'] = 'missing';
+
             if (submission?.status === 'approved') {
               status = 'approved';
-            } else if (submission?.status === 'pending' || !submission?.status) {
-              status = submission ? 'pending' : 'missing';
+            } else if (submission?.status === 'pending' || (submission && !submission.status)) {
+              status = 'pending';
             } else if (submission?.status === 'rejected') {
               status = 'rejected';
+            } else if (!isPastDue && !submission) {
+              status = 'active';
             }
 
             return {

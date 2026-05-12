@@ -81,12 +81,14 @@ export async function POST(request: Request) {
     const requestedTargetUsers = toUniqueStringArray(body.target_users);
     const targetVoiceGroups = toUniqueStringArray(body.target_voice_groups).filter((group) => VOICE_GROUPS.has(group));
     const hasVisibilityUpdate = typeof body.is_hidden === 'boolean';
-    const hasAnnouncementDetailsUpdate =
-      body.title !== undefined ||
-      body.description !== undefined ||
-      body.icon !== undefined ||
-      body.target_users !== undefined ||
-      body.target_voice_groups !== undefined;
+    const hasTargetSelectionUpdate = requestedTargetUsers.length > 0 || targetVoiceGroups.length > 0;
+    const hasAnnouncementDetailsUpdate = hasVisibilityUpdate
+      ? hasTargetSelectionUpdate
+      : body.title !== undefined ||
+        body.description !== undefined ||
+        body.icon !== undefined ||
+        body.target_users !== undefined ||
+        body.target_voice_groups !== undefined;
 
     if (!announcementId) {
       return new NextResponse('announcement_id zorunlu.', { status: 400 });
