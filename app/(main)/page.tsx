@@ -562,9 +562,9 @@ export default function Dashboard() {
               onClick={(event) => event.stopPropagation()}
               aria-label="Takvim"
               title="Takvim"
-              className="mt-1 inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-accent)] active:scale-95"
+              className="mt-1 inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:text-[var(--color-accent)] active:scale-95"
             >
-              <CalendarDays size={15} />
+              <CalendarDays size={17} />
             </Link>
           </div>
 

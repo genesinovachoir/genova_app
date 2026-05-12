@@ -2,9 +2,25 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { createRealtimeTopic } from '@/lib/realtime';
 import { useChatStore } from '@/store/useChatStore';
 import type { ChatMessage, ChatMessageType, ChatReaction, ChatRoom } from '@/lib/chat';
 import type { RealtimeChannel } from '@supabase/supabase-js';
+
+function removeChatChannel(channel: RealtimeChannel) {
+  return supabase.removeChannel(channel).catch((err) => {
+    console.error('Failed to remove chat realtime channel:', err);
+  });
+}
+
+async function removeExistingChannelsForTopic(topic: string) {
+  const realtimeTopic = `realtime:${topic}`;
+  const existingChannels = supabase
+    .getChannels()
+    .filter((channel) => channel.topic === realtimeTopic);
+
+  await Promise.all(existingChannels.map(removeChatChannel));
+}
 
 /**
  * Manages Supabase Realtime subscriptions for chat:
@@ -176,131 +192,154 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
   useEffect(() => {
     if (!memberId || !roomId) return;
 
-    // Clean up previous channel
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
-      channelRef.current = null;
-    }
+    let isCancelled = false;
+    let channel: RealtimeChannel | null = null;
+    const topic = `chat:${roomId}`;
 
-    const channel = supabase.channel(`chat:${roomId}`, {
-      config: { presence: { key: memberId } },
-    });
-
-    // 1. Postgres Changes — new messages in this room
-    channel.on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'chat_messages',
-        filter: `room_id=eq.${roomId}`,
-      },
-      handleNewMessage
-    );
-
-    // 2. Postgres Changes — message updates (edit/delete)
-    channel.on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'chat_messages',
-        filter: `room_id=eq.${roomId}`,
-      },
-      handleMessageUpdate
-    );
-
-    // 3. Postgres Changes — new reactions
-    channel.on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'chat_reactions',
-      },
-      handleNewReaction
-    );
-
-    // 4. Postgres Changes — deleted reactions
-    channel.on(
-      'postgres_changes',
-      {
-        event: 'DELETE',
-        schema: 'public',
-        table: 'chat_reactions',
-      },
-      handleDeleteReaction
-    );
-
-    // 5. Broadcast — typing indicators
-    channel.on('broadcast', { event: 'typing' }, (payload) => {
-      const typingMemberId = payload.payload?.member_id as string;
-      if (!typingMemberId || typingMemberId === memberId) return;
-
-      const state = useChatStore.getState();
-      const current = state.typingUsers[roomId] ?? [];
-      if (!current.includes(typingMemberId)) {
-        state.setTypingUsers(roomId, [...current, typingMemberId]);
+    const setupChannel = async () => {
+      if (channelRef.current) {
+        const previousChannel = channelRef.current;
+        channelRef.current = null;
+        await removeChatChannel(previousChannel);
       }
 
-      // Clear typing after 3 seconds
-      if (typingTimeoutsRef.current[typingMemberId]) {
-        clearTimeout(typingTimeoutsRef.current[typingMemberId]);
-      }
-      typingTimeoutsRef.current[typingMemberId] = setTimeout(() => {
+      await removeExistingChannelsForTopic(topic);
+      if (isCancelled) return;
+
+      channel = supabase.channel(topic, {
+        config: { presence: { key: memberId } },
+      });
+
+      // 1. Postgres Changes — new messages in this room
+      channel.on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: `room_id=eq.${roomId}`,
+        },
+        handleNewMessage
+      );
+
+      // 2. Postgres Changes — message updates (edit/delete)
+      channel.on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: `room_id=eq.${roomId}`,
+        },
+        handleMessageUpdate
+      );
+
+      // 3. Postgres Changes — new reactions
+      channel.on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_reactions',
+        },
+        handleNewReaction
+      );
+
+      // 4. Postgres Changes — deleted reactions
+      channel.on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'chat_reactions',
+        },
+        handleDeleteReaction
+      );
+
+      // 5. Broadcast — typing indicators
+      channel.on('broadcast', { event: 'typing' }, (payload) => {
+        if (isCancelled) return;
+        const typingMemberId = payload.payload?.member_id as string;
+        if (!typingMemberId || typingMemberId === memberId) return;
+
         const state = useChatStore.getState();
-        const updated = (
-          state.typingUsers[roomId] ?? []
-        ).filter((id) => id !== typingMemberId);
-        state.setTypingUsers(roomId, updated);
-        delete typingTimeoutsRef.current[typingMemberId];
-      }, 3000);
-    });
-
-    // 6. Broadcast — read receipts
-    channel.on('broadcast', { event: 'read_receipt' }, (payload) => {
-      const readerMemberId = payload.payload?.member_id as string;
-      if (!readerMemberId || readerMemberId === memberId) return;
-
-      // Mark all own messages in this room as 'read'
-      const state = useChatStore.getState();
-      const msgs = state.messagesByRoom[roomId] ?? [];
-      for (const msg of msgs) {
-        if (msg.sender_id === memberId) {
-          state.setMessageStatus(roomId, msg.id, 'read');
+        const current = state.typingUsers[roomId] ?? [];
+        if (!current.includes(typingMemberId)) {
+          state.setTypingUsers(roomId, [...current, typingMemberId]);
         }
-      }
-    });
 
-    // 7. Presence — track online users
-    channel.on('presence', { event: 'sync' }, () => {
-      const state = channel.presenceState();
-      const onlineIds = Object.keys(state);
-      useChatStore.getState().setOnlineUsers(onlineIds);
-    });
+        // Clear typing after 3 seconds
+        if (typingTimeoutsRef.current[typingMemberId]) {
+          clearTimeout(typingTimeoutsRef.current[typingMemberId]);
+        }
+        typingTimeoutsRef.current[typingMemberId] = setTimeout(() => {
+          const state = useChatStore.getState();
+          const updated = (
+            state.typingUsers[roomId] ?? []
+          ).filter((id) => id !== typingMemberId);
+          state.setTypingUsers(roomId, updated);
+          delete typingTimeoutsRef.current[typingMemberId];
+        }, 3000);
+      });
 
-    channel.subscribe(async (status) => {
-      if (status === 'SUBSCRIBED') {
-        await channel.track({
-          member_id: memberId,
-          online_at: new Date().toISOString(),
-        });
+      // 6. Broadcast — read receipts
+      channel.on('broadcast', { event: 'read_receipt' }, (payload) => {
+        if (isCancelled) return;
+        const readerMemberId = payload.payload?.member_id as string;
+        if (!readerMemberId || readerMemberId === memberId) return;
 
-        // Broadcast read receipt when entering room
-        channel.send({
-          type: 'broadcast',
-          event: 'read_receipt',
-          payload: { member_id: memberId },
-        });
-      }
-    });
+        // Mark all own messages in this room as 'read'
+        const state = useChatStore.getState();
+        const msgs = state.messagesByRoom[roomId] ?? [];
+        for (const msg of msgs) {
+          if (msg.sender_id === memberId) {
+            state.setMessageStatus(roomId, msg.id, 'read');
+          }
+        }
+      });
 
-    channelRef.current = channel;
+      // 7. Presence — track online users
+      channel.on('presence', { event: 'sync' }, () => {
+        if (isCancelled || !channel) return;
+        const state = channel.presenceState();
+        const onlineIds = Object.keys(state);
+        useChatStore.getState().setOnlineUsers(onlineIds);
+      });
+
+      channel.subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          if (isCancelled || !channel) return;
+          await channel.track({
+            member_id: memberId,
+            online_at: new Date().toISOString(),
+          });
+
+          if (isCancelled) return;
+          // Broadcast read receipt when entering room
+          channel.send({
+            type: 'broadcast',
+            event: 'read_receipt',
+            payload: { member_id: memberId },
+          });
+        }
+      });
+
+      channelRef.current = channel;
+    };
+
+    void setupChannel();
 
     return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
+      isCancelled = true;
+      if (channel) {
+        if (channelRef.current === channel) {
+          channelRef.current = null;
+        }
+        void removeChatChannel(channel);
+      } else if (channelRef.current) {
+        const previousChannel = channelRef.current;
         channelRef.current = null;
+        void removeChatChannel(previousChannel);
       }
       // Clear all typing timeouts
       Object.values(typingTimeoutsRef.current).forEach(clearTimeout);
@@ -327,16 +366,23 @@ export function useChatRealtime(memberId: string | null, roomId: string | null) 
  */
 export function useChatGlobalRealtime(memberId: string | null, roomIds: string[]) {
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const roomIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!memberId || roomIds.length === 0) return;
+    roomIdsRef.current = new Set(roomIds);
+  }, [roomIds]);
+
+  const hasRooms = roomIds.length > 0;
+
+  useEffect(() => {
+    if (!memberId || !hasRooms) return;
 
     if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
+      void removeChatChannel(channelRef.current);
       channelRef.current = null;
     }
 
-    const channel = supabase.channel('chat:global');
+    const channel = supabase.channel(createRealtimeTopic('chat:global'));
 
     channel.on(
       'postgres_changes',
@@ -351,7 +397,7 @@ export function useChatGlobalRealtime(memberId: string | null, roomIds: string[]
         const senderId = msg.sender_id as string;
 
         // Only process if we're a member of this room
-        if (!roomIds.includes(msgRoomId)) return;
+        if (!roomIdsRef.current.has(msgRoomId)) return;
         // Skip own messages
         if (senderId === memberId) return;
 
@@ -398,7 +444,7 @@ export function useChatGlobalRealtime(memberId: string | null, roomIds: string[]
       (payload) => {
         const updatedRoom = payload.new;
         const updatedRoomId = updatedRoom.id as string;
-        if (!roomIds.includes(updatedRoomId)) return;
+        if (!roomIdsRef.current.has(updatedRoomId)) return;
 
         const updates: Partial<ChatRoom> = {
           name: (updatedRoom.name as string) ?? '',
@@ -428,7 +474,7 @@ export function useChatGlobalRealtime(memberId: string | null, roomIds: string[]
       (payload) => {
         const updatedMembership = payload.new;
         const updatedRoomId = updatedMembership.room_id as string;
-        if (!roomIds.includes(updatedRoomId)) return;
+        if (!roomIdsRef.current.has(updatedRoomId)) return;
 
         useChatStore.getState().updateRoomMembership(updatedRoomId, {
           last_read_at: (updatedMembership.last_read_at as string | null) ?? null,
@@ -458,10 +504,9 @@ export function useChatGlobalRealtime(memberId: string | null, roomIds: string[]
 
     return () => {
       if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
+        void removeChatChannel(channelRef.current);
         channelRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [memberId, roomIds.join(',')]);
+  }, [memberId, hasRooms]);
 }

@@ -167,7 +167,7 @@ function formatDeadline(deadline: string | null): { text: string; isUrgent: bool
   const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
 
   if (days < 0) {
-    const dateStr = date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+    const dateStr = date.toLocaleDateString('tr-TR', { dateStyle: 'long' });
     return { text: `Süresi doldu (${dateStr})`, isUrgent: true };
   }
   if (days === 0) {

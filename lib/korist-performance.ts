@@ -151,10 +151,20 @@ function formatMetricPercent(numerator: number, denominator: number) {
 }
 
 function calculateContinuityPercent(attendedRehearsals: number, totalRehearsals: number, approvedAssignments: number, totalAssignments: number) {
-  return formatMetricPercent(
-    attendedRehearsals * REHEARSAL_CONTINUITY_WEIGHT + approvedAssignments * HOMEWORK_CONTINUITY_WEIGHT,
-    totalRehearsals * REHEARSAL_CONTINUITY_WEIGHT + totalAssignments * HOMEWORK_CONTINUITY_WEIGHT,
-  );
+  const hasRehearsals = totalRehearsals > 0;
+  const hasAssignments = totalAssignments > 0;
+
+  if (!hasRehearsals && !hasAssignments) return 0;
+  if (!hasAssignments) return formatMetricPercent(attendedRehearsals, totalRehearsals);
+  if (!hasRehearsals) return formatMetricPercent(approvedAssignments, totalAssignments);
+
+  const attendancePct = (attendedRehearsals / totalRehearsals) * 100;
+  const homeworkPct = (approvedAssignments / totalAssignments) * 100;
+  const totalWeight = REHEARSAL_CONTINUITY_WEIGHT + HOMEWORK_CONTINUITY_WEIGHT;
+
+  return Math.max(0, Math.min(100, Math.round(
+    (attendancePct * REHEARSAL_CONTINUITY_WEIGHT + homeworkPct * HOMEWORK_CONTINUITY_WEIGHT) / totalWeight,
+  )));
 }
 
 function normalizeRoleName(value: string) {

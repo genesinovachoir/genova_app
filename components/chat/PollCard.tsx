@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { BarChart3, Check, Users, X } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
 import { supabase } from '@/lib/supabase';
+import { createRealtimeTopic } from '@/lib/realtime';
 import { fetchPollData, votePoll, removePollVote } from '@/lib/chat';
 import type { ChatPoll, ChatPollVote } from '@/lib/chat';
 
@@ -44,7 +45,7 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
     if (!currentPollId) return;
 
     const channel = supabase
-      .channel(`poll-votes-${currentPollId}`)
+      .channel(createRealtimeTopic(`poll-votes:${currentPollId}`))
       .on(
         'postgres_changes',
         {
@@ -88,7 +89,7 @@ export function PollCard({ messageId, isOwn }: PollCardProps) {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [poll?.id]);
+  }, [poll?.id, poll?.is_multiple_choice]);
 
   const totalVotes = votes.length;
 
