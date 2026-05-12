@@ -26,7 +26,7 @@ interface ReviewerRoleEntry {
 }
 
 const PROFILE_MEMBER_SELECT =
-  'id, email, phone, birth_date, school_id, department_id, linkedin_url, instagram_url, youtube_url, spotify_url, photo_url';
+  'id, email, phone, birth_date, school_id, department_id, favorite_song_id, about_text, linkedin_url, instagram_url, youtube_url, spotify_url, tiktok_url, x_url, photo_url';
 
 function normalizeRoleName(value: string) {
   return value

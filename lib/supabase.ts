@@ -40,6 +40,7 @@ export interface ChoirMember {
   school_id?: string | null;
   department_id?: string | null;
   favorite_song_id?: string | null;
+  about_text?: string | null;
   linkedin_url?: string | null;
   instagram_url?: string | null;
   youtube_url?: string | null;
@@ -50,6 +51,7 @@ export interface ChoirMember {
   school_name?: string | null;
   department_name?: string | null;
   favorite_song_title?: string | null;
+  favorite_song_composer?: string | null;
 }
 
 export interface Announcement {

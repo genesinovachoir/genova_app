@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
@@ -11,9 +12,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  ExternalLink,
   GraduationCap,
   Loader2,
   Mail,
+  Music2,
   Phone,
   School2,
   XCircle,
@@ -25,6 +28,7 @@ import { supabase } from '@/lib/supabase';
 import { createRealtimeTopic } from '@/lib/realtime';
 import { sanitizeRichText } from '@/lib/richText';
 import { useBackOrHome } from '@/hooks/useBackOrHome';
+import { useProtectedDriveFileUrl } from '@/hooks/useProtectedDriveFileUrl';
 import { SwipeBack } from '@/components/SwipeBack';
 import {
   loadPerformanceMemberDetail,
@@ -66,6 +70,16 @@ function formatShortDate(dateStr: string | null | undefined) {
   return new Date(`${dateStr.slice(0, 10)}T12:00:00`).toLocaleDateString('tr-TR', {
     day: 'numeric',
     month: 'short',
+  });
+}
+
+function formatDateTime(dateStr: string | null | undefined) {
+  if (!dateStr) return null;
+  return new Date(dateStr).toLocaleDateString('tr-TR', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 }
 
@@ -122,6 +136,32 @@ function InfoRow({
         </span>
       </div>
     </div>
+  );
+}
+
+function normalizeExternalHref(value: string | null | undefined) {
+  const raw = value?.trim();
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `https://${raw}`;
+}
+
+function SocialLink({ label, href }: { label: string; href: string | null | undefined }) {
+  const normalizedHref = normalizeExternalHref(href);
+  if (!normalizedHref) {
+    return null;
+  }
+
+  return (
+    <a
+      href={normalizedHref}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-white/4 px-3 py-1.5 text-[0.68rem] font-semibold text-[var(--color-text-medium)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-high)]"
+    >
+      {label}
+      <ExternalLink size={11} />
+    </a>
   );
 }
 
@@ -259,7 +299,18 @@ function buildCalendarDays(currentMonth: Date, rehearsals: PerformanceRehearsalE
   return days;
 }
 
-function HomeworkCard({ item }: { item: PerformanceHomeworkEntry }) {
+function HomeworkCard({ item, memberId }: { item: PerformanceHomeworkEntry; memberId: string }) {
+  const protectedFileInput = item.submission?.drive_web_view_link ? null : item.submission;
+  const { url: protectedDriveUrl } = useProtectedDriveFileUrl(protectedFileInput);
+  const submissionUrl = item.submission?.drive_web_view_link ?? protectedDriveUrl;
+  const assignmentParams = new URLSearchParams({
+    mid: memberId,
+    returnTo: `/koristler/${memberId}`,
+  });
+  const assignmentHref = `/odevler/${item.assignment.id}?${assignmentParams.toString()}`;
+  const submittedAtLabel = formatDateTime(item.submission?.submitted_at);
+  const reviewedAtLabel = formatDateTime(item.submission?.approved_at);
+
   return (
     <div className="rounded-[10px] border border-[var(--color-border)] bg-white/4 p-4">
       <div className="flex items-start justify-between gap-3">
@@ -274,18 +325,37 @@ function HomeworkCard({ item }: { item: PerformanceHomeworkEntry }) {
 
       <div className="mt-3 space-y-2 text-sm text-[var(--color-text-medium)]">
         {item.submission ? (
-          <p>
-            Teslim: <span className="text-[var(--color-text-high)]">{item.submission.file_name}</span>
-          </p>
+          <div className="grid gap-2 rounded-[8px] border border-[var(--color-border)] bg-black/10 p-3 text-[0.78rem] sm:grid-cols-2">
+            <p>
+              Teslim:{' '}
+              {submissionUrl ? (
+                <a
+                  href={submissionUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-[var(--color-accent)] underline decoration-white/20 underline-offset-2 hover:text-[var(--color-text-high)]"
+                >
+                  Drive Linki
+                </a>
+              ) : (
+                <span className="text-[var(--color-text-high)]">Drive bağlantısı hazırlanıyor...</span>
+              )}
+            </p>
+            {submittedAtLabel ? <p>Teslim Tarihi: <span className="text-[var(--color-text-high)]">{submittedAtLabel}</span></p> : null}
+            {reviewedAtLabel ? <p>Değerlendirme: <span className="text-[var(--color-text-high)]">{reviewedAtLabel}</span></p> : null}
+          </div>
         ) : (
           <p>Henüz teslim edilmedi.</p>
         )}
-        {item.submission?.submission_note ? (
-          <p className="text-[0.85rem] leading-6 text-[var(--color-text-high)] opacity-85">{item.submission.submission_note}</p>
-        ) : null}
-        {item.submission?.reviewer_note ? (
-          <p className="text-[0.85rem] leading-6 text-[var(--color-text-high)] opacity-85">{item.submission.reviewer_note}</p>
-        ) : null}
+      </div>
+
+      <div className="mt-4">
+        <Link
+          href={assignmentHref}
+          className="inline-flex items-center justify-center rounded-full border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] px-4 py-2 text-[0.68rem] font-bold uppercase tracking-[0.12em] text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-background)]"
+        >
+          Ödevi Görüntüle
+        </Link>
       </div>
     </div>
   );
@@ -377,6 +447,11 @@ export default function KoristDetailPage() {
       return selectedDate;
     }
 
+    const todayDay = calendarDays.find((day) => day.isToday);
+    if (todayDay?.date) {
+      return todayDay.date;
+    }
+
     return calendarDays.find((day) => Boolean(day.rehearsal))?.date ?? null;
   }, [calendarDays, currentMonth, detail, selectedDate]);
 
@@ -396,7 +471,7 @@ export default function KoristDetailPage() {
   if (detailQuery.isError) {
     return (
       <main className="relative page-shell space-y-6 pb-28 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
-        <div className="absolute right-5 top-[max(env(safe-area-inset-top),1.5rem)] z-10">
+        <div className="flex justify-end">
           <button
             onClick={handleBack}
             className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
@@ -421,7 +496,7 @@ export default function KoristDetailPage() {
   if (!detail) {
     return (
       <main className="relative page-shell space-y-6 pb-28 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
-        <div className="absolute right-5 top-[max(env(safe-area-inset-top),1.5rem)] z-10">
+        <div className="flex justify-end">
           <button
             onClick={handleBack}
             className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
@@ -446,26 +521,37 @@ export default function KoristDetailPage() {
   const rejectedHomeworkCount = showHomeworkMetrics ? detail.homework.filter((item) => item.status === 'rejected').length : 0;
   const missingHomeworkCount = showHomeworkMetrics ? detail.homework.filter((item) => item.status === 'missing').length : 0;
   const contentGridClass = showHomeworkMetrics ? 'grid gap-6 lg:grid-cols-[1.1fr_0.9fr]' : 'grid gap-6';
+  const favoriteSongLabel = member.favorite_song_title
+    ? `${member.favorite_song_title}${member.favorite_song_composer ? ` - ${member.favorite_song_composer}` : ''}`
+    : null;
+  const hasSocialLinks = Boolean(
+    member.linkedin_url ||
+    member.instagram_url ||
+    member.youtube_url ||
+    member.spotify_url ||
+    member.tiktok_url ||
+    member.x_url,
+  );
 
   return (
     <SwipeBack fallback="/">
     <main className="relative page-shell space-y-6 pb-28 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
-      <div className="absolute right-5 top-[max(env(safe-area-inset-top),1.5rem)] z-10">
-        <button
-          onClick={handleBack}
-          className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
-        >
-          <ArrowLeft size={16} />
-          <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
-        </button>
-      </div>
-
       <motion.section
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         className="glass-panel p-6 sm:p-7 pt-4"
       >
-        <div className="flex flex-col gap-7 pr-20">
+        <div className="mb-5 flex justify-end">
+          <button
+            onClick={handleBack}
+            className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
+          >
+            <ArrowLeft size={16} />
+            <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-7">
           <div className="flex items-center gap-5">
             <MemberAvatar detail={detail} />
             <div className="min-w-0">
@@ -473,8 +559,18 @@ export default function KoristDetailPage() {
               <h1 className="mt-2 font-serif text-[1.6rem] tracking-[-0.04em] text-[var(--color-text-high)] sm:text-[2rem]">
                 {member.first_name} {member.last_name}
               </h1>
+              <p className="mt-1 text-[0.68rem] uppercase tracking-[0.16em] text-[var(--color-text-medium)]">
+                {member.voice_group ?? 'Parti yok'}
+                {member.sub_voice_group && member.sub_voice_group !== member.voice_group ? ` · ${member.sub_voice_group}` : ''}
+              </p>
             </div>
           </div>
+
+          {member.about_text ? (
+            <p className="whitespace-pre-wrap border-t border-[var(--color-border)] pt-5 text-[0.9rem] leading-6 text-[var(--color-text-high)] opacity-90">
+              {member.about_text}
+            </p>
+          ) : null}
 
           <div className="grid gap-x-8 gap-y-4 border-t border-[var(--color-border)] pt-6 sm:grid-cols-2 lg:grid-cols-3">
             <InfoRow icon={<Mail size={15} />} label="E-posta" value={member.email} />
@@ -483,7 +579,19 @@ export default function KoristDetailPage() {
             <InfoRow icon={<CalendarDays size={15} />} label="Katılım Tarihi" value={formatDate(member.join_date)} />
             <InfoRow icon={<School2 size={15} />} label="Okul" value={member.school_name} />
             <InfoRow icon={<GraduationCap size={15} />} label="Bölüm" value={member.department_name} />
+            <InfoRow icon={<Music2 size={15} />} label="Favori Eser" value={favoriteSongLabel} />
           </div>
+
+          {hasSocialLinks ? (
+            <div className="flex flex-wrap gap-2 border-t border-[var(--color-border)] pt-5">
+              <SocialLink label="LinkedIn" href={member.linkedin_url} />
+              <SocialLink label="Instagram" href={member.instagram_url} />
+              <SocialLink label="YouTube" href={member.youtube_url} />
+              <SocialLink label="Spotify" href={member.spotify_url} />
+              <SocialLink label="TikTok" href={member.tiktok_url} />
+              <SocialLink label="X" href={member.x_url} />
+            </div>
+          ) : null}
         </div>
       </motion.section>
 
@@ -529,7 +637,7 @@ export default function KoristDetailPage() {
         >
           <div className="flex items-center justify-between gap-3">
             <div>
-              <span className="page-kicker">Prova Takvimi</span>
+              <span className="page-kicker">Takvim</span>
               <h2 className="mt-3 font-serif text-2xl tracking-[-0.05em]">{monthLabel(currentMonth)}</h2>
             </div>
             <div className="flex gap-2">
@@ -639,7 +747,19 @@ export default function KoristDetailPage() {
             className="space-y-5"
           >
             <div className="glass-panel p-5 sm:p-6">
-              <span className="page-kicker">Ödevler</span>
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <span className="page-kicker">Ödevler</span>
+                <div className="text-right">
+                  <p className="text-[0.6rem] uppercase tracking-[0.16em] text-[var(--color-text-medium)]">Ödev Başarısı</p>
+                  <p className="font-serif text-2xl tracking-[-0.04em] text-[var(--color-text-high)]">{formatPercent(member.homework_percent)}</p>
+                </div>
+              </div>
+              <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/5">
+                <div
+                  className="h-full rounded-full bg-[var(--color-accent)] transition-[width]"
+                  style={{ width: `${Math.max(0, Math.min(100, member.homework_percent ?? 0))}%` }}
+                />
+              </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-4">
                 <div className="rounded-[10px] border border-[var(--color-border)] bg-white/4 p-3">
                   <p className="text-[0.58rem] uppercase tracking-[0.16em] text-[var(--color-text-medium)]">Tamamlanan</p>
@@ -667,7 +787,7 @@ export default function KoristDetailPage() {
                   {approvedHomework.length === 0 ? (
                     <p className="text-sm text-[var(--color-text-medium)]">Henüz tamamlanan ödev yok.</p>
                   ) : (
-                    approvedHomework.map((item) => <HomeworkCard key={item.assignment.id} item={item} />)
+                    approvedHomework.map((item) => <HomeworkCard key={item.assignment.id} item={item} memberId={member.id} />)
                   )}
                 </div>
               </div>
@@ -678,7 +798,7 @@ export default function KoristDetailPage() {
                   {openHomework.length === 0 ? (
                     <p className="text-sm text-[var(--color-text-medium)]">Eksik ödev yok.</p>
                   ) : (
-                    openHomework.map((item) => <HomeworkCard key={item.assignment.id} item={item} />)
+                    openHomework.map((item) => <HomeworkCard key={item.assignment.id} item={item} memberId={member.id} />)
                   )}
                 </div>
               </div>

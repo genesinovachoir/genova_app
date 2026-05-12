@@ -65,7 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .select(`
         id, first_name, last_name, voice_group, sub_voice_group, auth_user_id,
         email, phone, is_active, photo_url, birth_date, join_date,
-        school_id, department_id, favorite_song_id,
+        school_id, department_id, favorite_song_id, about_text,
         linkedin_url, instagram_url, youtube_url, spotify_url, tiktok_url, x_url,
         schools(name),
         departments(name),
@@ -79,6 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       (memberData as any).school_name = (memberData as any).schools?.name ?? null;
       (memberData as any).department_name = (memberData as any).departments?.name ?? null;
       (memberData as any).favorite_song_title = (memberData as any).repertoire?.title ?? null;
+      (memberData as any).favorite_song_composer = (memberData as any).repertoire?.composer ?? null;
       setMember(memberData);
 
       const { data: rolesData } = await supabase

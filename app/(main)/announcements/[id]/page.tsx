@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Edit2, Eye, EyeOff, Loader2, Megaphone, CalendarDays, FileText, Music4, AlertTriangle, Info, Heart } from 'lucide-react';
+import { ArrowLeft, Edit2, Eye, EyeOff, Loader2, Megaphone, CalendarDays, FileText, Music4, AlertTriangle, Info, Heart, Trash2 } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import { motion } from 'motion/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -85,6 +85,7 @@ export default function AnnouncementPage() {
   const id = params?.id as string;
   const { isAdmin, isSectionLeader, member } = useAuth();
   const [editingAnn, setEditingAnn] = useState<Announcement | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const handleBack = useBackOrHome();
 
   const announcementQuery = useQuery({
@@ -107,6 +108,24 @@ export default function AnnouncementPage() {
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'İşlem başarısız oldu.', 'Hata');
+    },
+  });
+
+  const deleteAnnouncementMutation = useMutation({
+    mutationFn: async () => {
+      await postJsonWithAuth<{ id: string }>('/api/announcements/delete', {
+        announcement_id: id,
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['announcements'] });
+      await queryClient.invalidateQueries({ queryKey: ['announcement', id] });
+      setShowDeleteConfirm(false);
+      toast.success('Duyuru silindi.');
+      handleBack();
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Duyuru silinemedi.', 'Hata');
     },
   });
 
@@ -134,8 +153,8 @@ export default function AnnouncementPage() {
 
   if (announcementQuery.isError || !announcementQuery.data) {
     return (
-      <main className="relative min-h-screen bg-[var(--color-background)] px-5 pb-10 pt-[max(env(safe-area-inset-top),1.5rem)]">
-        <div className="absolute right-5 top-[max(env(safe-area-inset-top),1.5rem)] z-10">
+      <main className="min-h-screen bg-[var(--color-background)] px-5 pb-10 pt-[max(env(safe-area-inset-top),1.5rem)]">
+        <div className="mb-6 flex items-center gap-3">
           <button
             onClick={handleBack}
             className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
@@ -143,59 +162,83 @@ export default function AnnouncementPage() {
             <ArrowLeft size={16} />
             <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
           </button>
+          <span className="page-kicker">Duyuru</span>
         </div>
-        <p className="text-center text-[var(--color-text-medium)] mt-12">Duyuru bulunamadı.</p>
+        <p className="mt-6 text-center text-[var(--color-text-medium)]">Duyuru bulunamadı.</p>
       </main>
     );
   }
 
   const announcement = announcementQuery.data;
   const Icon = ICON_MAP[announcement.icon] ?? Megaphone;
-  const canEditDelete = isAdmin() || (isSectionLeader() && announcement.created_by === member?.id);
+  const canEditAnnouncement = isAdmin() || (isSectionLeader() && announcement.created_by === member?.id);
+  const canDeleteAnnouncement = announcement.created_by === member?.id;
 
   return (
     <SwipeBack fallback="/">
-    <main className="relative min-h-screen bg-[var(--color-background)] px-5 pb-10 pt-[max(env(safe-area-inset-top),1.5rem)]">
-      <div className="absolute right-5 top-[max(env(safe-area-inset-top),1.5rem)] z-10 flex items-center gap-2">
-        {canEditDelete ? (
+    <main className="min-h-screen bg-[var(--color-background)] px-5 pb-10 pt-[max(env(safe-area-inset-top),1.5rem)]">
+      <div className="mb-6 flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <button
+            onClick={handleBack}
+            className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
+          >
+            <ArrowLeft size={16} />
+            <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
+          </button>
+          <span className="page-kicker">Duyuru</span>
+        </div>
+
+        {canEditAnnouncement || canDeleteAnnouncement ? (
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => toggleHideMutation.mutate(!announcement.is_hidden)}
-              disabled={toggleHideMutation.isPending}
-              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border backdrop-blur-md transition-all active:scale-95 disabled:opacity-50 ${
-                announcement.is_hidden
-                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
-                  : 'border-white/10 bg-white/5 text-[var(--color-text-medium)] hover:bg-white/10 hover:text-[var(--color-text-high)]'
-              }`}
-              title={announcement.is_hidden ? 'Göster' : 'Gizle'}
-            >
-              {toggleHideMutation.isPending ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : announcement.is_hidden ? (
-                <Eye size={13} />
-              ) : (
-                <EyeOff size={13} />
-              )}
-            </button>
-            <button
-              onClick={() => setEditingAnn(announcement)}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95 disabled:opacity-50"
-            >
-              <Edit2 size={13} />
-            </button>
+            {canEditAnnouncement ? (
+              <>
+                <button
+                  onClick={() => toggleHideMutation.mutate(!announcement.is_hidden)}
+                  disabled={toggleHideMutation.isPending}
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border backdrop-blur-md transition-all active:scale-95 disabled:opacity-50 ${
+                    announcement.is_hidden
+                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
+                      : 'border-white/10 bg-white/5 text-[var(--color-text-medium)] hover:bg-white/10 hover:text-[var(--color-text-high)]'
+                  }`}
+                  title={announcement.is_hidden ? 'Göster' : 'Gizle'}
+                >
+                  {toggleHideMutation.isPending ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : announcement.is_hidden ? (
+                    <Eye size={13} />
+                  ) : (
+                    <EyeOff size={13} />
+                  )}
+                </button>
+                <button
+                  onClick={() => setEditingAnn(announcement)}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95 disabled:opacity-50"
+                >
+                  <Edit2 size={13} />
+                </button>
+              </>
+            ) : null}
+            {canDeleteAnnouncement ? (
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                disabled={deleteAnnouncementMutation.isPending}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-rose-500/35 bg-rose-500/10 text-rose-300 backdrop-blur-md transition-all hover:bg-rose-500/20 active:scale-95 disabled:opacity-50"
+                title="Sil"
+              >
+                {deleteAnnouncementMutation.isPending ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Trash2 size={13} />
+                )}
+              </button>
+            ) : null}
           </div>
         ) : null}
-        <button
-          onClick={handleBack}
-          className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
-        >
-          <ArrowLeft size={16} />
-          <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
-        </button>
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="pt-2">
-        <div className="mb-5 flex items-start gap-3 pr-[160px]">
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
+        <div className="mb-5 flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] border border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)] mt-0.5">
             <Icon size={18} />
           </div>
@@ -230,6 +273,22 @@ export default function AnnouncementPage() {
           await queryClient.invalidateQueries({ queryKey: ['announcements'] });
         }}
         editAnnouncement={editingAnn}
+      />
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Duyuruyu sil"
+        description="Bu duyuru kalıcı olarak silinecek. İşlem geri alınamaz."
+        confirmLabel="Sil"
+        tone="danger"
+        loading={deleteAnnouncementMutation.isPending}
+        onClose={() => {
+          if (!deleteAnnouncementMutation.isPending) {
+            setShowDeleteConfirm(false);
+          }
+        }}
+        onConfirm={() => {
+          deleteAnnouncementMutation.mutate();
+        }}
       />
     </main>
     </SwipeBack>

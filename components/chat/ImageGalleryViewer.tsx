@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Download, MessageCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { ChatMessage } from '@/lib/chat';
+import { ChatOverlayPortal } from './ChatOverlayPortal';
 
 interface ImageGalleryViewerProps {
   images: ChatMessage[];
@@ -89,13 +90,16 @@ export function ImageGalleryViewer({
     : '';
 
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[200] flex flex-col bg-black/95 backdrop-blur-md"
-      >
+    <ChatOverlayPortal>
+      <AnimatePresence>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[1000] flex h-[100dvh] w-screen flex-col bg-black/95 backdrop-blur-md"
+          role="dialog"
+          aria-modal="true"
+        >
         {/* Header */}
         <div className="flex items-center justify-between p-4 pt-[calc(env(safe-area-inset-top,0px)+16px)]">
           <div className="flex items-center gap-3">
@@ -182,7 +186,8 @@ export function ImageGalleryViewer({
             <p className="text-center text-sm text-white/90">{currentMessage.content}</p>
           </div>
         )}
-      </motion.div>
-    </AnimatePresence>
+        </motion.div>
+      </AnimatePresence>
+    </ChatOverlayPortal>
   );
 }

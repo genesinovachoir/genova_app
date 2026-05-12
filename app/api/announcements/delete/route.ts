@@ -9,42 +9,6 @@ interface DeleteAnnouncementBody {
   announcement_id?: string;
 }
 
-interface RoleRow {
-  roles?: { name?: string } | { name?: string }[] | null;
-}
-
-function normalizeRoleName(value: string) {
-  return value
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/ş/gi, 's')
-    .replace(/ı/gi, 'i')
-    .toLocaleLowerCase('tr-TR')
-    .trim();
-}
-
-function collectRoleNames(roleRows: RoleRow[] | null | undefined) {
-  return new Set(
-    (roleRows ?? [])
-      .flatMap((entry) => {
-        const roleData = entry.roles;
-        if (!roleData) {
-          return [];
-        }
-
-        if (Array.isArray(roleData)) {
-          return roleData
-            .map((role) => role?.name)
-            .filter((name): name is string => Boolean(name))
-            .map((name) => normalizeRoleName(name));
-        }
-
-        return roleData.name ? [normalizeRoleName(roleData.name)] : [];
-      })
-      .filter((roleName): roleName is string => Boolean(roleName)),
-  );
-}
-
 export async function POST(request: Request) {
   try {
     const { user } = await requireAuthenticatedUser(request);
@@ -71,23 +35,6 @@ export async function POST(request: Request) {
       return new NextResponse('Kullanıcı için korist kaydı bulunamadı.', { status: 404 });
     }
 
-    const { data: actorRoles, error: rolesError } = await serviceClient
-      .from('choir_member_roles')
-      .select('roles(name)')
-      .eq('member_id', actorMember.id);
-
-    if (rolesError) {
-      return new NextResponse(rolesError.message, { status: 500 });
-    }
-
-    const roleNames = collectRoleNames(actorRoles as RoleRow[]);
-    const isChef = roleNames.has('sef');
-    const isSectionLeader = roleNames.has('partisyon sefi');
-
-    if (!isChef && !isSectionLeader) {
-      return new NextResponse('Bu işlem için Şef veya Partisyon Şefi yetkisi gerekli.', { status: 403 });
-    }
-
     const { data: announcement, error: announcementError } = await serviceClient
       .from('announcements')
       .select('id, created_by')
@@ -102,7 +49,9 @@ export async function POST(request: Request) {
       return new NextResponse('Duyuru bulunamadı.', { status: 404 });
     }
 
-    if (!isChef && announcement.created_by !== actorMember.id) {
+    const isCreator = announcement.created_by === actorMember.id;
+
+    if (!isCreator) {
       return new NextResponse('Sadece kendi oluşturduğunuz duyuruyu silebilirsiniz.', { status: 403 });
     }
 

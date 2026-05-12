@@ -264,7 +264,7 @@ export default function KoristlerPage() {
   if (overviewQuery.isError) {
     return (
       <main className="relative page-shell space-y-6 pb-28 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
-        <div className="absolute right-5 top-[max(env(safe-area-inset-top),1.5rem)] z-10">
+        <div className="flex justify-end">
           <button
             onClick={handleBack}
             className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
@@ -292,21 +292,20 @@ export default function KoristlerPage() {
   return (
     <SwipeBack fallback="/">
     <main className="relative page-shell space-y-6 pb-28 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
-      <div className="absolute right-5 top-[max(env(safe-area-inset-top),1.5rem)] z-10">
-        <button
-          onClick={handleBack}
-          className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
-        >
-          <ArrowLeft size={16} />
-          <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
-        </button>
-      </div>
-
       <motion.section
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         className="glass-panel p-6 sm:p-7"
       >
+        <div className="mb-5 flex justify-end">
+          <button
+            onClick={handleBack}
+            className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
+          >
+            <ArrowLeft size={16} />
+            <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
+          </button>
+        </div>
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex flex-col gap-1.5">

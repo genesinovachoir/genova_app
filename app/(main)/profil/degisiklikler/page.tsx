@@ -49,10 +49,14 @@ const FIELD_LABELS: Record<ProfileChangeKey, string> = {
   birth_date: 'Doğum Tarihi',
   school_id: 'Okul',
   department_id: 'Bölüm',
+  favorite_song_id: 'Favori Eser',
+  about_text: 'Hakkımda',
   linkedin_url: 'LinkedIn',
   instagram_url: 'Instagram',
   youtube_url: 'YouTube',
   spotify_url: 'Spotify veya YTMUSIC',
+  tiktok_url: 'TikTok',
+  x_url: 'X',
   photo_url: 'Profil Fotoğrafı',
 };
 
@@ -81,6 +85,8 @@ const DEPTS: Record<string, string> = {
   '8a794ff4-c307-4e93-9652-ec2e36e1d8c3': 'Müzik',
 };
 
+let REPERTOIRE_LABELS: Record<string, string> = {};
+
 function displayValue(key: ProfileChangeKey, val: ProfileChangeValue | undefined) {
   if (val === null || val === undefined || val === '') {
     return '—';
@@ -90,6 +96,9 @@ function displayValue(key: ProfileChangeKey, val: ProfileChangeValue | undefined
   }
   if (key === 'department_id') {
     return DEPTS[val] || val;
+  }
+  if (key === 'favorite_song_id') {
+    return REPERTOIRE_LABELS[val] || val;
   }
   if (key === 'birth_date' && val) {
     return new Date(val).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -232,9 +241,14 @@ export default function ProfilDegisiklikler() {
     }
 
     const rows = (data ?? []) as Omit<ChangeRequest, 'requester' | 'reviewer'>[];
+    const sanitizedRows = rows.map((row) => ({
+      ...row,
+      changes_json: sanitizeProfileChanges(row.changes_json),
+      previous_values_json: sanitizeProfileChanges(row.previous_values_json),
+    }));
     const personIds = Array.from(
       new Set(
-        rows
+        sanitizedRows
           .flatMap((row) => [row.member_id, row.reviewed_by])
           .filter((value): value is string => Boolean(value)),
       ),
@@ -244,7 +258,7 @@ export default function ProfilDegisiklikler() {
     if (personIds.length > 0) {
       const { data: people, error: peopleError } = await supabase
         .from('choir_members')
-        .select('id, first_name, last_name, voice_group, email, phone, birth_date, school_id, department_id, linkedin_url, instagram_url, youtube_url, spotify_url, photo_url')
+        .select('id, first_name, last_name, voice_group, email, phone, birth_date, school_id, department_id, favorite_song_id, about_text, linkedin_url, instagram_url, youtube_url, spotify_url, tiktok_url, x_url, photo_url')
         .in('id', personIds);
 
       if (peopleError) {
@@ -262,10 +276,14 @@ export default function ProfilDegisiklikler() {
               birth_date: person.birth_date ?? null,
               school_id: person.school_id ?? null,
               department_id: person.department_id ?? null,
+              favorite_song_id: person.favorite_song_id ?? null,
+              about_text: person.about_text ?? null,
               linkedin_url: person.linkedin_url ?? null,
               instagram_url: person.instagram_url ?? null,
               youtube_url: person.youtube_url ?? null,
               spotify_url: person.spotify_url ?? null,
+              tiktok_url: person.tiktok_url ?? null,
+              x_url: person.x_url ?? null,
               photo_url: person.photo_url ?? null,
             },
           ]),
@@ -273,11 +291,39 @@ export default function ProfilDegisiklikler() {
       }
     }
 
+    const favoriteSongIds = Array.from(
+      new Set(
+        [
+          ...sanitizedRows.flatMap((row) => [
+            row.changes_json.favorite_song_id,
+            row.previous_values_json.favorite_song_id,
+          ]),
+          ...Array.from(peopleMap.values()).map((person) => person.favorite_song_id),
+        ].filter((value): value is string => Boolean(value)),
+      ),
+    );
+
+    if (favoriteSongIds.length > 0) {
+      const { data: songs, error: songsError } = await supabase
+        .from('repertoire')
+        .select('id, title, composer')
+        .in('id', favoriteSongIds);
+
+      if (!songsError) {
+        REPERTOIRE_LABELS = Object.fromEntries(
+          (songs ?? []).map((song) => [
+            song.id,
+            `${song.title}${song.composer ? ` - ${song.composer}` : ''}`,
+          ]),
+        );
+      }
+    } else {
+      REPERTOIRE_LABELS = {};
+    }
+
     setRequests(
-      rows.map((row) => ({
+      sanitizedRows.map((row) => ({
         ...row,
-        changes_json: sanitizeProfileChanges(row.changes_json),
-        previous_values_json: sanitizeProfileChanges(row.previous_values_json),
         requester: peopleMap.get(row.member_id) ?? null,
         reviewer: row.reviewed_by ? peopleMap.get(row.reviewed_by) ?? null : null,
       })),
@@ -768,7 +814,7 @@ function ValueBox({ label, value, emphasis = false }: { label: string; value: st
   return (
     <div className="min-w-0 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
       <p className="text-[0.58rem] uppercase tracking-[0.16em] text-[var(--color-text-medium)]">{label}</p>
-      <p className={`mt-1 text-[0.84rem] break-all ${emphasis ? 'text-[var(--color-text-high)]' : 'text-[var(--color-text-medium)]'}`}>
+      <p className={`mt-1 whitespace-pre-wrap break-words text-[0.84rem] ${emphasis ? 'text-[var(--color-text-high)]' : 'text-[var(--color-text-medium)]'}`}>
         {value}
       </p>
     </div>

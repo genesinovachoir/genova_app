@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
-import { Edit2, LogOut, Mail, Phone, Cake, Building2, GraduationCap, Music, Calendar, Clock, ShieldCheck, Moon, Sun, Menu } from 'lucide-react';
+import { Edit2, LogOut, Mail, Phone, Cake, Building2, GraduationCap, Music, Calendar, Clock, ShieldCheck, Moon, Sun, Menu, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { useTheme } from 'next-themes';
 import { useAuth } from '@/components/AuthProvider';
@@ -20,6 +20,9 @@ export default function Profil() {
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const isDark = resolvedTheme !== 'light';
+  const favoriteSongLabel = member?.favorite_song_title
+    ? `${member.favorite_song_title}${member.favorite_song_composer ? ` - ${member.favorite_song_composer}` : ''}`
+    : null;
   const today = new Date();
   const isBirthdayToday = (() => {
     if (!member?.birth_date) return false;
@@ -244,6 +247,16 @@ export default function Profil() {
         )}
       </motion.div>
 
+      {member?.about_text ? (
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: 0.04 }}
+          className="glass-panel p-5 flex flex-col gap-3">
+          <SectionTitle icon={<UserRound size={11} />} label="HAKKIMDA" />
+          <p className="whitespace-pre-wrap text-[0.9rem] leading-6 text-[var(--color-text-high)] opacity-90">
+            {member.about_text}
+          </p>
+        </motion.div>
+      ) : null}
+
       {/* İletişim */}
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: 0.06 }}
         className="glass-panel p-5 flex flex-col gap-3.5">
@@ -261,7 +274,7 @@ export default function Profil() {
         {member?.school_name && <><Div /><InfoRow icon={<Building2 size={15} />} label="Okul" value={member.school_name} /></>}
         {member?.department_name && <><Div /><InfoRow icon={<GraduationCap size={15} />} label="Bölüm" value={member.department_name} /></>}
         {member?.join_date && <><Div /><InfoRow icon={<Clock size={15} />} label="Katılım Tarihi" value={formatDate(member.join_date)} /></>}
-        {member?.favorite_song_title && <><Div /><InfoRow icon={<Music size={15} />} label="En Sevdiğim Eser" value={member.favorite_song_title} /></>}
+        {favoriteSongLabel && <><Div /><InfoRow icon={<Music size={15} />} label="En Sevdiğim Eser" value={favoriteSongLabel} /></>}
       </motion.div>
     </main>
   );

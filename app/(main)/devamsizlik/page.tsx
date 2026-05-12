@@ -565,8 +565,7 @@ export default function DevamsizlikPage() {
           </button>
         </div>
         <div className="pr-20">
-          <span className="page-kicker">Devam Çizelgesi</span>
-          <h1 className="mt-2 font-serif text-3xl tracking-[-0.05em]">Takvim</h1>
+          <h1 className="font-serif text-3xl tracking-[-0.05em]">Takvim</h1>
         </div>
       </div>
 

@@ -56,6 +56,9 @@ interface AttendanceStats {
   attendedCount: number;
   missedCount: number;
   totalRehearsals: number;
+  approvedAssignments: number;
+  totalAssignments: number;
+  continuityCoefficient: number;
 }
 
 function formatDate(iso: string) {
@@ -133,64 +136,38 @@ async function fetchTodayRehearsal(memberId: string, todayStr: string): Promise<
 }
 
 async function fetchAttendanceStats(memberId: string, todayStr: string): Promise<AttendanceStats> {
-  const { data: rehearsals, error: rehearsalsError } = await supabase
-    .from('rehearsals')
-    .select('id')
-    .eq('collect_attendance', true)
-    .lte('date', todayStr);
-
-  if (rehearsalsError) {
-    throw rehearsalsError;
-  }
-
-  const allRehearsalIds = (rehearsals ?? []).map((rehearsal) => rehearsal.id);
+  const { data, error } = await supabase.rpc('get_member_continuity_info', { p_member_id: memberId });
   
-  if (allRehearsalIds.length === 0) {
+  if (error) {
+    throw error;
+  }
+
+  const info = data?.[0] as {
+    total_rehearsals: number;
+    attended_rehearsals: number;
+    total_assignments: number;
+    approved_assignments: number;
+    continuity_coefficient: number;
+  } | null;
+
+  if (!info) {
     return {
       attendedCount: 0,
       missedCount: 0,
       totalRehearsals: 0,
+      approvedAssignments: 0,
+      totalAssignments: 0,
+      continuityCoefficient: 0,
     };
   }
-
-  const { data: invitees, error: inviteeError } = await supabase
-    .from('rehearsal_invitees')
-    .select('rehearsal_id')
-    .eq('member_id', memberId)
-    .in('rehearsal_id', allRehearsalIds);
-
-  if (inviteeError) {
-    throw inviteeError;
-  }
-
-  const rehearsalIds = (invitees ?? []).map(i => i.rehearsal_id);
-  const totalRehearsals = rehearsalIds.length;
-
-  if (totalRehearsals === 0) {
-    return {
-      attendedCount: 0,
-      missedCount: 0,
-      totalRehearsals: 0,
-    };
-  }
-
-  const { data: approvedAttendance, error: attendanceError } = await supabase
-    .from('attendance')
-    .select('rehearsal_id')
-    .eq('member_id', memberId)
-    .eq('status', 'approved')
-    .in('rehearsal_id', rehearsalIds);
-
-  if (attendanceError) {
-    throw attendanceError;
-  }
-
-  const attendedCount = new Set((approvedAttendance ?? []).map((row) => row.rehearsal_id)).size;
 
   return {
-    attendedCount,
-    missedCount: Math.max(0, totalRehearsals - attendedCount),
-    totalRehearsals,
+    attendedCount: info.attended_rehearsals,
+    missedCount: Math.max(0, info.total_rehearsals - info.attended_rehearsals),
+    totalRehearsals: info.total_rehearsals,
+    approvedAssignments: info.approved_assignments,
+    totalAssignments: info.total_assignments,
+    continuityCoefficient: info.continuity_coefficient,
   };
 }
 
@@ -423,15 +400,17 @@ export default function Dashboard() {
     if (!ann.is_hidden) return true;
     return isAdmin() || (isSectionLeader() && ann.created_by === member?.id);
   });
-  const { attendedCount, missedCount, totalRehearsals } = statsQuery.data ?? {
+  const { attendedCount, missedCount, totalRehearsals, approvedAssignments, totalAssignments, continuityCoefficient } = statsQuery.data ?? {
     attendedCount: 0,
     missedCount: 0,
     totalRehearsals: 0,
+    approvedAssignments: 0,
+    totalAssignments: 0,
+    continuityCoefficient: 0,
   };
 
-  const rawAttendancePercent = totalRehearsals > 0 ? Math.round((attendedCount / totalRehearsals) * 100) : 0;
-  const attendancePercent = Number.isFinite(rawAttendancePercent)
-    ? Math.max(0, Math.min(100, rawAttendancePercent))
+  const attendancePercent = Number.isFinite(continuityCoefficient)
+    ? Math.max(0, Math.min(100, Math.round(continuityCoefficient * 100)))
     : 0;
   const circumference = 289;
   const dashOffset = circumference - (circumference * attendancePercent) / 100;
@@ -447,11 +426,162 @@ export default function Dashboard() {
 
   return (
     <main className="page-shell space-y-6 sm:space-y-8">
-      <div className="grid gap-6">
+      {!todayRehearsalQuery.isPending && todayRehearsal ? (
         <motion.section
           initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.08 }}
+          className="glass-panel p-6 sm:p-7"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <span className="page-kicker">Katılım Komutu</span>
+              <h3 className="mt-4 font-serif text-2xl tracking-[-0.05em]">{todayRehearsal.title}</h3>
+            </div>
+            <span className="status-pill">
+              {toTimeStr(todayRehearsal.start_time)} • {todayRehearsal.location}
+            </span>
+          </div>
+
+          <div className={`mt-6 grid gap-4 ${todayRehearsal.notes ? 'lg:grid-cols-[0.78fr_1.22fr]' : ''}`}>
+            {todayRehearsal.notes ? (
+              <div className="rounded-[4px] border border-[var(--color-border)] bg-white/4 p-4">
+                <p className="text-[0.68rem] uppercase tracking-[0.22em] text-[var(--color-text-medium)]">Not</p>
+                <div
+                  className="prose mt-3 max-w-none text-[var(--color-text-high)] opacity-90 [--tw-prose-body:var(--color-text-high)] [--tw-prose-headings:var(--color-text-high)] [--tw-prose-links:var(--color-accent)] [--tw-prose-bold:var(--color-text-high)] [--tw-prose-bullets:var(--color-text-medium)] [--tw-prose-quotes:var(--color-text-high)] [--tw-prose-code:var(--color-text-high)] [--tw-prose-hr:var(--color-border)] prose-p:my-0.5 prose-p:text-[14px] prose-p:leading-[1.4] prose-ul:list-disc prose-ol:list-decimal prose-li:my-0.5 prose-a:text-[var(--color-accent)] prose-img:my-2 prose-img:max-h-[30vh] prose-img:w-full prose-img:rounded-[8px] prose-img:border prose-img:border-[var(--color-border)] prose-img:object-cover"
+                  dangerouslySetInnerHTML={{ __html: sanitizeRichText(todayRehearsal.notes) }}
+                />
+              </div>
+            ) : null}
+
+            <div className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+              <div ref={containerRef} className="group relative h-14 overflow-hidden rounded-full border border-[var(--color-border)] bg-[var(--color-surface-solid)] sm:h-16">
+                {attendanceState === 'idle' ? (
+                  <motion.div
+                    className="absolute bottom-0 left-0 top-0 z-10 rounded-full bg-[var(--color-accent)]"
+                    style={{ width: fillWidth }}
+                  />
+                ) : null}
+
+                <AnimatePresence mode="wait">
+                  {attendanceState === 'idle' ? (
+                    <motion.div
+                      key="idle-text"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center pl-[3.5rem] pr-2 text-center sm:pl-[4rem]"
+                    >
+                      <span className="text-[0.65rem] font-bold uppercase tracking-[0.22em] text-[var(--color-text-medium)] sm:text-[0.72rem]">
+                        Katılımı onaylamak için sürükle
+                      </span>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+
+                {attendanceState === 'idle' ? (
+                  <motion.div
+                    ref={thumbRef}
+                    style={{ x: dragX }}
+                    drag="x"
+                    dragConstraints={{ left: 0, right: maxDrag }}
+                    dragElastic={0}
+                    dragMomentum={false}
+                    onDragEnd={() => {
+                      if (dragX.get() >= maxDrag * 0.8) {
+                        handleSwipeConfirm();
+                      } else {
+                        animate(dragX, 0, { type: 'spring', stiffness: 300, damping: 20 });
+                      }
+                    }}
+                    className="group/thumb relative z-20 flex h-full w-14 shrink-0 cursor-grab items-center justify-center rounded-full bg-[var(--color-accent)] text-[var(--color-background)] shadow-lg active:cursor-grabbing sm:w-16"
+                  >
+                    <ChevronRight className="transition-transform duration-200 group-active/thumb:scale-75" size={24} strokeWidth={2.4} />
+                  </motion.div>
+                ) : null}
+
+                <AnimatePresence mode="wait">
+                  {attendanceState === 'pending' ? (
+                    <motion.div
+                      key="pending"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="absolute inset-0 z-30 flex items-center justify-center bg-[var(--color-surface-solid)]"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Loader2 className="animate-spin text-[var(--color-accent)]" size={18} />
+                        <span className="whitespace-nowrap font-serif text-base italic tracking-[-0.04em] text-[var(--color-accent)] sm:text-lg">
+                          Onay bekleniyor...
+                        </span>
+                      </div>
+                    </motion.div>
+                  ) : null}
+                  {attendanceState === 'approved' ? (
+                    <motion.div
+                      key="approved"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="absolute inset-0 z-30 flex items-center justify-center bg-[var(--color-accent-soft)]"
+                    >
+                      <div className="flex items-center gap-1">
+                        <LottieIcon path="/lottie/Success.json" fallback={CheckCircle2} size={36} isActive stopAtHalf interactive={false} />
+                        <motion.span
+                          initial={{ opacity: 0, x: -4 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.3 }}
+                          className="whitespace-nowrap font-serif text-base font-medium tracking-[-0.04em] text-[var(--color-accent)] sm:text-lg"
+                        >
+                          Onaylandı
+                        </motion.span>
+                      </div>
+                    </motion.div>
+                  ) : null}
+                  {attendanceState === 'rejected' ? (
+                    <motion.div
+                      key="rejected"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="absolute inset-0 z-30 flex items-center justify-center bg-rose-500/10"
+                    >
+                      <div className="flex items-center gap-2">
+                        <XCircle className="text-rose-500" size={20} />
+                        <span className="whitespace-nowrap font-serif text-base tracking-[-0.04em] text-rose-500 sm:text-lg">
+                          Reddedildi
+                        </span>
+                      </div>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </div>
+            </div>
+          </div>
+        </motion.section>
+      ) : todayRehearsalQuery.isPending ? (
+        <motion.section
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.08 }}
+          className="glass-panel flex min-h-[220px] items-center justify-center p-6 sm:p-7"
+        >
+          <Loader2 className="animate-spin text-[var(--color-accent)]" size={24} />
+        </motion.section>
+      ) : todayRehearsalQuery.isError ? (
+        <motion.section
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.08 }}
+          className="glass-panel flex min-h-[220px] items-center justify-center p-6 text-center text-sm text-rose-300 sm:p-7"
+        >
+          Bugünün prova bilgisi alınamadı.
+        </motion.section>
+      ) : null}
+
+      <div className="grid gap-6">
+        <motion.section
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.16 }}
           onClick={() => router.push('/announcements')}
           className="glass-panel cursor-pointer p-6 sm:p-7"
         >
@@ -544,11 +674,11 @@ export default function Dashboard() {
         </motion.section>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
+      <div className="grid gap-6">
         <motion.section
           initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.16 }}
+          transition={{ delay: 0.24 }}
           onClick={() => router.push('/devamsizlik')}
           className="glass-panel cursor-pointer p-6 sm:p-7"
         >
@@ -569,20 +699,32 @@ export default function Dashboard() {
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-6">
-            <div className="space-y-3 text-sm text-[var(--color-text-medium)]">
-              <div className="flex items-center gap-3">
+            <div className="space-y-1.5 text-[0.82rem] text-[var(--color-text-medium)]">
+              <div className="flex items-center gap-2.5">
                 <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]" />
                 <p className="whitespace-nowrap">
                   Gelinen prova: <span className="font-bold text-[var(--color-text-high)]">{attendedCount}</span>
                 </p>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2.5">
                 <span className="h-2 w-2 shrink-0 rounded-full bg-rose-400" />
                 <p className="whitespace-nowrap">
                   Gelinmeyen prova: <span className="font-bold text-[var(--color-text-high)]">{missedCount}</span>
                 </p>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2.5">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+                <p className="whitespace-nowrap">
+                  Yapılan ödev: <span className="font-bold text-[var(--color-text-high)]">{approvedAssignments}</span>
+                </p>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-orange-400" />
+                <p className="whitespace-nowrap">
+                  Yapılmayan ödev: <span className="font-bold text-[var(--color-text-high)]">{Math.max(0, totalAssignments - approvedAssignments)}</span>
+                </p>
+              </div>
+              <div className="flex items-center gap-2.5 pt-0.5">
                 <span className="h-2 w-2 shrink-0 rounded-full bg-sky-300" />
                 <p className="whitespace-nowrap">
                   Kritik eşik: <span className="font-bold text-[var(--color-text-high)]">%75</span>
@@ -618,157 +760,6 @@ export default function Dashboard() {
             </div>
           </div>
         </motion.section>
-
-        {!todayRehearsalQuery.isPending && todayRehearsal ? (
-          <motion.section
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.24 }}
-            className="glass-panel p-6 sm:p-7"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <span className="page-kicker">Katılım Komutu</span>
-                <h3 className="mt-4 font-serif text-2xl tracking-[-0.05em]">{todayRehearsal.title}</h3>
-              </div>
-              <span className="status-pill">
-                {toTimeStr(todayRehearsal.start_time)} • {todayRehearsal.location}
-              </span>
-            </div>
-
-            <div className={`mt-6 grid gap-4 ${todayRehearsal.notes ? 'lg:grid-cols-[0.78fr_1.22fr]' : ''}`}>
-              {todayRehearsal.notes ? (
-                <div className="rounded-[4px] border border-[var(--color-border)] bg-white/4 p-4">
-                  <p className="text-[0.68rem] uppercase tracking-[0.22em] text-[var(--color-text-medium)]">Not</p>
-                  <div
-                    className="prose mt-3 max-w-none text-[var(--color-text-high)] opacity-90 [--tw-prose-body:var(--color-text-high)] [--tw-prose-headings:var(--color-text-high)] [--tw-prose-links:var(--color-accent)] [--tw-prose-bold:var(--color-text-high)] [--tw-prose-bullets:var(--color-text-medium)] [--tw-prose-quotes:var(--color-text-high)] [--tw-prose-code:var(--color-text-high)] [--tw-prose-hr:var(--color-border)] prose-p:my-0.5 prose-p:text-[14px] prose-p:leading-[1.4] prose-ul:list-disc prose-ol:list-decimal prose-li:my-0.5 prose-a:text-[var(--color-accent)] prose-img:my-2 prose-img:max-h-[30vh] prose-img:w-full prose-img:rounded-[8px] prose-img:border prose-img:border-[var(--color-border)] prose-img:object-cover"
-                    dangerouslySetInnerHTML={{ __html: sanitizeRichText(todayRehearsal.notes) }}
-                  />
-                </div>
-              ) : null}
-
-              <div className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
-                <div ref={containerRef} className="group relative h-14 overflow-hidden rounded-full border border-[var(--color-border)] bg-[var(--color-surface-solid)] sm:h-16">
-                  {attendanceState === 'idle' ? (
-                    <motion.div
-                      className="absolute bottom-0 left-0 top-0 z-10 rounded-full bg-[var(--color-accent)]"
-                      style={{ width: fillWidth }}
-                    />
-                  ) : null}
-
-                  <AnimatePresence mode="wait">
-                    {attendanceState === 'idle' ? (
-                      <motion.div
-                        key="idle-text"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center pl-[3.5rem] pr-2 text-center sm:pl-[4rem]"
-                      >
-                        <span className="text-[0.65rem] font-bold uppercase tracking-[0.22em] text-[var(--color-text-medium)] sm:text-[0.72rem]">
-                          Katılımı onaylamak için sürükle
-                        </span>
-                      </motion.div>
-                    ) : null}
-                  </AnimatePresence>
-
-                  {attendanceState === 'idle' ? (
-                    <motion.div
-                      ref={thumbRef}
-                      style={{ x: dragX }}
-                      drag="x"
-                      dragConstraints={{ left: 0, right: maxDrag }}
-                      dragElastic={0}
-                      dragMomentum={false}
-                      onDragEnd={() => {
-                        if (dragX.get() >= maxDrag * 0.8) {
-                          handleSwipeConfirm();
-                        } else {
-                          animate(dragX, 0, { type: 'spring', stiffness: 300, damping: 20 });
-                        }
-                      }}
-                      className="group/thumb relative z-20 flex h-full w-14 shrink-0 cursor-grab items-center justify-center rounded-full bg-[var(--color-accent)] text-[var(--color-background)] shadow-lg active:cursor-grabbing sm:w-16"
-                    >
-                      <ChevronRight className="transition-transform duration-200 group-active/thumb:scale-75" size={24} strokeWidth={2.4} />
-                    </motion.div>
-                  ) : null}
-
-                  <AnimatePresence mode="wait">
-                    {attendanceState === 'pending' ? (
-                      <motion.div
-                        key="pending"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="absolute inset-0 z-30 flex items-center justify-center bg-[var(--color-surface-solid)]"
-                      >
-                        <div className="flex items-center gap-3">
-                          <Loader2 className="animate-spin text-[var(--color-accent)]" size={18} />
-                          <span className="whitespace-nowrap font-serif text-base italic tracking-[-0.04em] text-[var(--color-accent)] sm:text-lg">
-                            Onay bekleniyor...
-                          </span>
-                        </div>
-                      </motion.div>
-                    ) : null}
-                    {attendanceState === 'approved' ? (
-                      <motion.div
-                        key="approved"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="absolute inset-0 z-30 flex items-center justify-center bg-[var(--color-accent-soft)]"
-                      >
-                        <div className="flex items-center gap-1">
-                          <LottieIcon path="/lottie/Success.json" fallback={CheckCircle2} size={36} isActive stopAtHalf interactive={false} />
-                          <motion.span
-                            initial={{ opacity: 0, x: -4 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: 0.3 }}
-                            className="whitespace-nowrap font-serif text-base font-medium tracking-[-0.04em] text-[var(--color-accent)] sm:text-lg"
-                          >
-                            Onaylandı
-                          </motion.span>
-                        </div>
-                      </motion.div>
-                    ) : null}
-                    {attendanceState === 'rejected' ? (
-                      <motion.div
-                        key="rejected"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="absolute inset-0 z-30 flex items-center justify-center bg-rose-500/10"
-                      >
-                        <div className="flex items-center gap-2">
-                          <XCircle className="text-rose-500" size={20} />
-                          <span className="whitespace-nowrap font-serif text-base tracking-[-0.04em] text-rose-500 sm:text-lg">
-                            Reddedildi
-                          </span>
-                        </div>
-                      </motion.div>
-                    ) : null}
-                  </AnimatePresence>
-                </div>
-              </div>
-            </div>
-          </motion.section>
-        ) : todayRehearsalQuery.isPending ? (
-          <motion.section
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.24 }}
-            className="glass-panel flex min-h-[220px] items-center justify-center p-6 sm:p-7"
-          >
-            <Loader2 className="animate-spin text-[var(--color-accent)]" size={24} />
-          </motion.section>
-        ) : todayRehearsalQuery.isError ? (
-          <motion.section
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.24 }}
-            className="glass-panel flex min-h-[220px] items-center justify-center p-6 text-center text-sm text-rose-300 sm:p-7"
-          >
-            Bugünün prova bilgisi alınamadı.
-          </motion.section>
-        ) : null}
       </div>
 
       <KoristPerformanceSection />

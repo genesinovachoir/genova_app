@@ -230,6 +230,7 @@ function buildSearchText(member: PerformanceMember) {
       member.department_name ?? '',
       member.favorite_song_title ?? '',
       member.favorite_song_composer ?? '',
+      member.about_text ?? '',
       member.linkedin_url ?? '',
       member.instagram_url ?? '',
       member.youtube_url ?? '',
@@ -505,7 +506,7 @@ async function loadPerformanceDataset(member: ChoirMember | null, isChef: boolea
     .select(`
       id, first_name, last_name, voice_group, sub_voice_group, auth_user_id,
       email, phone, is_active, photo_url, birth_date, join_date,
-      school_id, department_id, favorite_song_id,
+      school_id, department_id, favorite_song_id, about_text,
       linkedin_url, instagram_url, youtube_url, spotify_url, tiktok_url, x_url,
       schools(name),
       departments(name),

@@ -4,10 +4,14 @@ export const PROFILE_CHANGE_KEYS = [
   'birth_date',
   'school_id',
   'department_id',
+  'favorite_song_id',
+  'about_text',
   'linkedin_url',
   'instagram_url',
   'youtube_url',
   'spotify_url',
+  'tiktok_url',
+  'x_url',
   'photo_url',
 ] as const;
 

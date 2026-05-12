@@ -1138,12 +1138,14 @@ export default function AssignmentDetailPage() {
   const searchParams = useSearchParams();
   const assignmentIdHint = searchParams?.get('aid') ?? null;
   const targetMemberId = searchParams?.get('mid') ?? null;
+  const returnToPath = searchParams?.get('returnTo') ?? null;
   const assignmentIdentifier = decodeURIComponent(params?.id ?? '');
   const router = useRouter();
   const queryClient = useQueryClient();
   const toast = useToast();
   const { isAdmin, isSectionLeader, member, isLoading: authLoading } = useAuth();
   const handleBack = useBackOrHome('/odevler');
+  const backLabel = returnToPath?.startsWith('/koristler/') ? 'Koriste Dön' : 'Geri';
   const isChef = isAdmin();
   const isLeader = isSectionLeader();
   const reviewerVoiceGroup = !isChef ? member?.voice_group ?? null : null;
@@ -1579,7 +1581,7 @@ export default function AssignmentDetailPage() {
           className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/5 pr-3 pl-2.5 text-[var(--color-text-medium)] backdrop-blur-md transition-all hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-95"
         >
           <ArrowLeft size={16} />
-          <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">Geri</span>
+          <span className="text-[0.65rem] font-bold uppercase tracking-[0.1em]">{backLabel}</span>
         </button>
       </div>
       <div className="space-y-6 px-5 pt-[max(env(safe-area-inset-top),1.5rem)]">

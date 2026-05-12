@@ -39,12 +39,25 @@ const DEPTS = [
 ];
 
 /* ---------- Field config ---------- */
-type FieldKey = 'email' | 'phone' | 'birth_date' | 'school_id' | 'department_id' | 'linkedin_url' | 'instagram_url' | 'youtube_url' | 'spotify_url';
+type FieldKey =
+  | 'email'
+  | 'phone'
+  | 'birth_date'
+  | 'school_id'
+  | 'department_id'
+  | 'favorite_song_id'
+  | 'about_text'
+  | 'linkedin_url'
+  | 'instagram_url'
+  | 'youtube_url'
+  | 'spotify_url'
+  | 'tiktok_url'
+  | 'x_url';
 
 interface FieldDef {
   key: FieldKey;
   label: string;
-  type: 'text' | 'email' | 'tel' | 'date' | 'select';
+  type: 'text' | 'email' | 'tel' | 'date' | 'select' | 'textarea';
   placeholder?: string;
   options?: { id: string; name: string }[];
 }
@@ -59,10 +72,14 @@ const FIELDS: FieldDef[] = [
   { key: 'birth_date', label: 'Doğum Tarihi', type: 'date' },
   { key: 'school_id', label: 'Okul', type: 'select', options: SCHOOLS },
   { key: 'department_id', label: 'Bölüm', type: 'select', options: DEPTS },
+  { key: 'favorite_song_id', label: 'Favori Eser', type: 'select' },
+  { key: 'about_text', label: 'Hakkımda', type: 'textarea', placeholder: 'Kendin hakkında kısa bir not...' },
   { key: 'linkedin_url', label: 'LinkedIn', type: 'text', placeholder: 'https://linkedin.com/in/...' },
   { key: 'instagram_url', label: 'Instagram', type: 'text', placeholder: 'https://instagram.com/...' },
   { key: 'youtube_url', label: 'YouTube', type: 'text', placeholder: 'https://youtube.com/@...' },
   { key: 'spotify_url', label: 'Spotify veya YTMUSIC', type: 'text', placeholder: 'https://open.spotify.com/user/...' },
+  { key: 'tiktok_url', label: 'TikTok', type: 'text', placeholder: 'https://tiktok.com/@...' },
+  { key: 'x_url', label: 'X', type: 'text', placeholder: 'https://x.com/...' },
 ];
 
 export default function ProfilDuzenle() {
@@ -73,8 +90,11 @@ export default function ProfilDuzenle() {
 
   const [form, setForm] = useState<Record<FieldKey, string>>({
     email: '', phone: '', birth_date: '', school_id: '', department_id: '',
+    favorite_song_id: '', about_text: '',
     linkedin_url: '', instagram_url: '', youtube_url: '', spotify_url: '',
+    tiktok_url: '', x_url: '',
   });
+  const [repertoireOptions, setRepertoireOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [note, setNote] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -92,14 +112,46 @@ export default function ProfilDuzenle() {
         birth_date: member.birth_date || '',
         school_id: member.school_id || '',
         department_id: member.department_id || '',
+        favorite_song_id: member.favorite_song_id || '',
+        about_text: member.about_text || '',
         linkedin_url: member.linkedin_url || '',
         instagram_url: member.instagram_url || '',
         youtube_url: member.youtube_url || '',
         spotify_url: member.spotify_url || '',
+        tiktok_url: member.tiktok_url || '',
+        x_url: member.x_url || '',
       });
       setPhotoUrl(member.photo_url || '');
     }
   }, [member]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadRepertoireOptions() {
+      const { data, error } = await supabase
+        .from('repertoire')
+        .select('id, title, composer')
+        .order('title');
+
+      if (error || cancelled) {
+        return;
+      }
+
+      setRepertoireOptions(
+        (data ?? []).map((song) => ({
+          id: song.id,
+          name: `${song.title}${song.composer ? ` - ${song.composer}` : ''}`,
+        })),
+      );
+    }
+
+    void loadRepertoireOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handlePickPhoto = () => {
     if (status !== 'idle' || uploadingPhoto) return;
@@ -162,8 +214,10 @@ export default function ProfilDuzenle() {
     const original: Record<string, string> = {
       email: member.email || '', phone: member.phone || '', birth_date: member.birth_date || '',
       school_id: member.school_id || '', department_id: member.department_id || '',
+      favorite_song_id: member.favorite_song_id || '', about_text: member.about_text || '',
       linkedin_url: member.linkedin_url || '', instagram_url: member.instagram_url || '',
       youtube_url: member.youtube_url || '', spotify_url: member.spotify_url || '',
+      tiktok_url: member.tiktok_url || '', x_url: member.x_url || '',
       photo_url: member.photo_url || '',
     };
     const changes: Record<string, ProfileChangeValue> = {};
@@ -357,12 +411,21 @@ export default function ProfilDuzenle() {
                     className="editorial-input w-full appearance-none pr-9 cursor-pointer"
                   >
                     <option value="">-- Seçiniz --</option>
-                    {field.options?.map(o => (
+                    {(field.key === 'favorite_song_id' ? repertoireOptions : field.options)?.map(o => (
                       <option key={o.id} value={o.id}>{o.name}</option>
                     ))}
                   </select>
                   <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-medium)]" />
                 </div>
+              ) : field.type === 'textarea' ? (
+                <textarea
+                  value={form[field.key]}
+                  onChange={e => setForm(f => ({ ...f, [field.key]: e.target.value }))}
+                  rows={4}
+                  maxLength={1200}
+                  className="editorial-input w-full resize-none"
+                  placeholder={field.placeholder}
+                />
               ) : (
                 <input
                   type={field.type}

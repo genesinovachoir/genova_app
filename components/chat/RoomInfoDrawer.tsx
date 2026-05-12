@@ -36,6 +36,7 @@ import { LinksPanel } from './LinksPanel';
 import { FilesPanel } from './FilesPanel';
 import { getDriveImageUrl } from '@/lib/drive';
 import { AddMemberModal } from './AddMemberModal';
+import { ChatOverlayPortal } from './ChatOverlayPortal';
 
 interface RoomInfoDrawerProps {
   roomId: string;
@@ -220,27 +221,30 @@ export function RoomInfoDrawer({
 
   return (
     <>
-    <AnimatePresence>
-      {isRoomInfoOpen && (
-        <motion.div
-          key="room-info-backdrop"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[150] bg-black/30 backdrop-blur-sm"
-          onClick={() => setRoomInfoOpen(false)}
-        />
-      )}
-      {isRoomInfoOpen && (
-
-        <motion.div
-          key="room-info-drawer"
-          initial={{ x: '100%' }}
-          animate={{ x: 0 }}
-          exit={{ x: '100%' }}
-          transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-            className="fixed right-0 top-0 z-[151] flex h-full w-[85%] max-w-sm flex-col border-l border-[var(--color-border)] bg-[#f5f3ec] dark:bg-black shadow-2xl"
-          >
+      <ChatOverlayPortal>
+        <AnimatePresence>
+          {isRoomInfoOpen && (
+            <motion.div
+              key="room-info-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[900] bg-black/30 backdrop-blur-sm"
+              onClick={() => setRoomInfoOpen(false)}
+            />
+          )}
+          {isRoomInfoOpen && (
+            <motion.div
+              key="room-info-drawer"
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+              className="fixed right-0 top-0 z-[901] flex h-[100dvh] w-[85%] max-w-sm flex-col border-l border-[var(--color-border)] bg-[#f5f3ec] shadow-2xl dark:bg-black"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Oda Bilgisi"
+            >
             {/* Header */}
             <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3 pt-[calc(env(safe-area-inset-top,0px)+12px)]">
               <h2 className="text-lg font-bold text-[var(--color-text-high)]">
@@ -552,9 +556,10 @@ export function RoomInfoDrawer({
                 </button>
               </div>
             )}
-          </motion.div>
-      )}
-    </AnimatePresence>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </ChatOverlayPortal>
       
     {selectedMember && (
       <MemberActionSheet

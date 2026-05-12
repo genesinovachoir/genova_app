@@ -501,12 +501,14 @@ html.light .theme-date-input {
 
 /* Swipe-back content — GPU layer promotion */
 .swipe-back-content {
+  min-height: inherit;
   will-change: transform;
   -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
 }
 
 .swipe-back-root {
+  min-height: 100dvh;
   touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: none;
@@ -514,6 +516,7 @@ html.light .theme-date-input {
 
 /* Tab swipe container */
 .tab-swipe-container {
+  min-height: 100dvh;
   touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: none;
