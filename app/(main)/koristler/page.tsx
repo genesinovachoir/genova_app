@@ -15,6 +15,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/components/AuthProvider';
 import { supabase } from '@/lib/supabase';
 import { useBackOrHome } from '@/hooks/useBackOrHome';
+import { SwipeBack } from '@/components/SwipeBack';
 import {
   loadPerformanceOverview,
   PERFORMANCE_ROOT_QUERY_KEY,
@@ -288,6 +289,7 @@ export default function KoristlerPage() {
   const scopeTag = `(${overview.summary.member_count} KORİST)`;
 
   return (
+    <SwipeBack fallback="/">
     <main className="page-shell space-y-6 pb-28 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
       <motion.section
         initial={{ opacity: 0, y: 14 }}
@@ -416,5 +418,6 @@ export default function KoristlerPage() {
         )}
       </div>
     </main>
+    </SwipeBack>
   );
 }

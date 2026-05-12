@@ -11,6 +11,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { CreateAnnouncementModal } from '@/components/CreateAnnouncementModal';
 import { useToast } from '@/components/ToastProvider';
 import { useBackOrHome } from '@/hooks/useBackOrHome';
+import { SwipeBack } from '@/components/SwipeBack';
 
 const ICON_MAP: Record<string, React.ElementType> = {
   megaphone: Megaphone,
@@ -62,6 +63,7 @@ export default function AnnouncementsPage() {
   const announcements = announcementsQuery.data ?? [];
 
   return (
+    <SwipeBack fallback="/">
     <main className="min-h-screen bg-[var(--color-background)] px-5 pb-10 pt-[max(env(safe-area-inset-top),1.5rem)]">
       <motion.section initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className="flex h-full flex-col">
         <div className="mb-6 flex flex-col gap-4">
@@ -150,5 +152,6 @@ export default function AnnouncementsPage() {
         }}
       />
     </main>
+    </SwipeBack>
   );
 }

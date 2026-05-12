@@ -489,3 +489,35 @@ html.light .theme-date-input {
 .themed-search-input::placeholder {
   color: var(--color-text-medium);
 }
+
+/* ─── Gesture Navigation ─── */
+
+/* GPU-accelerated page transitions — prevents jank */
+.page-transition-layer {
+  will-change: transform, opacity;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+/* Swipe-back content — GPU layer promotion */
+.swipe-back-content {
+  will-change: transform;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+.swipe-back-root {
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: none;
+}
+
+/* Tab swipe container */
+.tab-swipe-container {
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: none;
+  will-change: transform;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}

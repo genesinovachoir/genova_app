@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase';
 import { normalizeProfileChangeValue, type ProfileChangeValue } from '@/lib/profile-change-requests';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/components/ToastProvider';
+import { SwipeBack } from '@/components/SwipeBack';
 
 /* ---------- Statik veriler (idealde DB'den gelir) ---------- */
 const SCHOOLS = [
@@ -283,6 +284,7 @@ export default function ProfilDuzenle() {
   );
 
   return (
+    <SwipeBack fallback="/profil">
     <main className="page-shell pb-28 space-y-4 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
       {/* Header */}
       <div className="flex items-center gap-3 px-1 pt-2">
@@ -470,5 +472,6 @@ export default function ProfilDuzenle() {
         </button>
       </motion.form>
     </main>
+    </SwipeBack>
   );
 }

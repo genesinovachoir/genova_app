@@ -224,6 +224,9 @@ export interface Assignment {
   drive_folder_id: string | null;
   created_by: string;
   is_active: boolean;
+  is_locked?: boolean;
+  locked_at?: string | null;
+  locked_by?: string | null;
   created_at: string;
   updated_at: string;
   choir_members?: { 
@@ -254,6 +257,11 @@ export interface AssignmentSubmission {
   status?: 'pending' | 'approved' | 'rejected';
   submission_note?: string | null;
   reviewer_note?: string | null;
+  is_reviewer_note_hidden?: boolean;
+  reviewer_note_history?: Array<Record<string, unknown>>;
+  submission_note_history?: Array<Record<string, unknown>>;
+  hidden_by?: string | null;
+  hidden_at?: string | null;
   approved_at?: string | null;
   approved_by?: string | null;
   choir_members?: { first_name: string; last_name: string; voice_group: string | null };

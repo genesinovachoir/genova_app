@@ -6,6 +6,7 @@ import { use } from 'react';
 import dynamic from 'next/dynamic';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
+import { SwipeBack } from '@/components/SwipeBack';
 import { useAuth } from '@/components/AuthProvider';
 import { LottieIcon } from '@/components/LottieIcon';
 import { useBackOrHome } from '@/hooks/useBackOrHome';
@@ -110,6 +111,7 @@ export default function SongDetailPage({ params }: { params: Promise<{ id: strin
     ?? (!loading && resolvedSongId && !song ? 'Şarkı bulunamadı.' : null);
 
   return (
+    <SwipeBack fallback="/repertuvar">
     <main className="min-h-screen bg-[var(--color-background)] pb-[max(2rem,env(safe-area-inset-bottom))]">
       <div className="border-b border-[var(--color-border)] bg-[var(--color-background)]/90 px-5 pb-4 pt-[max(env(safe-area-inset-top),1.25rem)] backdrop-blur-sm">
         <button
@@ -187,5 +189,6 @@ export default function SongDetailPage({ params }: { params: Promise<{ id: strin
       )}
       </div>
     </main>
+    </SwipeBack>
   );
 }

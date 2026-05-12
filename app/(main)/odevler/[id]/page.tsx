@@ -32,6 +32,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { FileUploadModal } from '@/components/FileUploadModal';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ReviewNoteDialog } from '@/components/ReviewNoteDialog';
+import { SwipeBack } from '@/components/SwipeBack';
 import { useToast } from '@/components/ToastProvider';
 import { useBackOrHome } from '@/hooks/useBackOrHome';
 import { getAssignmentCacheKey, readAssignmentCache, writeAssignmentCache } from '@/lib/assignment-cache';
@@ -780,7 +781,7 @@ export default function AssignmentDetailPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const { isAdmin, isSectionLeader, member, isLoading: authLoading } = useAuth();
-  const handleBack = useBackOrHome();
+  const handleBack = useBackOrHome('/odevler');
   const isChef = isAdmin();
   const isLeader = isSectionLeader();
   const reviewerVoiceGroup = !isChef ? member?.voice_group ?? null : null;
@@ -1123,6 +1124,7 @@ export default function AssignmentDetailPage() {
   const detailErrorMessage = getReadableErrorMessage(detailQuery.error);
 
   return (
+    <SwipeBack fallback="/odevler">
     <main className="min-h-screen bg-[var(--color-background)] pb-[max(2rem,env(safe-area-inset-bottom))]">
       <div className="space-y-6 px-5 pt-[max(env(safe-area-inset-top),1.25rem)]">
         <button
@@ -1800,5 +1802,6 @@ export default function AssignmentDetailPage() {
       />
       </div>
     </main>
+    </SwipeBack>
   );
 }

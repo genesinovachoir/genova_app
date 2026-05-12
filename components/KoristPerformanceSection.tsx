@@ -35,7 +35,7 @@ function VoiceGroupStatCard({
 }) {
   const continuityPercent = summary.show_homework_metrics
     ? summary.continuity_percent
-    : summary.attendance_percent;
+    : null;
 
   return (
     <div className="min-w-[140px] flex-1 rounded-[10px] border border-[var(--color-border)] bg-white/[0.03] p-3.5 transition-colors hover:bg-white/[0.05]">
@@ -48,7 +48,7 @@ function VoiceGroupStatCard({
         </span>
       </div>
 
-      <div className={`mt-3 grid gap-2 ${summary.show_homework_metrics ? 'grid-cols-3' : 'grid-cols-2'}`}>
+      <div className={`mt-3 grid gap-2 ${summary.show_homework_metrics ? 'grid-cols-3' : 'grid-cols-1'}`}>
         <div className="flex flex-col">
           <span className="text-[0.55rem] font-bold uppercase tracking-wider text-[var(--color-text-medium)] opacity-70">PROVA</span>
           <span className="font-serif text-[1rem] text-[var(--color-text-high)]">{formatPercent(summary.attendance_percent)}</span>
@@ -59,10 +59,12 @@ function VoiceGroupStatCard({
             <span className="font-serif text-[1rem] text-[var(--color-text-high)]">{formatPercent(summary.homework_percent)}</span>
           </div>
         )}
-        <div className="flex flex-col">
-          <span className="text-[0.55rem] font-bold uppercase tracking-wider text-[var(--color-text-medium)] opacity-70">DEVAM</span>
-          <span className="font-serif text-[1rem] text-[var(--color-text-high)]">{formatPercent(continuityPercent)}</span>
-        </div>
+        {summary.show_homework_metrics && (
+          <div className="flex flex-col">
+            <span className="text-[0.55rem] font-bold uppercase tracking-wider text-[var(--color-text-medium)] opacity-70">DEVAM</span>
+            <span className="font-serif text-[1rem] text-[var(--color-text-high)]">{formatPercent(continuityPercent)}</span>
+          </div>
+        )}
       </div>
     </div>
   );

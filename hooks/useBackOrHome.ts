@@ -1,7 +1,6 @@
-'use client';
-
 import { useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { useNavigationStore } from '@/store/useNavigationStore';
 
 const NOTIFICATION_BACK_PARAM = 'fromNotification';
 
@@ -45,13 +44,16 @@ function openedFromNotification() {
 
 export function useBackOrHome(homePath = '/') {
   const router = useRouter();
+  const setDirection = useNavigationStore((s) => s.setDirection);
 
   return useCallback(() => {
+    setDirection('back');
+
     if (openedFromNotification() || !canGoBackInHistory()) {
       router.replace(homePath);
       return;
     }
 
     router.back();
-  }, [homePath, router]);
+  }, [homePath, router, setDirection]);
 }

@@ -11,6 +11,10 @@ import {
   Trash2,
   ArrowUpDown,
   Pencil,
+  Calendar,
+  Users,
+  Lock,
+  LockOpen,
 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -104,6 +108,7 @@ interface ReviewerQueueItem {
   assignment_created_at: string;
   assignment_deadline: string | null;
   assignment_is_active: boolean;
+  assignment_is_locked: boolean;
   assignment_creator_first_name: string | null;
   assignment_creator_last_name: string | null;
   assignment_creator_role: string | null;
@@ -114,6 +119,7 @@ interface ReviewerQueueItem {
   submission_id: string | null;
   submission_status: ReviewerSubmissionState;
   submission_submitted_at: string | null;
+  target_voice_group: string | null;
 }
 
 interface ReviewerAssignmentSummary {
@@ -122,12 +128,14 @@ interface ReviewerAssignmentSummary {
   assignment_created_at: string;
   assignment_deadline: string | null;
   assignment_is_active: boolean;
+  assignment_is_locked: boolean;
   assignment_creator_first_name: string | null;
   assignment_creator_last_name: string | null;
   assignment_creator_role: string | null;
   total: number;
   submitted: number;
   completed: number;
+  target_voice_group: string | null;
 }
 
 interface ChoirMemberRoleRow {
@@ -225,7 +233,7 @@ async function fetchReviewerQueue({
     .from('assignments')
     .select(`
       id, title, description, deadline, target_voice_group,
-      drive_folder_id, created_by, is_active, created_at, updated_at,
+      drive_folder_id, created_by, is_active, is_locked, created_at, updated_at,
       choir_members!assignments_created_by_fkey ( 
         id,
         first_name, 
@@ -447,6 +455,7 @@ async function fetchReviewerQueue({
         assignment_created_at: assignment.created_at,
         assignment_deadline: assignment.deadline,
         assignment_is_active: assignment.is_active,
+        assignment_is_locked: Boolean(assignment.is_locked),
         assignment_creator_first_name: assignment.choir_members?.first_name ?? null,
         assignment_creator_last_name: assignment.choir_members?.last_name ?? null,
         assignment_creator_role: assignment.choir_members?.choir_member_roles?.[0]?.roles?.name ?? null,
@@ -459,6 +468,7 @@ async function fetchReviewerQueue({
           ? getReviewerSubmissionStateFromRaw(latestSubmission.status ?? null)
           : 'missing',
         submission_submitted_at: latestSubmission?.submitted_at ?? null,
+        target_voice_group: assignment.target_voice_group ?? null,
       });
     }
   }
@@ -481,7 +491,7 @@ async function fetchAssignments({
     .from('assignments')
     .select(`
       id, title, description, deadline, target_voice_group,
-      drive_folder_id, created_by, is_active, created_at, updated_at,
+      drive_folder_id, created_by, is_active, is_locked, created_at, updated_at,
       choir_members!assignments_created_by_fkey ( 
         id,
         first_name, 
@@ -754,16 +764,13 @@ async function fetchAssignments({
 }
 
 function isMemberAssignmentCompleted(assignment: AssignmentListItem): boolean {
-  if (!assignment.is_active) {
+  if (!assignment.is_active || assignment.is_locked) {
     return true;
   }
   return assignment.submission?.status === 'approved';
 }
 
 function isReviewerQueueItemCompleted(item: ReviewerQueueItem): boolean {
-  if (!item.assignment_is_active) {
-    return true;
-  }
   if (item.submission_status === 'approved' || item.submission_status === 'rejected') {
     return true;
   }
@@ -771,7 +778,7 @@ function isReviewerQueueItemCompleted(item: ReviewerQueueItem): boolean {
 }
 
 function isReviewerAssignmentCompleted(item: ReviewerAssignmentSummary): boolean {
-  if (!item.assignment_is_active) {
+  if (item.assignment_is_locked || !item.assignment_is_active) {
     return true;
   }
   return item.total > 0 && item.completed >= item.total;
@@ -911,6 +918,27 @@ export default function Odevler() {
     },
   });
 
+  const lockMutation = useMutation({
+    mutationFn: async ({ assignmentId, locked }: { assignmentId: string; locked: boolean }) => {
+      await postJsonWithAuth('/api/assignments/lock', {
+        assignment_id: assignmentId,
+        locked,
+        mark_missing_as_not_done: true,
+      });
+      return { assignmentId, locked };
+    },
+    onSuccess: async ({ locked }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['assignments'] }),
+        queryClient.invalidateQueries({ queryKey: ['reviewer-assignment-queue'] }),
+      ]);
+      toast.success(locked ? 'Ödev kilitlendi ve tamamlanana taşındı.' : 'Ödev tekrar aktive edildi.');
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Ödev kilit durumu güncellenemedi.', 'İşlem başarısız');
+    },
+  });
+
   const memberAssignments = useMemo(() => assignmentsQuery.data ?? [], [assignmentsQuery.data]);
   const reviewerQueueItems = useMemo(() => reviewerQueueQuery.data ?? [], [reviewerQueueQuery.data]);
 
@@ -924,12 +952,14 @@ export default function Odevler() {
         assignment_created_at: item.assignment_created_at,
         assignment_deadline: item.assignment_deadline,
         assignment_is_active: item.assignment_is_active,
+        assignment_is_locked: item.assignment_is_locked,
         assignment_creator_first_name: item.assignment_creator_first_name,
         assignment_creator_last_name: item.assignment_creator_last_name,
         assignment_creator_role: item.assignment_creator_role,
         total: 0,
         submitted: 0,
         completed: 0,
+        target_voice_group: item.target_voice_group,
       };
 
       existing.total += 1;
@@ -1214,16 +1244,55 @@ export default function Odevler() {
                           Tanımlayan: {createdByLabel}
                         </p>
 
-                        <div className="mt-2 flex flex-wrap items-center gap-3 text-[0.65rem] text-[var(--color-text-medium)]">
-                          <span>%{progress} tamamlandı</span>
-                          <span>{item.completed}/{item.total} değerlendirildi</span>
-                          <span>{item.submitted} teslim</span>
-                          {deadlineInfo ? <span className={deadlineInfo.isUrgent ? 'text-red-400' : ''}>{deadlineInfo.text}</span> : null}
+                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[0.65rem] text-[var(--color-text-medium)]">
+                          <div className="flex items-center gap-1">
+                            <Users size={10} className="text-[var(--color-accent)]" />
+                            <span className="font-bold text-[var(--color-text-high)]/80">
+                              {item.target_voice_group || 'Tüm Koro'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span>%{progress} tamamlandı</span>
+                            <span>{item.completed}/{item.total} değerlendirildi</span>
+                            <span>{item.submitted} teslim</span>
+                            {Math.max(item.total - item.submitted, 0) > 0 ? (
+                              <span className="text-rose-400">{Math.max(item.total - item.submitted, 0)} yapmadı</span>
+                            ) : null}
+                            {item.assignment_is_locked ? (
+                              <span className="text-[var(--color-accent)]">Kilitli</span>
+                            ) : null}
+                          </div>
+                          {deadlineInfo && activeTab !== 'tamamlanan' ? (
+                            <div className={`flex items-center gap-1 ${deadlineInfo.isUrgent ? 'text-red-400 font-bold' : ''}`}>
+                              <Calendar size={10} />
+                              <span>{deadlineInfo.text}</span>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
 
                       {canModifyAssignment && (
                         <div className="relative z-10 flex shrink-0 items-center gap-1.5 opacity-80 transition-opacity group-hover:opacity-100">
+                          <button
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              lockMutation.mutate({
+                                assignmentId: item.assignment_id,
+                                locked: !item.assignment_is_locked,
+                              });
+                            }}
+                            disabled={lockMutation.isPending}
+                            className="flex h-8 w-8 items-center justify-center rounded-[4px] text-[var(--color-text-medium)] transition-colors hover:bg-white/10 hover:text-[var(--color-accent)] disabled:opacity-50"
+                            title={item.assignment_is_locked ? 'Kilidi Aç' : 'Ödevi Kilitle'}
+                          >
+                            {lockMutation.isPending && lockMutation.variables?.assignmentId === item.assignment_id ? (
+                              <Loader2 size={14} className="animate-spin text-[var(--color-accent)]" />
+                            ) : item.assignment_is_locked ? (
+                              <LockOpen size={14} />
+                            ) : (
+                              <Lock size={14} />
+                            )}
+                          </button>
                           <button
                             onClick={(event) => {
                               event.stopPropagation();
@@ -1246,6 +1315,7 @@ export default function Odevler() {
                                 drive_folder_id: null,
                                 created_by: '',
                                 is_active: item.assignment_is_active,
+                                is_locked: item.assignment_is_locked,
                                 created_at: item.assignment_created_at,
                                 updated_at: item.assignment_created_at,
                               });
@@ -1322,6 +1392,10 @@ export default function Odevler() {
                               İncelemede
                             </span>
                           )
+                        ) : assignment.is_locked ? (
+                          <span className="text-[0.6rem] font-bold uppercase tracking-[0.15em] text-rose-400 opacity-90">
+                            Yapmadı
+                          </span>
                         ) : isUrgent ? (
                           <span className="text-[0.6rem] font-bold uppercase tracking-[0.15em] text-red-400 opacity-90">
                             Kritik
@@ -1330,16 +1404,17 @@ export default function Odevler() {
                         {deadlineText && (hasSubmitted || isUrgent) ? (
                           <span className="text-[0.6rem] text-[var(--color-text-medium)]/30">•</span>
                         ) : null}
-                        {deadlineText ? (
-                          <span
-                            className={`text-[0.65rem] font-bold uppercase tracking-[0.14em] ${
+                        {deadlineText && !isCompletedForCurrentUser ? (
+                          <div
+                            className={`flex items-center gap-1 text-[0.65rem] font-bold uppercase tracking-[0.14em] ${
                               isUrgent
                                 ? 'text-red-500/80 [text-shadow:0_0_6px_rgba(239,68,68,0.2)]'
                                 : 'text-[var(--color-text-medium)]'
                             }`}
                           >
-                            {deadlineText}
-                          </span>
+                            <Calendar size={10} />
+                            <span>{deadlineText}</span>
+                          </div>
                         ) : null}
                       </div>
 

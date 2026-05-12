@@ -330,15 +330,22 @@ async function upsertAssignmentSubmission(params: {
     submissionNote,
   } = params;
 
-  const driveFolderId = assignmentDriveFolderId ?? (
-    (
-      await supabaseAdmin
-        .from('assignments')
-        .select('drive_folder_id')
-        .eq('id', assignmentId)
-        .maybeSingle()
-    ).data?.drive_folder_id
-  );
+  const { data: assignmentRow, error: assignmentRowError } = await supabaseAdmin
+    .from('assignments')
+    .select('drive_folder_id, is_locked, is_active')
+    .eq('id', assignmentId)
+    .maybeSingle();
+  if (assignmentRowError) {
+    throw new Error(assignmentRowError.message);
+  }
+  if (!assignmentRow) {
+    throw new Error('Ödev bulunamadı');
+  }
+  if (assignmentRow.is_locked || assignmentRow.is_active === false) {
+    throw new Error('Bu ödev kilitlendiği için yeni teslim kabul edilmiyor');
+  }
+
+  const driveFolderId = assignmentDriveFolderId ?? assignmentRow.drive_folder_id;
   if (!driveFolderId) {
     throw new Error('Ödev klasörü bulunamadı');
   }
@@ -377,6 +384,19 @@ async function upsertAssignmentSubmission(params: {
       updated_at: uploadedAt,
       status: 'pending',
       reviewer_note: null,
+      is_reviewer_note_hidden: false,
+      reviewer_note_history: [],
+      submission_note_history: submissionNote
+        ? [{
+            action: 'submission_note_updated',
+            changed_at: uploadedAt,
+            changed_by: memberId,
+            previous_note: null,
+            next_note: submissionNote,
+          }]
+        : [],
+      hidden_by: null,
+      hidden_at: null,
       approved_at: null,
       approved_by: null,
       submission_note: submissionNote ?? null,
@@ -386,6 +406,14 @@ async function upsertAssignmentSubmission(params: {
 
   if (!sub) {
     throw new Error('Submission kaydedilemedi');
+  }
+
+  const { error: clearPrivateNoteError } = await supabaseAdmin
+    .from('assignment_submission_private_notes')
+    .delete()
+    .eq('submission_id', sub.id);
+  if (clearPrivateNoteError) {
+    throw new Error(clearPrivateNoteError.message);
   }
 
   return sub;

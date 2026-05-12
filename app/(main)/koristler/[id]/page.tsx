@@ -24,6 +24,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { supabase } from '@/lib/supabase';
 import { sanitizeRichText } from '@/lib/richText';
 import { useBackOrHome } from '@/hooks/useBackOrHome';
+import { SwipeBack } from '@/components/SwipeBack';
 import {
   loadPerformanceMemberDetail,
   PERFORMANCE_ROOT_QUERY_KEY,
@@ -438,6 +439,7 @@ export default function KoristDetailPage() {
   const contentGridClass = showHomeworkMetrics ? 'grid gap-6 lg:grid-cols-[1.1fr_0.9fr]' : 'grid gap-6';
 
   return (
+    <SwipeBack fallback="/">
     <main className="page-shell space-y-6 pb-28 !pt-[calc(1.5rem+env(safe-area-inset-top))]">
       <div className="flex items-center justify-between gap-3">
         <button
@@ -677,5 +679,6 @@ export default function KoristDetailPage() {
         ) : null}
       </div>
     </main>
+    </SwipeBack>
   );
 }

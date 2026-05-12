@@ -12,6 +12,7 @@ import { EventFormModal } from '@/components/EventFormModal';
 import { useToast } from '@/components/ToastProvider';
 import { useBackOrHome } from '@/hooks/useBackOrHome';
 import { isRichTextMeaningful, sanitizeRichText } from '@/lib/richText';
+import { SwipeBack } from '@/components/SwipeBack';
 
 const DAY_LABELS = ['PZT', 'SAL', 'ÇAR', 'PER', 'CUM', 'CMT', 'PAZ'];
 
@@ -551,6 +552,7 @@ export default function DevamsizlikPage() {
   }
 
   return (
+    <SwipeBack fallback="/">
     <main className="min-h-screen bg-[var(--color-background)] pb-[max(2rem,env(safe-area-inset-bottom))]">
       <div className="border-b border-[var(--color-border)] bg-[var(--color-background)]/90 px-5 pb-4 pt-[max(env(safe-area-inset-top),1.25rem)] backdrop-blur-sm">
         <button
@@ -884,5 +886,6 @@ export default function DevamsizlikPage() {
         />
       ) : null}
     </main>
+    </SwipeBack>
   );
 }

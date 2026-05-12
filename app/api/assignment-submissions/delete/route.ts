@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { insertAssignmentAuditLog } from '@/lib/server/assignment-audit';
 import { createSupabaseServiceClient, requireAuthenticatedUser } from '@/lib/server/supabase-auth';
 
 export const dynamic = 'force-dynamic';
@@ -79,6 +80,18 @@ export async function POST(request: Request) {
       return new NextResponse('Bu işlem için Şef yetkisi gerekli.', { status: 403 });
     }
 
+    const { data: existingSubmission, error: existingSubmissionError } = await serviceClient
+      .from('assignment_submissions')
+      .select('id, assignment_id, member_id')
+      .eq('id', submissionId)
+      .maybeSingle();
+    if (existingSubmissionError) {
+      return new NextResponse(existingSubmissionError.message, { status: 500 });
+    }
+    if (!existingSubmission?.id) {
+      return new NextResponse('Teslim bulunamadı.', { status: 404 });
+    }
+
     const { data: deletedSubmission, error: deleteError } = await serviceClient
       .from('assignment_submissions')
       .delete()
@@ -93,6 +106,14 @@ export async function POST(request: Request) {
     if (!deletedSubmission?.id) {
       return new NextResponse('Teslim silinemedi veya bulunamadı.', { status: 404 });
     }
+
+    await insertAssignmentAuditLog(serviceClient, {
+      assignmentId: existingSubmission.assignment_id,
+      submissionId: existingSubmission.id,
+      memberId: existingSubmission.member_id,
+      actorMemberId: reviewerMember.id,
+      eventType: 'submission_deleted_by_chef',
+    });
 
     return NextResponse.json({ id: deletedSubmission.id });
   } catch (error) {

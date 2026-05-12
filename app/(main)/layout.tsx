@@ -3,13 +3,16 @@
 import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
+import { motion } from 'motion/react';
 import { Loader2 } from 'lucide-react';
 import { TopBar } from '@/components/TopBar';
 import { BottomNav } from '@/components/BottomNav';
+import { PageTransition } from '@/components/PageTransition';
 import { useAuth } from '@/components/AuthProvider';
 import { NotificationPrompt } from '@/components/NotificationPrompt';
 import { ProfileChangeRequestNotifier } from '@/components/ProfileChangeRequestNotifier';
 import { FloatingMiniPlayer } from '@/components/FloatingMiniPlayer';
+import { useTabSwipe } from '@/hooks/useTabSwipe';
 import { getRepertoireRoleScope } from '@/lib/repertuvar/cache';
 import { getRepertoireCatalogQueryKey, loadRepertoireCatalog } from '@/lib/repertuvar/queries';
 
@@ -18,6 +21,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const router = useRouter();
   const pathname = usePathname();
   const queryClient = useQueryClient();
+  const { x: tabSwipeX, handlers: tabSwipeHandlers } = useTabSwipe();
 
   const mainNavPages = ['/', '/repertuvar', '/chat', '/odevler', '/profil'];
   const showNavigation = mainNavPages.includes(pathname);
@@ -85,7 +89,17 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     <>
       {showFadeOverlays && <div className="fade-overlay fade-overlay-top" />}
       {showNavigation && !isProfilePage && <TopBar />}
-      {children}
+      {showNavigation ? (
+        <motion.div
+          className="tab-swipe-container"
+          style={{ x: tabSwipeX }}
+          {...tabSwipeHandlers}
+        >
+          <PageTransition>{children}</PageTransition>
+        </motion.div>
+      ) : (
+        <PageTransition>{children}</PageTransition>
+      )}
       <FloatingMiniPlayer hasBottomNav={showNavigation} />
       {showNavigation && <BottomNav />}
       {showFadeOverlays && <div className="fade-overlay fade-overlay-bottom" />}

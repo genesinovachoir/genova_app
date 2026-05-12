@@ -13,6 +13,7 @@ import { useToast } from '@/components/ToastProvider';
 import { sanitizeRichText } from '@/lib/richText';
 import { supabase, type Announcement } from '@/lib/supabase';
 import { useBackOrHome } from '@/hooks/useBackOrHome';
+import { SwipeBack } from '@/components/SwipeBack';
 
 const ICON_MAP: Record<string, React.ElementType> = {
   megaphone: Megaphone,
@@ -133,6 +134,7 @@ export default function AnnouncementPage() {
   const canEditDelete = isAdmin() || (isSectionLeader() && announcement.created_by === member?.id);
 
   return (
+    <SwipeBack fallback="/">
     <main className="min-h-screen bg-[var(--color-background)] px-5 pb-10 pt-[max(env(safe-area-inset-top),1.5rem)]">
       <div className="mb-8 flex items-center justify-between">
         <button
@@ -212,5 +214,6 @@ export default function AnnouncementPage() {
         editAnnouncement={editingAnn}
       />
     </main>
+    </SwipeBack>
   );
 }
