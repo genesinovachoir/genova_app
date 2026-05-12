@@ -495,6 +495,7 @@ export function RichTextEditor({
   onChange,
   placeholder,
   borderless = false,
+  disabled = false,
 }: Props) {
   const toast = useToast();
   const [uploading, setUploading] = useState(false);
