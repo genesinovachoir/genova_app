@@ -657,7 +657,7 @@ export function RichTextEditor({
     editorProps: {
       attributes: {
         class:
-          'prose max-w-none focus:outline-none min-h-[60px] text-[15px] sm:text-[16px] leading-[1.3] prose-p:my-0.5 text-[var(--color-text-high)] opacity-90 [--tw-prose-body:var(--color-text-high)] [--tw-prose-headings:var(--color-text-high)] [--tw-prose-links:var(--color-accent)] [--tw-prose-bold:var(--color-text-high)] [--tw-prose-bullets:var(--color-text-medium)] [--tw-prose-quotes:var(--color-text-high)] [--tw-prose-code:var(--color-text-high)] [--tw-prose-hr:var(--color-border)]',
+          'prose max-w-none focus:outline-none min-h-[60px] text-[15px] sm:text-[16px] leading-[1.3] prose-p:my-0.5 text-[var(--color-text-high)] opacity-90 [--tw-prose-body:var(--color-text-high)] [--tw-prose-headings:var(--color-text-high)] [--tw-prose-links:var(--color-accent)] [--tw-prose-bold:var(--color-text-high)] [--tw-prose-bullets:var(--color-text-medium)] [--tw-prose-quotes:var(--color-text-high)] [--tw-prose-code:var(--color-text-high)] [--tw-prose-hr:var(--color-border)] prose-strong:text-[var(--color-text-high)] prose-b:text-[var(--color-text-high)]',
       },
     },
     immediatelyRender: false,

@@ -418,13 +418,21 @@ function getInlineFileSource(
   protectedUrl: string | null,
   allowOfflineFallback: boolean,
 ): string | null {
+  // When the hook has already resolved a URL (local cached or remote), prefer it.
+  // The hook already handles cache-hit → local URL and cache-miss → API URL correctly.
+  if (protectedUrl) {
+    return protectedUrl;
+  }
+
+  // protectedUrl is null (still loading, or offline/error). Use offline URL as a fallback
+  // so content can render instantly from the SW cache while the hook is resolving.
   if (allowOfflineFallback) {
     const offlineUrl = getOfflineDriveFileUrl(file, buildRuntimeDriveFileVersion(file));
     if (offlineUrl) {
       return offlineUrl;
     }
   }
-  return protectedUrl ?? file?.drive_download_link ?? null;
+  return file?.drive_download_link ?? null;
 }
 
 function formatSyncedAtLabel(timestamp: number | null) {
