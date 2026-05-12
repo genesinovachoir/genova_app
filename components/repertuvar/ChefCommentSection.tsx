@@ -209,6 +209,8 @@ export function ChefCommentSection({
   const recorderStreamRef = useRef<MediaStream | null>(null);
   const recorderTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingStartedAtRef = useRef<number | null>(null);
+  const recordingErrorRef = useRef(false);
+  const isUnmountingRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const commentsQuery = useQuery({
@@ -243,6 +245,7 @@ export function ChefCommentSection({
 
   useEffect(() => {
     return () => {
+      isUnmountingRef.current = true;
       if (recorderTimerRef.current) {
         clearInterval(recorderTimerRef.current);
         recorderTimerRef.current = null;
@@ -252,15 +255,10 @@ export function ChefCommentSection({
       }
       recorderStreamRef.current?.getTracks().forEach((track) => track.stop());
       recorderStreamRef.current = null;
-      recorderRef.current = null;
-      recorderChunksRef.current = [];
     };
   }, []);
 
   function clearAudioSelection(options?: { clearInput?: boolean }) {
-    if (audioPreviewUrl) {
-      URL.revokeObjectURL(audioPreviewUrl);
-    }
     setAudioPreviewUrl(null);
     setAudioFile(null);
     setAudioError(null);
@@ -276,10 +274,6 @@ export function ChefCommentSection({
       return;
     }
 
-    if (audioPreviewUrl) {
-      URL.revokeObjectURL(audioPreviewUrl);
-    }
-
     setAudioError(null);
     setAudioFile(nextFile);
     setAudioPreviewUrl(URL.createObjectURL(nextFile));
@@ -290,7 +284,6 @@ export function ChefCommentSection({
       clearInterval(recorderTimerRef.current);
       recorderTimerRef.current = null;
     }
-    recordingStartedAtRef.current = null;
     recorderStreamRef.current?.getTracks().forEach((track) => track.stop());
     recorderStreamRef.current = null;
   }
@@ -317,9 +310,11 @@ export function ChefCommentSection({
       recorderChunksRef.current = [];
       recorderStreamRef.current = stream;
       recorderRef.current = recorder;
+      recordingErrorRef.current = false;
       setRecordingSeconds(0);
       setRecording(true);
-      recordingStartedAtRef.current = Date.now();
+      const recordingStartedAt = Date.now();
+      recordingStartedAtRef.current = recordingStartedAt;
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -328,7 +323,11 @@ export function ChefCommentSection({
       };
 
       recorder.onerror = () => {
-        setAudioError('Ses kaydı başlatılamadı.');
+        recordingErrorRef.current = true;
+        const current = recorderRef.current;
+        if (current && current.state === 'recording') {
+          current.stop();
+        }
       };
 
       recorder.onstop = async () => {
@@ -336,12 +335,19 @@ export function ChefCommentSection({
         const recordedType = recorder.mimeType || 'audio/webm';
         const rawBlob = new Blob(chunks, { type: recordedType });
         recorderChunksRef.current = [];
-        const elapsedMs = Math.max(
-          1,
-          (recordingStartedAtRef.current ? Date.now() - recordingStartedAtRef.current : 0) || recordingSeconds * 1000,
-        );
+        const elapsedMs = Math.max(1, Date.now() - recordingStartedAt);
         recordingStartedAtRef.current = null;
+        recorderRef.current = null;
         stopRecordingResources();
+        if (isUnmountingRef.current) {
+          return;
+        }
+        if (recordingErrorRef.current) {
+          recordingErrorRef.current = false;
+          setRecording(false);
+          setAudioError('Ses kaydı sırasında bir hata oluştu.');
+          return;
+        }
         setRecording(false);
 
         if (!rawBlob.size) {
@@ -382,7 +388,11 @@ export function ChefCommentSection({
         });
       }, 1000);
     } catch {
+      recordingErrorRef.current = false;
       stopRecordingResources();
+      recordingStartedAtRef.current = null;
+      recorderRef.current = null;
+      recorderChunksRef.current = [];
       setRecording(false);
       setAudioError('Mikrofon izni alınamadı.');
     }
@@ -454,17 +464,30 @@ export function ChefCommentSection({
   });
 
   const comments = commentsQuery.data ?? [];
-  const canSubmit = useMemo(
-    () => Boolean(
-      canComment &&
-      memberId &&
-      !submitMutation.isPending &&
-      !isRecording &&
-      (isRichTextMeaningful(editorHtml) || audioFile) &&
-      (isChef || composerTargetVoiceGroup !== null),
-    ),
-    [audioFile, canComment, composerTargetVoiceGroup, editorHtml, isChef, isRecording, memberId, submitMutation.isPending],
-  );
+  const submitDisabledReason = useMemo(() => {
+    if (!canComment) {
+      return 'Yorum yetkiniz bulunmuyor.';
+    }
+    if (!memberId) {
+      return 'Üye kimliğiniz doğrulanamadı.';
+    }
+    if (!isChef && composerTargetVoiceGroup === null) {
+      return 'Ses grubu bilginiz yüklenemediği için yorum gönderilemiyor.';
+    }
+    if (submitMutation.isPending) {
+      return 'Yorum gönderiliyor...';
+    }
+    if (isRecording) {
+      return 'Önce kaydı durdurun.';
+    }
+    if (!(isRichTextMeaningful(editorHtml) || audioFile)) {
+      return 'Metin veya ses kaydı ekleyin.';
+    }
+    return null;
+  }, [audioFile, canComment, composerTargetVoiceGroup, editorHtml, isChef, isRecording, memberId, submitMutation.isPending]);
+
+  const canSubmit = submitDisabledReason === null;
+  const recordingProgressPercent = Math.min(100, Math.round((recordingSeconds / MAX_RECORD_SECONDS) * 100));
 
   const composerName = member?.first_name || 'Siz';
   const composerPhotoUrl = member?.photo_url ?? null;
@@ -532,6 +555,12 @@ export function ChefCommentSection({
               const fullName = firstName || 'Bilinmeyen Üye';
               const photoUrl = comment.choir_members?.photo_url ?? null;
               const hasMeaningfulText = isRichTextMeaningful(comment.content_html);
+              const showAudioEditInfo = Boolean(
+                comment.audio_drive_file_id &&
+                canComment &&
+                memberId &&
+                comment.created_by === memberId,
+              );
 
               return (
                 <article key={comment.id} className="group relative pl-6 pr-5 sm:pr-6">
@@ -575,6 +604,9 @@ export function ChefCommentSection({
                               >
                                 <Trash2 size={10} strokeWidth={2.5} />
                               </button>
+                            ) : null}
+                            {showAudioEditInfo ? (
+                              <span className="text-[10px] text-[var(--color-text-medium)]">Sesli not düzenlenemez</span>
                             ) : null}
                           </div>
                         ) : null}
@@ -659,7 +691,7 @@ export function ChefCommentSection({
                       }
                     }}
                     disabled={submitMutation.isPending}
-                    className={`flex h-7 w-7 items-center justify-center rounded-md border transition-colors ${
+                    className={`relative flex h-7 w-7 items-center justify-center rounded-md border transition-colors ${
                       isRecording
                         ? 'border-rose-500/50 bg-rose-500/15 text-rose-300'
                         : 'border-[var(--color-border)] bg-white/5 text-[var(--color-text-medium)] hover:bg-white/10'
@@ -667,6 +699,12 @@ export function ChefCommentSection({
                     title={isRecording ? 'Kaydı durdur' : 'Mikrofonla kaydet'}
                   >
                     {isRecording ? <Square size={13} strokeWidth={2.4} /> : <Mic size={13} strokeWidth={2.4} />}
+                    {isRecording ? (
+                      <span className="absolute -right-1 -top-1 flex h-2 w-2">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-80" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-500" />
+                      </span>
+                    ) : null}
                   </button>
 
                   <button
@@ -701,6 +739,14 @@ export function ChefCommentSection({
                     )}
                   </div>
                 </div>
+                {isRecording ? (
+                  <div className="h-1 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-rose-400 transition-[width] duration-300 ease-out"
+                      style={{ width: `${recordingProgressPercent}%` }}
+                    />
+                  </div>
+                ) : null}
 
                 <input
                   ref={fileInputRef}
@@ -722,6 +768,12 @@ export function ChefCommentSection({
                     <p className="text-xs text-rose-300">{audioError}</p>
                   </div>
                 ) : null}
+                {submitDisabledReason && (isRecording || Boolean(audioFile) || isRichTextMeaningful(editorHtml) || (!isChef && composerTargetVoiceGroup === null)) ? (
+                  <div className="flex items-center gap-2 rounded-[10px] border border-[var(--color-border)] bg-white/5 px-3 py-2">
+                    <AlertCircle size={12} className="text-[var(--color-text-medium)]" />
+                    <p className="text-xs text-[var(--color-text-medium)]">{submitDisabledReason}</p>
+                  </div>
+                ) : null}
 
                 <div className="flex justify-end">
                   <button
@@ -729,7 +781,7 @@ export function ChefCommentSection({
                     onClick={() => submitMutation.mutate({ contentHtml: editorHtml, attachedAudioFile: audioFile })}
                     disabled={!canSubmit}
                     className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--color-accent)] text-[var(--color-background)] transition-opacity hover:opacity-90 disabled:opacity-50"
-                    title="Gönder"
+                    title={canSubmit ? 'Gönder' : (submitDisabledReason ?? 'Gönder')}
                   >
                     {submitMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} strokeWidth={2.5} />}
                   </button>

@@ -3213,7 +3213,6 @@ export function RepertoireWorkspace({
       </div>
 
       <ChefCommentSection
-        key={`${song.id}:${commentPreviewVoiceGroup}`}
         songId={song.id}
         memberId={memberId}
         canComment={isChef || isSectionLeader}
