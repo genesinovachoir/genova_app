@@ -64,6 +64,7 @@ export interface Announcement {
   target_voice_groups?: string[];
   created_by: string;
   created_at: string;
+  is_hidden: boolean;
   choir_members?: { 
     first_name: string; 
     last_name: string;

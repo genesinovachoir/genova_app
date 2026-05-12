@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowLeft, Loader2, Megaphone, CalendarDays, FileText, Music4, AlertTriangle, Info, Heart, Edit2, Trash2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Megaphone, CalendarDays, FileText, Music4, AlertTriangle, Info, Heart, Edit2, Trash2, Eye, EyeOff } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import { motion } from 'motion/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -109,6 +109,23 @@ export default function AnnouncementPage() {
     },
   });
 
+  const toggleHideMutation = useMutation({
+    mutationFn: async (isHidden: boolean) => {
+      await postJsonWithAuth<{ id: string }>('/api/announcements/update', {
+        announcement_id: id,
+        is_hidden: isHidden,
+      });
+    },
+    onSuccess: async (_, isHidden) => {
+      await queryClient.invalidateQueries({ queryKey: ['announcements'] });
+      await queryClient.invalidateQueries({ queryKey: ['announcement', id] });
+      toast.success(isHidden ? 'Duyuru gizlendi.' : 'Duyuru görünür yapıldı.');
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'İşlem başarısız oldu.', 'Hata');
+    },
+  });
+
   if (announcementQuery.isPending) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--color-background)]">
@@ -147,6 +164,24 @@ export default function AnnouncementPage() {
 
         {canEditDelete ? (
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => toggleHideMutation.mutate(!announcement.is_hidden)}
+              disabled={toggleHideMutation.isPending}
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] border transition-colors active:scale-90 disabled:opacity-50 ${
+                announcement.is_hidden
+                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
+                  : 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] hover:bg-white/10 hover:text-[var(--color-text-high)]'
+              }`}
+              title={announcement.is_hidden ? 'Göster' : 'Gizle'}
+            >
+              {toggleHideMutation.isPending ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : announcement.is_hidden ? (
+                <Eye size={13} />
+              ) : (
+                <EyeOff size={13} />
+              )}
+            </button>
             <button
               onClick={() => setEditingAnn(announcement)}
               disabled={deleteMutation.isPending}

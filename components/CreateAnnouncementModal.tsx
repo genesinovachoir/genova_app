@@ -132,7 +132,9 @@ function AnnouncementModalBody({
   const [title, setTitle] = useState(initialDraft.title);
   const [description, setDescription] = useState(initialDraft.description);
   const [submitting, setSubmitting] = useState(false);
-  
+
+  const canEditContent = editAnnouncement ? editAnnouncement.created_by === member?.id : true;
+
   // Member selection states
   const [members, setMembers] = useState<MemberWithSelection[]>([]);
   const [memberSearch, setMemberSearch] = useState('');
@@ -355,12 +357,13 @@ function AnnouncementModalBody({
                   <button
                     key={key}
                     type="button"
-                    onClick={() => setIcon(key)}
-                    className={`flex items-center justify-center rounded-[8px] border p-2.5 transition-all active:scale-95 ${
+                    onClick={() => canEditContent && setIcon(key)}
+                    disabled={!canEditContent}
+                    className={`flex items-center justify-center rounded-[8px] border p-2.5 transition-all ${
                       icon === key
                         ? 'border-[var(--color-border-strong)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
                         : 'border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)]'
-                    }`}
+                    } ${canEditContent ? 'active:scale-95' : 'opacity-70 cursor-not-allowed'}`}
                   >
                     <Icon size={14} />
                   </button>
@@ -376,14 +379,15 @@ function AnnouncementModalBody({
                 onChange={(event) => setTitle(event.target.value)}
                 placeholder="Duyuru başlığı..."
                 required
-                className="editorial-input"
+                disabled={!canEditContent}
+                className="editorial-input disabled:opacity-70 disabled:cursor-not-allowed"
               />
             </div>
 
             <div>
               <p className="mb-2 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-[var(--color-text-medium)]">Açıklama</p>
-              <div className="reset-tiptap-styles">
-                <RichTextEditor content={description} onChange={setDescription} />
+              <div className={`reset-tiptap-styles ${!canEditContent ? 'opacity-70 pointer-events-none' : ''}`}>
+                <RichTextEditor content={description} onChange={setDescription} disabled={!canEditContent} />
               </div>
             </div>
 

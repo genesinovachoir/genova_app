@@ -154,6 +154,7 @@ interface Props {
   onChange: (html: string) => void;
   placeholder?: string;
   borderless?: boolean;
+  disabled?: boolean;
 }
 
 interface PendingLinkPrompt {
@@ -651,6 +652,7 @@ export function RichTextEditor({
       }),
     ],
     content,
+    editable: !disabled,
     editorProps: {
       attributes: {
         class:

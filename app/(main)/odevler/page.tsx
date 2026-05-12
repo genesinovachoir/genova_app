@@ -1229,9 +1229,20 @@ export default function Odevler() {
                     exit={{ opacity: 0, y: -8 }}
                     transition={{ delay: 0.03 * index }}
                     onClick={() => router.push(assignmentPath)}
+                    onMouseEnter={() => {
+                      void router.prefetch(assignmentPath);
+                    }}
                     className="group relative cursor-pointer overflow-hidden rounded-[4px] border border-[var(--color-border)] bg-white/4 p-4 pl-5 shadow-sm transition-all hover:bg-white/5"
                   >
-                    <div className={`absolute bottom-0 left-0 top-0 w-1 ${progress >= 100 ? 'bg-emerald-500/55' : 'bg-rose-500/55'}`} />
+                    <div
+                      className={`absolute bottom-0 left-0 top-0 w-1 ${
+                        progress >= 100
+                          ? 'bg-emerald-500/55'
+                          : item.assignment_is_locked
+                            ? 'bg-amber-500/55'
+                            : 'bg-rose-500/55'
+                      }`}
+                    />
 
 
                     <div className="relative flex items-start justify-between gap-4">
@@ -1367,6 +1378,9 @@ export default function Odevler() {
                   transition={{ delay: 0.05 * index }}
                   className="group relative flex cursor-pointer flex-col gap-3 overflow-hidden rounded-[4px] border border-[var(--color-border)] bg-white/4 p-4 pl-5 shadow-sm transition-all hover:bg-white/5"
                   onClick={() => router.push(assignmentPath)}
+                  onMouseEnter={() => {
+                    void router.prefetch(assignmentPath);
+                  }}
                 >
                   {isUrgent && !isCompletedForCurrentUser ? (
                     <div className="absolute bottom-0 left-0 top-0 w-1 bg-red-500/50" />

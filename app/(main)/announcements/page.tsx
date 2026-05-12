@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { motion } from 'motion/react';
-import { Megaphone, CalendarDays, FileText, Music4, AlertTriangle, Info, Heart, Loader2, ArrowLeft, Plus } from 'lucide-react';
+import { Megaphone, CalendarDays, FileText, Music4, AlertTriangle, Info, Heart, Loader2, ArrowLeft, Plus, EyeOff } from 'lucide-react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -49,7 +49,7 @@ async function fetchAnnouncements() {
 }
 
 export default function AnnouncementsPage() {
-  const { isAdmin, isSectionLeader } = useAuth();
+  const { isAdmin, isSectionLeader, member } = useAuth();
   const queryClient = useQueryClient();
   const toast = useToast();
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -60,7 +60,11 @@ export default function AnnouncementsPage() {
     queryFn: fetchAnnouncements,
   });
 
-  const announcements = announcementsQuery.data ?? [];
+  const allAnnouncements = announcementsQuery.data ?? [];
+  const announcements = allAnnouncements.filter((ann) => {
+    if (!ann.is_hidden) return true;
+    return isAdmin() || (isSectionLeader() && ann.created_by === member?.id);
+  });
 
   return (
     <SwipeBack fallback="/">
@@ -129,7 +133,12 @@ export default function AnnouncementsPage() {
                           <Icon size={16} />
                         </div>
                         <div className="flex min-w-0 flex-1 flex-col">
-                          <p className="line-clamp-2 font-serif text-[15px] leading-tight tracking-[-0.03em]">{ann.title}</p>
+                          <div className="flex items-start justify-between gap-2">
+                            <p className={`line-clamp-2 font-serif text-[15px] leading-tight tracking-[-0.03em] ${ann.is_hidden ? 'text-[var(--color-text-medium)] line-through' : ''}`}>
+                              {ann.title}
+                            </p>
+                            {ann.is_hidden && <EyeOff size={14} className="shrink-0 text-amber-500/70" />}
+                          </div>
                           <p className="mt-1.5 text-right text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--color-text-medium)]">{formatDate(ann.created_at)}</p>
                         </div>
                       </div>

@@ -16,6 +16,7 @@ interface UpdateAnnouncementBody {
   icon?: string;
   target_users?: string[];
   target_voice_groups?: string[];
+  is_hidden?: boolean;
 }
 
 interface RoleRow {
@@ -183,15 +184,24 @@ export async function POST(request: Request) {
       }
     }
 
+    const updatePayload: Record<string, any> = {
+      target_users: targetMemberIds,
+      target_voice_groups: targetVoiceGroups,
+    };
+
+    if (typeof body.is_hidden === 'boolean') {
+      updatePayload.is_hidden = body.is_hidden;
+    }
+
+    if (announcement.created_by === actorMember.id) {
+      updatePayload.title = title;
+      updatePayload.description = description;
+      updatePayload.icon = icon;
+    }
+
     const { data: updatedAnnouncement, error: updateError } = await serviceClient
       .from('announcements')
-      .update({
-        title,
-        description,
-        icon,
-        target_users: targetMemberIds,
-        target_voice_groups: targetVoiceGroups,
-      })
+      .update(updatePayload)
       .eq('id', announcementId)
       .select('id, title, description')
       .maybeSingle();

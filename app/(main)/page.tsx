@@ -19,6 +19,7 @@ import {
   Info,
   Heart,
   Plus,
+  EyeOff,
 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -416,7 +417,11 @@ export default function Dashboard() {
     },
   });
 
-  const announcements = announcementsQuery.data ?? [];
+  const allAnnouncements = announcementsQuery.data ?? [];
+  const announcements = allAnnouncements.filter((ann) => {
+    if (!ann.is_hidden) return true;
+    return isAdmin() || (isSectionLeader() && ann.created_by === member?.id);
+  });
   const { attendedCount, missedCount, totalRehearsals } = statsQuery.data ?? {
     attendedCount: 0,
     missedCount: 0,
@@ -520,7 +525,12 @@ export default function Dashboard() {
                           <Icon size={16} />
                         </div>
                         <div className="min-w-0 flex flex-1 flex-col">
-                          <p className="line-clamp-2 font-serif text-[15px] leading-tight tracking-[-0.03em]">{announcement.title}</p>
+                          <div className="flex items-start justify-between gap-2">
+                            <p className={`line-clamp-2 font-serif text-[15px] leading-tight tracking-[-0.03em] ${announcement.is_hidden ? 'text-[var(--color-text-medium)] line-through' : ''}`}>
+                              {announcement.title}
+                            </p>
+                            {announcement.is_hidden && <EyeOff size={14} className="shrink-0 text-amber-500/70" />}
+                          </div>
                           <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--color-text-medium)]">{formatDate(announcement.created_at)}</p>
                         </div>
                       </div>

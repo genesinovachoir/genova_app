@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -19,6 +19,10 @@ import {
   Pencil,
   Check,
   X,
+  Eye,
+  EyeOff,
+  Lock,
+  LockOpen,
 } from 'lucide-react';
 
 function getInitials(firstName?: string | null, lastName?: string | null) {
@@ -77,6 +81,7 @@ interface AssignmentDetailData {
     last_name: string;
     photo_url: string | null;
   } | null;
+  auditLogs: AssignmentAuditLogItem[];
 }
 
 type AssignmentChoirMember =
@@ -163,6 +168,26 @@ interface ReviewerMemberStatus {
   submission: AssignmentSubmission | null;
 }
 
+interface AssignmentAuditLogRow {
+  id: string;
+  event_type: string;
+  created_at: string;
+  assignment_id: string;
+  submission_id: string | null;
+  member_id: string | null;
+  actor_member_id: string | null;
+  event_payload: Record<string, unknown> | null;
+}
+
+interface AssignmentAuditLogItem {
+  id: string;
+  eventType: string;
+  createdAt: string;
+  actorName: string | null;
+  actorId: string | null;
+  payload: Record<string, unknown>;
+}
+
 type ReviewerSubmissionState = 'missing' | 'pending' | 'approved' | 'rejected';
 
 interface ChoirMemberRoleRow {
@@ -227,10 +252,201 @@ function getReadableErrorMessage(error: unknown): string {
   return 'Veri yüklenemedi';
 }
 
+function getAuditEventLabel(eventType: string) {
+  switch (eventType) {
+    case 'submission_submitted':
+      return 'Teslim yapıldı';
+    case 'submission_resubmitted':
+      return 'Teslim yenilendi';
+    case 'submission_note_updated':
+      return 'Teslim notu düzenlendi';
+    case 'submission_reviewed':
+      return 'Değerlendirildi';
+    case 'submission_review_withdrawn':
+      return 'Değerlendirme beklemeye alındı';
+    case 'reviewer_note_updated':
+      return 'Değerlendirme notu düzenlendi';
+    case 'reviewer_note_hidden':
+      return 'Not koristten gizlendi';
+    case 'reviewer_note_unhidden':
+      return 'Not tekrar görünür yapıldı';
+    case 'assignment_locked':
+      return 'Ödev kilitlendi';
+    case 'assignment_unlocked':
+      return 'Ödev kilidi açıldı';
+    case 'assignment_missing_marked_not_done':
+      return 'Teslim yapmayan korist işaretlendi';
+    case 'submission_deleted_by_chef':
+      return 'Teslim şef tarafından silindi';
+    default:
+      return eventType;
+  }
+}
+
+const REVIEWER_LIST_VIRTUALIZE_THRESHOLD = 40;
+const REVIEWER_LIST_ROW_HEIGHT = 76;
+const REVIEWER_LIST_OVERSCAN = 8;
+const REVIEWER_LIST_MAX_HEIGHT = 480;
+
+interface ReviewerStatusRowProps {
+  row: ReviewerMemberStatus;
+  assignmentLocked: boolean;
+  revisedMemberIdSet: Set<string>;
+  onOpenMember: (memberId: string) => void;
+  style?: CSSProperties;
+}
+
+const ReviewerStatusRow = memo(function ReviewerStatusRow({
+  row,
+  assignmentLocked,
+  revisedMemberIdSet,
+  onOpenMember,
+  style,
+}: ReviewerStatusRowProps) {
+  const submission = row.submission;
+  const memberState = getReviewerSubmissionState(submission);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenMember(row.member_id)}
+      style={style}
+      className="relative w-full overflow-hidden rounded-[4px] border border-[var(--color-border)] bg-white/4 px-4 py-3 text-left"
+    >
+      <span
+        className={`absolute bottom-0 left-0 top-0 w-1 ${
+          memberState === 'approved'
+            ? 'bg-emerald-500/60'
+            : memberState === 'rejected'
+              ? 'bg-rose-500/60'
+              : memberState === 'pending'
+                ? 'bg-amber-400/80'
+                : 'bg-neutral-500/40'
+        }`}
+      />
+      <div className="pl-2">
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-sm font-medium text-[var(--color-text-high)]">
+            {row.first_name} {row.last_name}
+          </p>
+          <span className={`text-[0.6rem] font-bold uppercase tracking-[0.1em] opacity-80 ${
+            memberState === 'approved'
+              ? 'text-emerald-400'
+              : memberState === 'rejected'
+                ? 'text-rose-400'
+                : memberState === 'pending'
+                  ? 'text-amber-400'
+                  : 'text-[var(--color-text-low)]'
+          }`}>
+            {memberState === 'approved'
+              ? 'Onaylandı'
+              : memberState === 'rejected'
+                ? 'Reddedildi'
+                : memberState === 'pending'
+                  ? (revisedMemberIdSet.has(row.member_id) ? 'Revize Edildi' : 'Teslim Edildi')
+                  : (assignmentLocked ? 'Yapmadı' : 'Teslim Yok')}
+          </span>
+        </div>
+      </div>
+    </button>
+  );
+});
+
+interface ReviewerStatusListProps {
+  rows: ReviewerMemberStatus[];
+  assignmentLocked: boolean;
+  revisedMemberIdSet: Set<string>;
+  onOpenMember: (memberId: string) => void;
+}
+
+const ReviewerStatusList = memo(function ReviewerStatusList({
+  rows,
+  assignmentLocked,
+  revisedMemberIdSet,
+  onOpenMember,
+}: ReviewerStatusListProps) {
+  const [scrollTop, setScrollTop] = useState(0);
+  const shouldVirtualize = rows.length > REVIEWER_LIST_VIRTUALIZE_THRESHOLD;
+
+  if (!shouldVirtualize) {
+    return (
+      <div className="space-y-2">
+        {rows.map((row) => (
+          <ReviewerStatusRow
+            key={row.member_id}
+            row={row}
+            assignmentLocked={assignmentLocked}
+            revisedMemberIdSet={revisedMemberIdSet}
+            onOpenMember={onOpenMember}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  const viewportHeight = REVIEWER_LIST_MAX_HEIGHT;
+  const startIndex = Math.max(0, Math.floor(scrollTop / REVIEWER_LIST_ROW_HEIGHT) - REVIEWER_LIST_OVERSCAN);
+  const visibleCount = Math.ceil(viewportHeight / REVIEWER_LIST_ROW_HEIGHT) + REVIEWER_LIST_OVERSCAN * 2;
+  const endIndex = Math.min(rows.length, startIndex + visibleCount);
+  const visibleRows = rows.slice(startIndex, endIndex);
+
+  return (
+    <div
+      className="overflow-y-auto pr-1"
+      style={{ maxHeight: viewportHeight }}
+      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+    >
+      <div className="relative" style={{ height: rows.length * REVIEWER_LIST_ROW_HEIGHT }}>
+        {visibleRows.map((row, index) => {
+          const absoluteIndex = startIndex + index;
+          return (
+            <ReviewerStatusRow
+              key={row.member_id}
+              row={row}
+              assignmentLocked={assignmentLocked}
+              revisedMemberIdSet={revisedMemberIdSet}
+              onOpenMember={onOpenMember}
+              style={{
+                position: 'absolute',
+                top: absoluteIndex * REVIEWER_LIST_ROW_HEIGHT,
+                left: 0,
+                right: 0,
+                height: REVIEWER_LIST_ROW_HEIGHT - 8,
+              }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
+interface AssignmentAuditLogListProps {
+  logs: AssignmentAuditLogItem[];
+}
+
+const AssignmentAuditLogList = memo(function AssignmentAuditLogList({ logs }: AssignmentAuditLogListProps) {
+  return (
+    <div className="space-y-2">
+      {logs.map((log) => (
+        <div key={log.id} className="rounded-[4px] border border-[var(--color-border)] bg-white/4 px-3 py-2.5">
+          <p className="text-sm font-medium text-[var(--color-text-high)]">{getAuditEventLabel(log.eventType)}</p>
+          <p className="mt-1 text-[0.72rem] text-[var(--color-text-medium)]">
+            {formatDate(log.createdAt)} · {log.actorName ?? 'Sistem'}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+});
+
 interface ReviewSubmissionResponse {
   id: string;
-  status: 'approved' | 'rejected';
+  status: 'approved' | 'rejected' | 'pending';
   reviewer_note: string | null;
+  is_reviewer_note_hidden?: boolean;
+  hidden_by?: string | null;
+  hidden_at?: string | null;
   approved_at: string | null;
   approved_by: string | null;
   updated_at: string | null;
@@ -238,6 +454,23 @@ interface ReviewSubmissionResponse {
 
 interface DeleteSubmissionResponse {
   id: string;
+}
+
+interface HideReviewResponse {
+  id: string;
+  reviewer_note: string | null;
+  is_reviewer_note_hidden: boolean;
+  hidden_by: string | null;
+  hidden_at: string | null;
+  updated_at?: string | null;
+}
+
+interface LockAssignmentResponse {
+  id: string;
+  is_active: boolean;
+  is_locked: boolean;
+  locked_at: string | null;
+  locked_by: string | null;
 }
 
 async function getAccessToken() {
@@ -269,13 +502,56 @@ async function postJsonWithAuth<T>(url: string, payload: Record<string, unknown>
 
 async function reviewAssignmentSubmission(params: {
   submissionId: string;
-  status: 'approved' | 'rejected';
+  status: 'approved' | 'rejected' | 'pending';
   reviewerNote?: string;
 }) {
   return postJsonWithAuth<ReviewSubmissionResponse>('/api/assignment-submissions/review', {
     submissionId: params.submissionId,
     status: params.status,
     reviewerNote: params.reviewerNote ?? null,
+  });
+}
+
+async function withdrawAssignmentSubmission(params: {
+  submissionId: string;
+  reviewerNote?: string;
+}) {
+  return postJsonWithAuth<ReviewSubmissionResponse>('/api/assignment-submissions/withdraw', {
+    submissionId: params.submissionId,
+    reviewerNote: params.reviewerNote ?? null,
+  });
+}
+
+async function updateSubmissionNote(params: {
+  submissionId: string;
+  noteType: 'submission' | 'reviewer';
+  note: string;
+}) {
+  return postJsonWithAuth('/api/assignment-submissions/update-note', {
+    submissionId: params.submissionId,
+    noteType: params.noteType,
+    note: params.note,
+  });
+}
+
+async function hideReviewerNote(params: {
+  submissionId: string;
+  hidden: boolean;
+}) {
+  return postJsonWithAuth<HideReviewResponse>('/api/assignment-submissions/hide-review', {
+    submissionId: params.submissionId,
+    hidden: params.hidden,
+  });
+}
+
+async function updateAssignmentLock(params: {
+  assignmentId: string;
+  locked: boolean;
+}) {
+  return postJsonWithAuth<LockAssignmentResponse>('/api/assignments/lock', {
+    assignment_id: params.assignmentId,
+    locked: params.locked,
+    mark_missing_as_not_done: true,
   });
 }
 
@@ -369,7 +645,7 @@ async function fetchAssignmentDetail({
   const { data: assignment, error: assignmentError } = await supabase
     .from('assignments')
     .select(`
-      id, title, description, deadline, target_voice_group, drive_folder_id, created_by, is_active, created_at, updated_at,
+      id, title, description, deadline, target_voice_group, drive_folder_id, created_by, is_active, is_locked, locked_at, locked_by, created_at, updated_at,
       choir_members!assignments_created_by_fkey ( first_name, last_name, photo_url )
     `)
     .eq('id', assignmentId)
@@ -385,6 +661,7 @@ async function fetchAssignmentDetail({
   let submissionHistoryRows: AssignmentSubmissionHistoryRow[] = [];
   const revisedMemberIds = new Set<string>();
   const submissionMembersById = new Map<string, SubmissionMemberRow>();
+  const privateReviewerNotesBySubmissionId = new Map<string, { reviewer_note: string | null }>();
 
   // 1. Giriş yapan kullanıcının veya hedef koristin teslimini çekelim
   let mySubmission: ExtendedAssignmentSubmission | null = null;
@@ -399,7 +676,7 @@ async function fetchAssignmentDetail({
       supabase
         .from('assignment_submissions')
         .select(
-          'id, assignment_id, member_id, drive_file_id, drive_web_view_link, drive_download_link, file_name, mime_type, file_size_bytes, drive_member_folder_id, submitted_at, updated_at, status, submission_note, reviewer_note, approved_at, approved_by',
+          'id, assignment_id, member_id, drive_file_id, drive_web_view_link, drive_download_link, file_name, mime_type, file_size_bytes, drive_member_folder_id, submitted_at, updated_at, status, submission_note, reviewer_note, is_reviewer_note_hidden, hidden_by, hidden_at, approved_at, approved_by',
         )
         .eq('assignment_id', assignmentId)
         .eq('member_id', effectiveMemberId)
@@ -580,7 +857,7 @@ async function fetchAssignmentDetail({
         .select(`
           id, assignment_id, member_id, drive_file_id, drive_web_view_link, drive_download_link,
           file_name, mime_type, file_size_bytes, drive_member_folder_id, submitted_at, updated_at,
-          status, submission_note, reviewer_note, approved_at, approved_by
+          status, submission_note, reviewer_note, is_reviewer_note_hidden, hidden_by, hidden_at, approved_at, approved_by
         `)
         .eq('assignment_id', assignmentId)
         .order('submitted_at', { ascending: false });
@@ -638,11 +915,38 @@ async function fetchAssignmentDetail({
         }
       }
 
+      const privateSubmissionIds = Array.from(
+        new Set(
+          [
+            ...rawSubmissions.map((submission) => submission.id),
+            ...mySubmissionRows.map((submission) => submission.id),
+          ].filter((submissionId): submissionId is string => Boolean(submissionId)),
+        ),
+      );
+
+      if (privateSubmissionIds.length > 0) {
+        const { data: privateRows, error: privateRowsError } = await supabase
+          .from('assignment_submission_private_notes')
+          .select('submission_id, reviewer_note')
+          .in('submission_id', privateSubmissionIds);
+
+        if (!privateRowsError) {
+          for (const row of (privateRows ?? []) as Array<{ submission_id: string; reviewer_note: string | null }>) {
+            privateReviewerNotesBySubmissionId.set(row.submission_id, { reviewer_note: row.reviewer_note });
+          }
+        }
+      }
+
       submissions = rawSubmissions.map((submission) => {
         const choirMember = submission.member_id ? submissionMembersById.get(submission.member_id) : undefined;
         const reviewerMember = submission.approved_by ? submissionMembersById.get(submission.approved_by) : undefined;
+        const privateNote = privateReviewerNotesBySubmissionId.get(submission.id);
+        const reviewerNote = submission.is_reviewer_note_hidden
+          ? (privateNote?.reviewer_note ?? null)
+          : submission.reviewer_note;
         return {
           ...submission,
+          reviewer_note: reviewerNote,
           choir_members: choirMember
             ? {
                 first_name: choirMember.first_name,
@@ -692,8 +996,13 @@ async function fetchAssignmentDetail({
   if (mySubmissionRow) {
     const choirMember = mySubmissionRow.member_id ? submissionMembersById.get(mySubmissionRow.member_id) : undefined;
     const reviewerMember = mySubmissionRow.approved_by ? submissionMembersById.get(mySubmissionRow.approved_by) : undefined;
+    const privateNote = privateReviewerNotesBySubmissionId.get(mySubmissionRow.id);
+    const myReviewerNote = mySubmissionRow.is_reviewer_note_hidden
+      ? (privateNote?.reviewer_note ?? null)
+      : mySubmissionRow.reviewer_note;
     mySubmission = {
       ...mySubmissionRow,
+      reviewer_note: myReviewerNote,
       choir_members: choirMember
         ? {
             first_name: choirMember.first_name,
@@ -759,6 +1068,56 @@ async function fetchAssignmentDetail({
     });
   }
 
+  let auditLogs: AssignmentAuditLogItem[] = [];
+  {
+    let auditQuery = supabase
+      .from('assignment_submission_audit_logs')
+      .select('id, event_type, created_at, assignment_id, submission_id, member_id, actor_member_id, event_payload')
+      .eq('assignment_id', assignmentId)
+      .order('created_at', { ascending: false })
+      .limit(80);
+
+    if (effectiveMemberId) {
+      auditQuery = auditQuery.or(`member_id.eq.${effectiveMemberId},member_id.is.null`);
+    }
+
+    const { data: auditRowsData, error: auditRowsError } = await auditQuery;
+    if (auditRowsError) {
+      console.error('Assignment audit logs fetch failed:', auditRowsError);
+    } else {
+      const auditRows = (auditRowsData ?? []) as AssignmentAuditLogRow[];
+      const missingActorIds = Array.from(
+        new Set(
+          auditRows
+            .map((row) => row.actor_member_id)
+            .filter((id): id is string => Boolean(id) && !submissionMembersById.has(id as string)),
+        ),
+      );
+
+      if (missingActorIds.length > 0) {
+        const { data: actorRows } = await supabase
+          .from('choir_members')
+          .select('id, first_name, last_name, voice_group, photo_url')
+          .in('id', missingActorIds);
+        for (const row of (actorRows ?? []) as SubmissionMemberRow[]) {
+          submissionMembersById.set(row.id, row);
+        }
+      }
+
+      auditLogs = auditRows.map((row) => {
+        const actor = row.actor_member_id ? submissionMembersById.get(row.actor_member_id) : undefined;
+        return {
+          id: row.id,
+          eventType: row.event_type,
+          createdAt: row.created_at,
+          actorId: row.actor_member_id ?? null,
+          actorName: actor ? `${actor.first_name} ${actor.last_name}`.trim() : null,
+          payload: row.event_payload ?? {},
+        };
+      });
+    }
+  }
+
   return {
     assignmentId,
     assignment: normalizedAssignment,
@@ -768,6 +1127,7 @@ async function fetchAssignmentDetail({
     revisedMemberIds: Array.from(revisedMemberIds),
     targetMembers,
     designatedMember,
+    auditLogs,
   };
 }
 
@@ -869,14 +1229,11 @@ export default function AssignmentDetailPage() {
 
   const updateNoteMutation = useMutation({
     mutationFn: async ({ submissionId, note }: { submissionId: string; note: string }) => {
-      const { data, error } = await supabase
-        .from('assignment_submissions')
-        .update({ submission_note: note, updated_at: new Date().toISOString() })
-        .eq('id', submissionId)
-        .select()
-        .single();
-      if (error) throw error;
-      return data as AssignmentSubmission;
+      return updateSubmissionNote({
+        submissionId,
+        noteType: 'submission',
+        note,
+      });
     },
     onSuccess: async () => {
       setIsEditingSubmission(false);
@@ -889,14 +1246,11 @@ export default function AssignmentDetailPage() {
 
   const updateReviewerNoteMutation = useMutation({
     mutationFn: async ({ submissionId, note }: { submissionId: string; note: string }) => {
-      const { data, error } = await supabase
-        .from('assignment_submissions')
-        .update({ reviewer_note: note, updated_at: new Date().toISOString() })
-        .eq('id', submissionId)
-        .select()
-        .single();
-      if (error) throw error;
-      return data as AssignmentSubmission;
+      return updateSubmissionNote({
+        submissionId,
+        noteType: 'reviewer',
+        note,
+      });
     },
     onSuccess: async () => {
       setIsEditingReviewNote(false);
@@ -968,15 +1322,17 @@ export default function AssignmentDetailPage() {
         return {
           ...current,
           submissions: current.submissions.map((submission) =>
-            submission.id === variables.submissionId
-              ? {
-                  ...submission,
-                  status: variables.status,
-                  reviewer_note: variables.reviewerNote ?? null,
-                  approved_at: reviewedAt,
-                  approved_by: member?.id ?? submission.approved_by ?? null,
-                  updated_at: reviewedAt,
-                }
+                submission.id === variables.submissionId
+                  ? {
+                      ...submission,
+                      status: variables.status,
+                      reviewer_note: submission.is_reviewer_note_hidden
+                        ? submission.reviewer_note ?? null
+                        : (variables.reviewerNote ?? null),
+                      approved_at: reviewedAt,
+                      approved_by: member?.id ?? submission.approved_by ?? null,
+                      updated_at: reviewedAt,
+                    }
               : submission,
           ),
         };
@@ -997,6 +1353,9 @@ export default function AssignmentDetailPage() {
                   ...submission,
                   status: updatedSubmission.status,
                   reviewer_note: updatedSubmission.reviewer_note ?? null,
+                  is_reviewer_note_hidden: updatedSubmission.is_reviewer_note_hidden ?? submission.is_reviewer_note_hidden ?? false,
+                  hidden_by: updatedSubmission.hidden_by ?? submission.hidden_by ?? null,
+                  hidden_at: updatedSubmission.hidden_at ?? submission.hidden_at ?? null,
                   approved_at: updatedSubmission.approved_at ?? submission.approved_at ?? null,
                   approved_by: updatedSubmission.approved_by ?? submission.approved_by ?? null,
                   updated_at: updatedSubmission.updated_at ?? submission.updated_at,
@@ -1014,6 +1373,53 @@ export default function AssignmentDetailPage() {
     },
     onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: detailQueryKey });
+    },
+  });
+
+  const withdrawReviewMutation = useMutation({
+    mutationFn: async ({ submissionId }: { submissionId: string }) => {
+      return withdrawAssignmentSubmission({ submissionId });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: detailQueryKey });
+      await queryClient.invalidateQueries({ queryKey: ['reviewer-assignment-queue'] });
+      toast.success('Değerlendirme beklemeye geri alındı.');
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Değerlendirme geri alınamadı.', 'Hata');
+    },
+  });
+
+  const hideReviewMutation = useMutation({
+    mutationFn: async ({ submissionId, hidden }: { submissionId: string; hidden: boolean }) => {
+      return hideReviewerNote({ submissionId, hidden });
+    },
+    onSuccess: async (data) => {
+      await queryClient.invalidateQueries({ queryKey: detailQueryKey });
+      toast.success(data.is_reviewer_note_hidden ? 'Not koristten gizlendi.' : 'Not tekrar görünür yapıldı.');
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Not görünürlüğü güncellenemedi.', 'Hata');
+    },
+  });
+
+  const lockAssignmentMutation = useMutation({
+    mutationFn: async ({ locked }: { locked: boolean }) => {
+      if (!resolvedAssignmentId) {
+        throw new Error('Ödev bulunamadı.');
+      }
+      return updateAssignmentLock({ assignmentId: resolvedAssignmentId, locked });
+    },
+    onSuccess: async (data) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: detailQueryKey }),
+        queryClient.invalidateQueries({ queryKey: ['assignments'] }),
+        queryClient.invalidateQueries({ queryKey: ['reviewer-assignment-queue'] }),
+      ]);
+      toast.success(data.is_locked ? 'Ödev kilitlendi.' : 'Ödevin kilidi açıldı.');
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Ödev kilit durumu güncellenemedi.', 'Hata');
     },
   });
 
@@ -1035,6 +1441,7 @@ export default function AssignmentDetailPage() {
     () => new Set(detailQuery.data?.revisedMemberIds ?? []),
     [detailQuery.data?.revisedMemberIds],
   );
+  const auditLogs = detailQuery.data?.auditLogs ?? [];
   const deletingSubmissionId = deleteSubmissionMutation.isPending ? deleteSubmissionMutation.variables : null;
 
   const reviewerMemberStatuses = useMemo<ReviewerMemberStatus[]>(() => {
@@ -1108,12 +1515,23 @@ export default function AssignmentDetailPage() {
     return rows;
   }, [submissions, targetMembers]);
 
-  const reviewerApprovedMembers = useMemo(
-    () => reviewerMemberStatuses.filter((row) => row.submission?.status === 'approved'),
+  const reviewerReviewedCount = useMemo(
+    () =>
+      reviewerMemberStatuses.filter((row) => {
+        const status = row.submission?.status;
+        return status === 'approved' || status === 'rejected';
+      }).length,
     [reviewerMemberStatuses],
   );
+  const handleOpenReviewerMember = useCallback((memberId: string) => {
+    const newParams = new URLSearchParams(searchParams?.toString() || '');
+    newParams.set('mid', memberId);
+    router.push(`${window.location.pathname}?${newParams.toString()}`);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [router, searchParams]);
+
   const reviewerTotalCount = reviewerMemberStatuses.length;
-  const reviewerCompletedCount = reviewerApprovedMembers.length;
+  const reviewerCompletedCount = reviewerReviewedCount;
   const completionPercentage =
     reviewerTotalCount > 0 ? Math.round((reviewerCompletedCount / reviewerTotalCount) * 100) : 0;
   const completionScopeLabel = isChef
@@ -1175,6 +1593,21 @@ export default function AssignmentDetailPage() {
                         <span className="ml-1 opacity-50">({reviewerCompletedCount}/{reviewerTotalCount})</span>
                       </span>
                     </div>
+                    <button
+                      onClick={() => lockAssignmentMutation.mutate({ locked: !Boolean(assignment.is_locked) })}
+                      disabled={lockAssignmentMutation.isPending}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-white/5 px-3 py-1 text-[0.62rem] font-bold uppercase tracking-[0.12em] text-[var(--color-text-high)] transition hover:bg-white/10 disabled:opacity-50"
+                      title={assignment.is_locked ? 'Ödevi tekrar aktif yap' : 'Ödevi kilitle'}
+                    >
+                      {lockAssignmentMutation.isPending ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : assignment.is_locked ? (
+                        <LockOpen size={12} />
+                      ) : (
+                        <Lock size={12} />
+                      )}
+                      {assignment.is_locked ? 'Kilit Aç' : 'Kilitle'}
+                    </button>
                   </>
                 )}
               </div>
@@ -1338,7 +1771,7 @@ export default function AssignmentDetailPage() {
                                 </span>
                               </div>
 
-                              {mySubmission.status === 'pending' && !targetMemberId ? (
+                              {!targetMemberId ? (
                                 <div className="flex shrink-0 items-center gap-1">
                                   <button
                                     type="button"
@@ -1386,6 +1819,10 @@ export default function AssignmentDetailPage() {
                                 </div>
                                 <button
                                   onClick={() => {
+                                    if (assignment?.is_locked) {
+                                      toast.error('Bu ödev kilitlendiği için dosya değiştirilemez.', 'Ödev kilitli');
+                                      return;
+                                    }
                                     setUploadOpen(true);
                                     setIsEditingSubmission(false);
                                   }}
@@ -1452,26 +1889,59 @@ export default function AssignmentDetailPage() {
                                     className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${
                                       mySubmission.status === 'approved'
                                         ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-                                        : 'border-rose-500/30 bg-rose-500/10 text-rose-400'
+                                        : mySubmission.status === 'rejected'
+                                          ? 'border-rose-500/30 bg-rose-500/10 text-rose-400'
+                                          : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
                                     }`}
                                   >
-                                    {mySubmission.status === 'approved' ? 'ONAYLANDI' : 'REDDEDİLDİ'}
+                                    {mySubmission.status === 'approved'
+                                      ? 'ONAYLANDI'
+                                      : mySubmission.status === 'rejected'
+                                        ? 'REDDEDİLDİ'
+                                        : 'BEKLEMEDE'}
                                   </span>
+                                  {mySubmission.is_reviewer_note_hidden ? (
+                                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-300">
+                                      KORİSTE GİZLİ
+                                    </span>
+                                  ) : null}
                                 </div>
 
-                                {/* Edit Button for Reviewer */}
-                                {member?.id === mySubmission.approved_by && !isEditingReviewNote && (
-                                  <button
-                                    onClick={() => {
-                                      setReviewNoteValue(mySubmission.reviewer_note || '');
-                                      setIsEditingReviewNote(true);
-                                    }}
-                                    className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--color-text-medium)] transition-colors hover:bg-white/5 hover:text-[var(--color-text-high)]"
-                                    title="Değerlendirmeyi Düzenle"
-                                  >
-                                    <Pencil size={12} />
-                                  </button>
-                                )}
+                                <div className="flex items-center gap-1">
+                                  {canReviewSubmissions && !isEditingReviewNote ? (
+                                    <button
+                                      onClick={() => {
+                                        setReviewNoteValue(mySubmission.reviewer_note || '');
+                                        setIsEditingReviewNote(true);
+                                      }}
+                                      className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--color-text-medium)] transition-colors hover:bg-white/5 hover:text-[var(--color-text-high)]"
+                                      title="Değerlendirmeyi Düzenle"
+                                    >
+                                      <Pencil size={12} />
+                                    </button>
+                                  ) : null}
+                                  {isChef && canReviewSubmissions ? (
+                                    <button
+                                      onClick={() =>
+                                        hideReviewMutation.mutate({
+                                          submissionId: mySubmission.id,
+                                          hidden: !Boolean(mySubmission.is_reviewer_note_hidden),
+                                        })
+                                      }
+                                      disabled={hideReviewMutation.isPending}
+                                      className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--color-text-medium)] transition-colors hover:bg-white/5 hover:text-[var(--color-text-high)] disabled:opacity-50"
+                                      title={mySubmission.is_reviewer_note_hidden ? 'Notu Koriste Göster' : 'Notu Koristten Gizle'}
+                                    >
+                                      {hideReviewMutation.isPending ? (
+                                        <Loader2 size={12} className="animate-spin" />
+                                      ) : mySubmission.is_reviewer_note_hidden ? (
+                                        <Eye size={12} />
+                                      ) : (
+                                        <EyeOff size={12} />
+                                      )}
+                                    </button>
+                                  ) : null}
+                                </div>
                               </div>
                               {mySubmission.approved_at ? (
                                 <span className="text-[11px] text-[var(--color-text-medium)]">
@@ -1519,11 +1989,15 @@ export default function AssignmentDetailPage() {
                                 </div>
                               </div>
                             ) : (
-                              mySubmission.reviewer_note && (
+                              mySubmission.reviewer_note ? (
                                 <div className="mt-2 whitespace-pre-wrap text-sm text-[var(--color-text-high)]">
                                   {mySubmission.reviewer_note}
                                 </div>
-                              )
+                              ) : mySubmission.is_reviewer_note_hidden ? (
+                                <div className="mt-2 text-sm italic text-[var(--color-text-medium)]">
+                                  Bu değerlendirme notu Şef tarafından gizlendi.
+                                </div>
+                              ) : null
                             )}
                           </article>
                         ) : (
@@ -1565,52 +2039,65 @@ export default function AssignmentDetailPage() {
                               {designatedMember?.first_name} {designatedMember?.last_name}
                             </p>
                             <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-rose-400">
-                              TESLİM EDİLMEDİ
+                              {assignment?.is_locked ? 'YAPMADI' : 'TESLİM EDİLMEDİ'}
                             </span>
                           </div>
                           <p className="mt-1 text-sm italic text-[var(--color-text-medium)]">
-                            Bu korist henüz ödevini teslim etmedi.
+                            {assignment?.is_locked
+                              ? 'Ödev kilitlendi ve bu korist için teslim bulunmuyor.'
+                              : 'Bu korist henüz ödevini teslim etmedi.'}
                           </p>
                         </div>
                       </article>
                     ) : null}
 
                     {/* Reviewer Controls (Injected when mid is present) */}
-                    {canReviewSubmissions && targetMemberId && mySubmission && mySubmission.status === 'pending' && (
+                    {canReviewSubmissions && targetMemberId && mySubmission ? (
                       <div className="relative pl-6 pr-5 sm:pr-6 mt-8">
-                        <div className="flex gap-3">
+                        {mySubmission.status === 'pending' ? (
+                          <div className="flex gap-3">
+                            <button
+                              onClick={() => {
+                                setReviewNoteDialog({
+                                  open: true,
+                                  type: 'approve',
+                                  submission: mySubmission,
+                                });
+                              }}
+                              disabled={reviewMutation.isPending}
+                              className="flex flex-1 items-center justify-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 py-2.5 text-[0.65rem] font-bold uppercase tracking-[0.14em] text-emerald-400 transition hover:bg-emerald-500/15 disabled:opacity-50"
+                            >
+                              <CheckCircle2 size={16} /> Onayla
+                            </button>
+                            <button
+                              onClick={() => {
+                                setReviewNoteDialog({
+                                  open: true,
+                                  type: 'reject',
+                                  submission: mySubmission,
+                                });
+                              }}
+                              disabled={reviewMutation.isPending}
+                              className="flex flex-1 items-center justify-center gap-2 rounded-full border border-rose-500/30 bg-rose-500/10 py-2.5 text-[0.65rem] font-bold uppercase tracking-[0.14em] text-rose-400 transition hover:bg-rose-500/15 disabled:opacity-50"
+                            >
+                              <AlertCircle size={16} /> Reddet
+                            </button>
+                          </div>
+                        ) : (
                           <button
-                            onClick={() => {
-                              setReviewNoteDialog({
-                                open: true,
-                                type: 'approve',
-                                submission: mySubmission,
-                              });
-                            }}
-                            disabled={reviewMutation.isPending}
-                            className="flex flex-1 items-center justify-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 py-2.5 text-[0.65rem] font-bold uppercase tracking-[0.14em] text-emerald-400 transition hover:bg-emerald-500/15 disabled:opacity-50"
+                            onClick={() => withdrawReviewMutation.mutate({ submissionId: mySubmission.id })}
+                            disabled={withdrawReviewMutation.isPending}
+                            className="flex w-full items-center justify-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 py-2.5 text-[0.65rem] font-bold uppercase tracking-[0.14em] text-amber-300 transition hover:bg-amber-500/15 disabled:opacity-50"
                           >
-                            <CheckCircle2 size={16} /> Onayla
+                            {withdrawReviewMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                            Beklemeye Geri Al
                           </button>
-                          <button
-                            onClick={() => {
-                              setReviewNoteDialog({
-                                open: true,
-                                type: 'reject',
-                                submission: mySubmission,
-                              });
-                            }}
-                            disabled={reviewMutation.isPending}
-                            className="flex flex-1 items-center justify-center gap-2 rounded-full border border-rose-500/30 bg-rose-500/10 py-2.5 text-[0.65rem] font-bold uppercase tracking-[0.14em] text-rose-400 transition hover:bg-rose-500/15 disabled:opacity-50"
-                          >
-                            <AlertCircle size={16} /> Reddet
-                          </button>
-                        </div>
+                        )}
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Submission Input Area (If no submission OR rejected) - HIDDEN if targetMemberId is present */}
-                    {!targetMemberId && (!mySubmission || mySubmission.status === 'rejected') ? (
+                    {!targetMemberId && (!mySubmission || mySubmission.status === 'rejected') && !assignment?.is_locked ? (
                     <div className="relative pl-6 pr-5 sm:pr-6 mt-8">
                       <div className="absolute left-0 top-0 flex h-8 w-8 shrink-0 -translate-x-1/2 overflow-hidden rounded-full border border-[var(--color-border-strong)] bg-black/60 shadow-xl backdrop-blur-md">
                         {member?.photo_url ? (
@@ -1653,6 +2140,24 @@ export default function AssignmentDetailPage() {
                       </div>
                     </div>
                   ) : null}
+                  {!targetMemberId && !mySubmission && assignment?.is_locked ? (
+                    <article className="group relative pl-6 pr-5 sm:pr-6">
+                      <div className="absolute left-0 top-0 flex h-8 w-8 shrink-0 -translate-x-1/2 items-center justify-center overflow-hidden rounded-full border border-[var(--color-border-strong)] bg-black/60 shadow-xl backdrop-blur-md">
+                        <Lock size={14} className="text-rose-400" />
+                      </div>
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-2">
+                          <p className="text-[13px] font-semibold text-[var(--color-text-high)]">Ödev kilitlendi</p>
+                          <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-rose-400">
+                            YAPMADI
+                          </span>
+                        </div>
+                        <p className="mt-1 text-sm italic text-[var(--color-text-medium)]">
+                          Kilit sonrası yeni teslim kabul edilmiyor.
+                        </p>
+                      </div>
+                    </article>
+                  ) : null}
                 </>
               ) : null}
               </div>
@@ -1684,60 +2189,25 @@ export default function AssignmentDetailPage() {
                   Kişi bazlı liste için hedef korist bulunamadı.
                 </p>
               ) : (
-                <div className="space-y-2">
-                  {reviewerMemberStatuses.map((row) => {
-                    const submission = row.submission;
-                    const memberState = getReviewerSubmissionState(submission);
-                    const isCompleted = memberState !== 'missing';
-
-                    return (
-                      <button
-                        key={row.member_id}
-                        type="button"
-                        onClick={() => {
-                          const newParams = new URLSearchParams(searchParams?.toString() || '');
-                          newParams.set('mid', row.member_id);
-                          router.push(`${window.location.pathname}?${newParams.toString()}`);
-                          window.scrollTo({ top: 0, behavior: 'smooth' });
-                        }}
-                        className="relative w-full overflow-hidden rounded-[4px] border border-[var(--color-border)] bg-white/4 px-4 py-3 text-left"
-                      >
-                        <span 
-                          className={`absolute bottom-0 left-0 top-0 w-1 ${
-                            memberState === 'approved' 
-                              ? 'bg-emerald-500/60' 
-                              : memberState === 'rejected'
-                                ? 'bg-rose-500/60'
-                                : memberState === 'pending'
-                                  ? 'bg-amber-400/80'
-                                  : 'bg-neutral-500/40'
-                          }`} 
-                        />
-                        <div className="pl-2">
-                          <div className="flex items-center justify-between gap-4">
-                            <p className="text-sm font-medium text-[var(--color-text-high)]">
-                              {row.first_name} {row.last_name}
-                            </p>
-                            <span className={`text-[0.6rem] font-bold uppercase tracking-[0.1em] opacity-80 ${
-                              memberState === 'approved' ? 'text-emerald-400' :
-                              memberState === 'rejected' ? 'text-rose-400' :
-                              memberState === 'pending' ? 'text-amber-400' :
-                              'text-[var(--color-text-low)]'
-                            }`}>
-                              {memberState === 'approved' ? 'Onaylandı' :
-                               memberState === 'rejected' ? 'Reddedildi' :
-                               memberState === 'pending'
-                                 ? (revisedMemberIdSet.has(row.member_id) ? 'Revize Edildi' : 'Teslim Edildi')
-                                 :
-                               'Teslim Yok'}
-                            </span>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+                <ReviewerStatusList
+                  rows={reviewerMemberStatuses}
+                  assignmentLocked={Boolean(assignment?.is_locked)}
+                  revisedMemberIdSet={revisedMemberIdSet}
+                  onOpenMember={handleOpenReviewerMember}
+                />
               )}
+            </motion.section>
+          ) : null}
+
+          {auditLogs.length > 0 ? (
+            <motion.section initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-5 sm:p-6 mt-6">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h3 className="text-[0.7rem] font-bold uppercase tracking-[0.22em] text-[var(--color-text-medium)]">
+                  Düzenleme Günlüğü
+                </h3>
+                <span className="text-[0.62rem] text-[var(--color-text-medium)]">{auditLogs.length} kayıt</span>
+              </div>
+              <AssignmentAuditLogList logs={auditLogs} />
             </motion.section>
           ) : null}
         </>
