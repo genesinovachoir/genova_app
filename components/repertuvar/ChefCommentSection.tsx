@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { AlertCircle, Check, Loader2, Mic, Paperclip, Pencil, Send, Square, Trash2, X } from 'lucide-react';
+import { AlertCircle, Check, Eye, EyeOff, Loader2, Mic, Paperclip, Pencil, Send, Square, Trash2, X } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -40,11 +40,13 @@ interface SongChefComment {
   audio_file_size_bytes: number | null;
   created_at: string;
   created_by: string;
+  is_hidden: boolean;
   choir_members: CommentAuthor | null;
 }
 
 interface RawSongChefComment extends Omit<SongChefComment, 'choir_members'> {
   choir_members?: CommentAuthor | CommentAuthor[] | null;
+  is_hidden?: boolean;
 }
 
 const COMMENTS_QUERY_KEY = (songId: string, selectedVoiceGroup: PreviewVoiceGroup) =>
@@ -103,6 +105,7 @@ function validateCommentAudioFile(file: File): string | null {
 function normalizeComment(row: RawSongChefComment): SongChefComment {
   return {
     ...row,
+    is_hidden: row.is_hidden ?? false,
     content_html: sanitizeRichText(row.content_html),
     choir_members: Array.isArray(row.choir_members) ? row.choir_members[0] ?? null : row.choir_members ?? null,
   };
@@ -126,6 +129,7 @@ async function fetchComments(
       audio_file_size_bytes,
       created_at,
       created_by,
+      is_hidden,
       choir_members ( first_name, last_name, photo_url )
     `)
     .eq('song_id', songId)
@@ -137,6 +141,12 @@ async function fetchComments(
     } else {
       query = query.eq('target_voice_group', selectedVoiceGroup);
     }
+  }
+
+  // Chef (includeGlobalWhenScoped=false) sees all comments including hidden.
+  // All other users only see non-hidden comments.
+  if (includeGlobalWhenScoped) {
+    query = query.eq('is_hidden', false);
   }
 
   const { data, error } = await query;
@@ -463,6 +473,23 @@ export function ChefCommentSection({
     },
   });
 
+  const hideCommentMutation = useMutation({
+    mutationFn: async ({ commentId, hidden }: { commentId: string; hidden: boolean }) => {
+      const { error } = await supabase
+        .from('repertoire_song_comments')
+        .update({ is_hidden: hidden })
+        .eq('id', commentId);
+      if (error) throw error;
+      return { commentId, hidden };
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['repertoire-song-comments', songId] });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'İşlem başarısız oldu.', 'Şef notu');
+    },
+  });
+
   const comments = commentsQuery.data ?? [];
   const submitDisabledReason = useMemo(() => {
     if (!canComment) {
@@ -501,14 +528,16 @@ export function ChefCommentSection({
     return Boolean(canComment && memberId && comment.created_by === memberId);
   }
 
+  // Only the comment creator can delete their own comment
   function canDeleteComment(comment: SongChefComment) {
-    if (!memberId) {
-      return false;
-    }
-    if (comment.created_by === memberId && canComment) {
-      return true;
-    }
-    return isChef;
+    if (!memberId || !canComment) return false;
+    return comment.created_by === memberId;
+  }
+
+  // Chef can hide/unhide comments that are NOT their own
+  function canHideComment(comment: SongChefComment) {
+    if (!isChef || !memberId) return false;
+    return comment.created_by !== memberId;
   }
 
   function startEdit(comment: SongChefComment) {
@@ -562,8 +591,11 @@ export function ChefCommentSection({
                 comment.created_by === memberId,
               );
 
+              // Non-chef: skip hidden comments (double-safety; already filtered server-side)
+              if (!isChef && comment.is_hidden) return null;
+
               return (
-                <article key={comment.id} className="group relative pl-6 pr-5 sm:pr-6">
+                <article key={comment.id} className={`group relative pl-6 pr-5 sm:pr-6 ${comment.is_hidden ? 'opacity-40' : ''}`}>
                   <div className="absolute left-0 top-0 flex h-8 w-8 shrink-0 -translate-x-1/2 overflow-hidden rounded-full border border-[var(--color-border-strong)] bg-black/60 shadow-xl backdrop-blur-md">
                     {photoUrl ? (
                       <img src={photoUrl} alt={fullName} className="h-full w-full object-cover" />
@@ -582,8 +614,13 @@ export function ChefCommentSection({
                           {comment.target_voice_group ?? 'Tüm Koro'}
                         </span>
                         <span className="text-[11px] text-[var(--color-text-medium)]">{formatCommentDate(comment.created_at)}</span>
+                        {isChef && comment.is_hidden ? (
+                          <span className="flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-amber-400">
+                            <EyeOff size={8} /> Gizli
+                          </span>
+                        ) : null}
 
-                        {canEditComment(comment) || canDeleteComment(comment) ? (
+                        {(canEditComment(comment) || canDeleteComment(comment) || canHideComment(comment)) ? (
                           <div className="ml-1 flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                             {canEditComment(comment) ? (
                               <button
@@ -595,11 +632,26 @@ export function ChefCommentSection({
                                 <Pencil size={10} strokeWidth={2.5} />
                               </button>
                             ) : null}
+                            {canHideComment(comment) ? (
+                              <button
+                                type="button"
+                                onClick={() => hideCommentMutation.mutate({ commentId: comment.id, hidden: !comment.is_hidden })}
+                                disabled={hideCommentMutation.isPending}
+                                className={`flex h-5 w-5 items-center justify-center rounded-md transition-colors disabled:opacity-50 ${
+                                  comment.is_hidden
+                                    ? 'text-amber-400 hover:bg-amber-500/10'
+                                    : 'text-[var(--color-text-medium)] hover:bg-white/5 hover:text-amber-400'
+                                }`}
+                                title={comment.is_hidden ? 'Göster' : 'Gizle'}
+                              >
+                                {comment.is_hidden ? <Eye size={10} strokeWidth={2.5} /> : <EyeOff size={10} strokeWidth={2.5} />}
+                              </button>
+                            ) : null}
                             {canDeleteComment(comment) ? (
                               <button
                                 type="button"
                                 onClick={() => setConfirmDeleteId(comment.id)}
-                                className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--color-accent)] transition-colors hover:bg-rose-500/10"
+                                className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--color-text-medium)] transition-colors hover:bg-rose-500/10 hover:text-rose-400"
                                 title="Sil"
                               >
                                 <Trash2 size={10} strokeWidth={2.5} />
@@ -643,7 +695,7 @@ export function ChefCommentSection({
                       <div className="mt-1">
                         {hasMeaningfulText ? (
                           <div
-                            className="prose prose-invert max-w-none text-[var(--color-text-high)] opacity-90 prose-p:my-0.5 prose-p:text-[14px] prose-p:leading-[1.3] prose-ul:list-disc prose-ol:list-decimal prose-li:my-0.5 prose-a:text-[var(--color-accent)] prose-img:my-2 prose-img:max-h-[50vh] prose-img:w-full prose-img:rounded-[8px] prose-img:border prose-img:border-[var(--color-border)] prose-img:object-cover"
+                            className="prose max-w-none text-[var(--color-text-high)] opacity-90 [--tw-prose-body:var(--color-text-high)] [--tw-prose-headings:var(--color-text-high)] [--tw-prose-links:var(--color-accent)] [--tw-prose-bold:var(--color-text-high)] [--tw-prose-bullets:var(--color-text-medium)] [--tw-prose-quotes:var(--color-text-high)] [--tw-prose-code:var(--color-text-high)] [--tw-prose-hr:var(--color-border)] prose-p:my-0.5 prose-p:text-[14px] prose-p:leading-[1.3] prose-ul:list-disc prose-ol:list-decimal prose-li:my-0.5 prose-a:text-[var(--color-accent)] prose-img:my-2 prose-img:max-h-[50vh] prose-img:w-full prose-img:rounded-[8px] prose-img:border prose-img:border-[var(--color-border)] prose-img:object-cover prose-strong:text-[var(--color-text-high)] prose-b:text-[var(--color-text-high)]"
                             dangerouslySetInnerHTML={{ __html: sanitizeRichText(comment.content_html) }}
                           />
                         ) : null}
@@ -802,7 +854,7 @@ export function ChefCommentSection({
       <ConfirmDialog
         open={Boolean(pendingDeleteComment)}
         title="Şef notunu sil"
-        description={pendingDeleteComment ? 'Bu not silinecek. İşlem geri alınamaz.' : ''}
+        description={pendingDeleteComment ? 'Bu not kalıcı olarak silinecek. İşlem geri alınamaz.' : ''}
         confirmLabel="Sil"
         tone="danger"
         loading={deleteMutation.isPending}

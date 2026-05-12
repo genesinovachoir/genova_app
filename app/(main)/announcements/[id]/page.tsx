@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowLeft, Loader2, Megaphone, CalendarDays, FileText, Music4, AlertTriangle, Info, Heart, Edit2, Trash2, Eye, EyeOff } from 'lucide-react';
+import { ArrowLeft, Edit2, Eye, EyeOff, Loader2, Megaphone, CalendarDays, FileText, Music4, AlertTriangle, Info, Heart } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import { motion } from 'motion/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -84,29 +84,12 @@ export default function AnnouncementPage() {
   const id = params?.id as string;
   const { isAdmin, isSectionLeader, member } = useAuth();
   const [editingAnn, setEditingAnn] = useState<Announcement | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const handleBack = useBackOrHome();
 
   const announcementQuery = useQuery({
     queryKey: ['announcement', id],
     queryFn: () => fetchAnnouncement(id),
     enabled: Boolean(id),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async () => {
-      await postJsonWithAuth<{ id: string }>('/api/announcements/delete', {
-        announcement_id: id,
-      });
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['announcements'] });
-      toast.success('Duyuru silindi.');
-      handleBack();
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Duyuru silinemedi.', 'Silme başarısız');
-    },
   });
 
   const toggleHideMutation = useMutation({
@@ -184,17 +167,9 @@ export default function AnnouncementPage() {
             </button>
             <button
               onClick={() => setEditingAnn(announcement)}
-              disabled={deleteMutation.isPending}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] border border-[var(--color-border)] bg-white/4 text-[var(--color-text-medium)] transition-colors hover:bg-white/10 hover:text-[var(--color-text-high)] active:scale-90 disabled:opacity-50"
             >
               <Edit2 size={13} />
-            </button>
-            <button
-              onClick={() => setConfirmOpen(true)}
-              disabled={deleteMutation.isPending}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] border border-rose-500/30 bg-rose-500/10 text-rose-400 transition-colors hover:bg-rose-500/20 active:scale-90 disabled:opacity-50"
-            >
-              {deleteMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
             </button>
           </div>
         ) : null}
@@ -226,17 +201,6 @@ export default function AnnouncementPage() {
           dangerouslySetInnerHTML={{ __html: sanitizeRichText(announcement.description) }}
         />
       </motion.div>
-
-      <ConfirmDialog
-        open={confirmOpen}
-        title="Silme işlemini onaylıyor musunuz?"
-        description={`“${announcement.title}” duyurusu silinecektir. Bu işlem geri alınamaz.`}
-        confirmLabel="Sil"
-        tone="danger"
-        loading={deleteMutation.isPending}
-        onClose={() => setConfirmOpen(false)}
-        onConfirm={() => deleteMutation.mutate()}
-      />
 
       <CreateAnnouncementModal
         open={Boolean(editingAnn)}

@@ -167,8 +167,8 @@ export function NotificationPrompt() {
     <AnimatePresence>
       {showPrompt && (
         <div
-          className="fixed bottom-0 inset-x-0 z-[100] flex justify-center p-4 pointer-events-none"
-          style={{ paddingBottom: 'calc(7.5rem + env(safe-area-inset-bottom))' }}
+          className="fixed bottom-0 inset-x-0 z-[100] flex justify-center px-4 pointer-events-none"
+          style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}
         >
           <motion.div
             initial={{ opacity: 0, y: 50, scale: 0.95 }}
