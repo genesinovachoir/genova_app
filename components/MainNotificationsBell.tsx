@@ -14,6 +14,11 @@ import {
   Music4,
   UserRoundCheck,
   XCircle,
+  FileText,
+  MessageSquare,
+  AlertCircle,
+  Star,
+  Info,
 } from 'lucide-react';
 
 import { useAuth } from '@/components/AuthProvider';
@@ -36,6 +41,7 @@ interface MainNotificationItem {
   href: string;
   createdAt: string;
   status?: 'approved' | 'rejected';
+  announcementIcon?: string;
 }
 
 interface AssignmentRow {
@@ -252,7 +258,7 @@ async function fetchMainNotifications(params: {
   ] = await Promise.all([
     supabase
       .from('announcements')
-      .select('id, title, created_at')
+      .select('id, title, created_at, icon')
       .order('created_at', { ascending: false })
       .limit(8),
     supabase
@@ -392,6 +398,7 @@ async function fetchMainNotifications(params: {
       description: row.title ?? 'Duyuru güncellendi.',
       href: `/announcements/${row.id}`,
       createdAt: row.created_at,
+      announcementIcon: row.icon,
     });
   }
 
@@ -512,13 +519,25 @@ async function fetchMainNotifications(params: {
   return items.slice(0, MAX_ITEMS);
 }
 
-function getItemIcon(kind: NotificationKind) {
-  if (kind === 'announcement') return Megaphone;
-  if (kind === 'assignment') return ClipboardList;
-  if (kind === 'assignment_submission') return ClipboardList;
-  if (kind === 'rehearsal') return CalendarDays;
-  if (kind === 'repertoire_assignment') return Music4;
-  if (kind === 'assignment_reviewed') return CheckCircle2;
+const ICON_MAP: Record<string, React.ElementType> = {
+  megaphone: Megaphone,
+  calendar: CalendarDays,
+  file: FileText,
+  message: MessageSquare,
+  alert: AlertCircle,
+  star: Star,
+  info: Info,
+};
+
+function getItemIcon(item: MainNotificationItem) {
+  if (item.kind === 'announcement') {
+    return (item.announcementIcon && ICON_MAP[item.announcementIcon]) || Megaphone;
+  }
+  if (item.kind === 'assignment') return ClipboardList;
+  if (item.kind === 'assignment_submission') return ClipboardList;
+  if (item.kind === 'rehearsal') return CalendarDays;
+  if (item.kind === 'repertoire_assignment') return Music4;
+  if (item.kind === 'assignment_reviewed') return CheckCircle2;
   return UserRoundCheck;
 }
 
@@ -769,7 +788,7 @@ export function MainNotificationsBell() {
               ) : (
                 <div className="no-scrollbar max-h-[24rem] overflow-y-auto px-2 py-2">
                   {items.map((item) => {
-                    const Icon = getItemIcon(item.kind);
+                    const Icon = getItemIcon(item);
                     const isUnread = toUnreadComparableTimestamp(item.createdAt) > lastSeenAt;
                     return (
                       <Link
