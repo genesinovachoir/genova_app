@@ -685,7 +685,7 @@ export default function Dashboard() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <span className="page-kicker">Devamlılık ve Takvim</span>
-              <h3 className="mt-4 font-serif text-2xl tracking-[-0.05em]">Genel devamlılık</h3>
+              <h3 className="mt-4 font-serif text-2xl tracking-[-0.05em]">Genel Devamlılığım</h3>
             </div>
             <Link
               href="/devamsizlik"

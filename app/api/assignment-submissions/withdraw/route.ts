@@ -13,6 +13,7 @@ export async function POST(request: Request) {
   const payload = {
     submissionId: body.submissionId,
     reviewerNote: body.reviewerNote ?? null,
+    clearReviewerAudio: true,
     status: 'pending' as const,
   };
 

@@ -11,7 +11,7 @@ export interface AuthorizedDriveFile {
   driveFileId: string;
   fileName: string | null;
   mimeType: string | null;
-  kind: 'repertoire' | 'repertoire_comment_audio' | 'assignment_submission';
+  kind: 'repertoire' | 'repertoire_comment_audio' | 'assignment_submission' | 'assignment_review_audio';
   storageBucket?: string | null;
   storagePath?: string | null;
 }
@@ -176,6 +176,94 @@ async function authorizeAssignmentSubmission(driveFileId: string, memberContext:
   };
 }
 
+async function canAccessAssignmentReviewForMember(memberId: string, memberContext: MemberContext) {
+  if (memberContext.isChef || memberId === memberContext.memberId) {
+    return true;
+  }
+  if (!memberContext.isSectionLeader || !memberContext.voiceGroup) {
+    return false;
+  }
+
+  const serviceClient = createSupabaseServiceClient();
+  const { data: targetMember } = await serviceClient
+    .from('choir_members')
+    .select('voice_group')
+    .eq('id', memberId)
+    .maybeSingle();
+
+  return Boolean(targetMember?.voice_group && targetMember.voice_group === memberContext.voiceGroup);
+}
+
+async function canReviewAssignmentMember(memberId: string, memberContext: MemberContext) {
+  if (memberContext.isChef) {
+    return true;
+  }
+  if (!memberContext.isSectionLeader || !memberContext.voiceGroup) {
+    return false;
+  }
+
+  const serviceClient = createSupabaseServiceClient();
+  const { data: targetMember } = await serviceClient
+    .from('choir_members')
+    .select('voice_group')
+    .eq('id', memberId)
+    .maybeSingle();
+
+  return Boolean(targetMember?.voice_group && targetMember.voice_group === memberContext.voiceGroup);
+}
+
+async function authorizeAssignmentReviewAudio(
+  driveFileId: string,
+  memberContext: MemberContext,
+): Promise<AuthorizedDriveFile | null> {
+  if (!memberContext.memberId) {
+    return null;
+  }
+
+  const serviceClient = createSupabaseServiceClient();
+  const { data: publicSubmission } = await serviceClient
+    .from('assignment_submissions')
+    .select('reviewer_audio_drive_file_id, reviewer_audio_file_name, reviewer_audio_mime_type, member_id')
+    .eq('reviewer_audio_drive_file_id', driveFileId)
+    .maybeSingle();
+
+  if (publicSubmission?.reviewer_audio_drive_file_id) {
+    const canAccess = await canAccessAssignmentReviewForMember(publicSubmission.member_id, memberContext);
+    if (!canAccess) {
+      return null;
+    }
+
+    return {
+      driveFileId,
+      fileName: publicSubmission.reviewer_audio_file_name ?? null,
+      mimeType: publicSubmission.reviewer_audio_mime_type ?? null,
+      kind: 'assignment_review_audio',
+    };
+  }
+
+  const { data: privateNote } = await serviceClient
+    .from('assignment_submission_private_notes')
+    .select('reviewer_audio_drive_file_id, reviewer_audio_file_name, reviewer_audio_mime_type, member_id')
+    .eq('reviewer_audio_drive_file_id', driveFileId)
+    .maybeSingle();
+
+  if (!privateNote?.reviewer_audio_drive_file_id) {
+    return null;
+  }
+
+  const canAccessPrivate = await canReviewAssignmentMember(privateNote.member_id, memberContext);
+  if (!canAccessPrivate) {
+    return null;
+  }
+
+  return {
+    driveFileId,
+    fileName: privateNote.reviewer_audio_file_name ?? null,
+    mimeType: privateNote.reviewer_audio_mime_type ?? null,
+    kind: 'assignment_review_audio',
+  };
+}
+
 async function authorizeRepertoireCommentAudio(
   driveFileId: string,
   memberContext: MemberContext,
@@ -220,6 +308,7 @@ export async function authorizeDriveFileAccess(authUserId: string, driveFileId: 
   return (
     (await authorizeRepertoireFile(driveFileId, memberContext)) ??
     (await authorizeRepertoireCommentAudio(driveFileId, memberContext)) ??
+    (await authorizeAssignmentReviewAudio(driveFileId, memberContext)) ??
     (await authorizeAssignmentSubmission(driveFileId, memberContext))
   );
 }

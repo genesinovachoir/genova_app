@@ -9,6 +9,13 @@ const TAB_ORDER = ['/', '/repertuvar', '/chat', '/odevler', '/profil'];
 
 const SWIPE_THRESHOLD = 0.22; // Ekranın %22'si
 const VELOCITY_THRESHOLD = 350; // px/s
+const EDGE_ACTIVATION_MIN = 72; // Ortadan başlayan swipe için hedef kenara yaklaşma mesafesi
+const EDGE_ACTIVATION_MAX = 128;
+const EDGE_ACTIVATION_RATIO = 0.18;
+const INTENT_DISTANCE = 64; // Küçük orta hareketleri sayfa swipe'ına çevirmemek için
+const DEAD_ZONE = 10;
+const HORIZONTAL_DOMINANCE = 1.15;
+const MIN_FLING_DISTANCE = 72;
 
 interface UseTabSwipeReturn {
   x: MotionValue<number>;
@@ -36,6 +43,7 @@ export function useTabSwipe(): UseTabSwipeReturn {
   const setDirection = useNavigationStore((s) => s.setDirection);
 
   const isSwipingRef = useRef(false);
+  const isSwipeCommittedRef = useRef(false);
   const startXRef = useRef(0);
   const startYRef = useRef(0);
   const directionLockedRef = useRef<'x' | 'y' | null>(null);
@@ -53,20 +61,35 @@ export function useTabSwipe(): UseTabSwipeReturn {
     if (next) router.prefetch(next);
   }, [isTabPage, currentTabIndex, router]);
 
+  const getEdgeActivationZone = useCallback((screenWidth: number) => (
+    Math.min(EDGE_ACTIVATION_MAX, Math.max(EDGE_ACTIVATION_MIN, screenWidth * EDGE_ACTIVATION_RATIO))
+  ), []);
+
+  const shouldCommitSwipe = useCallback((clientX: number, dx: number, screenWidth: number) => {
+    if (Math.abs(dx) < INTENT_DISTANCE) return false;
+
+    const activationZone = getEdgeActivationZone(screenWidth);
+    if (dx < 0) return clientX <= activationZone;
+    if (dx > 0) return clientX >= screenWidth - activationZone;
+    return false;
+  }, [getEdgeActivationZone]);
+
   const onPointerDown = useCallback(
     (e: PointerEvent) => {
       if (!isTabPage) return;
+      if (!e.isPrimary) return;
       // Sol kenar bölgesi SwipeBack'e ait — çakışmayı önle
       if (e.clientX < 36) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
 
       isSwipingRef.current = true;
+      isSwipeCommittedRef.current = false;
       startXRef.current = e.clientX;
       startYRef.current = e.clientY;
       startTimeRef.current = e.timeStamp;
       directionLockedRef.current = null;
 
       prefetchAdjacentTabs();
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     },
     [isTabPage, prefetchAdjacentTabs],
   );
@@ -80,12 +103,20 @@ export function useTabSwipe(): UseTabSwipeReturn {
 
       // İlk hareket — yön kilidi
       if (!directionLockedRef.current) {
-        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return; // Dead zone
-        directionLockedRef.current = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+        if (Math.abs(dx) < DEAD_ZONE && Math.abs(dy) < DEAD_ZONE) return;
+        directionLockedRef.current = Math.abs(dx) > Math.abs(dy) * HORIZONTAL_DOMINANCE ? 'x' : 'y';
       }
 
       // Dikey scroll — bizi ilgilendirmez
       if (directionLockedRef.current === 'y') return;
+
+      if (!isSwipeCommittedRef.current) {
+        const screenWidth = window.innerWidth;
+        if (!shouldCommitSwipe(e.clientX, dx, screenWidth)) return;
+
+        isSwipeCommittedRef.current = true;
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      }
 
       // Tab sınırlarını kontrol et
       const atFirst = currentTabIndex === 0;
@@ -98,7 +129,7 @@ export function useTabSwipe(): UseTabSwipeReturn {
 
       x.set(clampedDx);
     },
-    [x, currentTabIndex],
+    [x, currentTabIndex, shouldCommitSwipe],
   );
 
   const onPointerUp = useCallback(
@@ -106,10 +137,12 @@ export function useTabSwipe(): UseTabSwipeReturn {
       if (!isSwipingRef.current) return;
       isSwipingRef.current = false;
 
-      if (directionLockedRef.current !== 'x') {
+      if (directionLockedRef.current !== 'x' || !isSwipeCommittedRef.current) {
+        isSwipeCommittedRef.current = false;
         animate(x, 0, { type: 'spring', stiffness: 400, damping: 30 });
         return;
       }
+      isSwipeCommittedRef.current = false;
 
       const currentX = x.get();
       const screenWidth = window.innerWidth;
@@ -117,7 +150,8 @@ export function useTabSwipe(): UseTabSwipeReturn {
       const velocity = Math.abs(currentX) / elapsed;
 
       const passedThreshold =
-        Math.abs(currentX) > screenWidth * SWIPE_THRESHOLD || velocity > VELOCITY_THRESHOLD;
+        Math.abs(currentX) > screenWidth * SWIPE_THRESHOLD ||
+        (velocity > VELOCITY_THRESHOLD && Math.abs(currentX) > MIN_FLING_DISTANCE);
 
       let targetTabIndex = currentTabIndex;
 
@@ -156,6 +190,7 @@ export function useTabSwipe(): UseTabSwipeReturn {
 
   const onPointerCancel = useCallback(() => {
     isSwipingRef.current = false;
+    isSwipeCommittedRef.current = false;
     animate(x, 0, { type: 'spring', stiffness: 400, damping: 30 });
   }, [x]);
 

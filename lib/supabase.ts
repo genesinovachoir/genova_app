@@ -260,6 +260,10 @@ export interface AssignmentSubmission {
   status?: 'pending' | 'approved' | 'rejected';
   submission_note?: string | null;
   reviewer_note?: string | null;
+  reviewer_audio_drive_file_id?: string | null;
+  reviewer_audio_file_name?: string | null;
+  reviewer_audio_mime_type?: string | null;
+  reviewer_audio_file_size_bytes?: number | null;
   is_reviewer_note_hidden?: boolean;
   reviewer_note_history?: Array<Record<string, unknown>>;
   submission_note_history?: Array<Record<string, unknown>>;

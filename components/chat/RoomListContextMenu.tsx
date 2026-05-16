@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Archive, Bell, BellOff, EyeOff, Info, LogOut } from 'lucide-react';
-import type { ChatRoom } from '@/lib/chat';
+import { useAuth } from '@/components/AuthProvider';
+import { getChatRoomDisplayName, type ChatRoom } from '@/lib/chat';
 
 interface RoomListContextMenuProps {
   room: ChatRoom | null;
@@ -26,6 +27,7 @@ export function RoomListContextMenu({
   onLeaveRoom,
   onArchiveRoom,
 }: RoomListContextMenuProps) {
+  const { member } = useAuth();
   const menuRef = useRef<HTMLDivElement>(null);
   const isOpen = room !== null && position !== null;
 
@@ -89,6 +91,7 @@ export function RoomListContextMenu({
   const notificationsEnabled = room?.my_membership?.notifications_enabled ?? true;
   const canArchive = room?.type === 'custom' && room?.my_membership?.role === 'admin';
   const canLeave = room?.type !== 'dm';
+  const displayName = room ? getChatRoomDisplayName(room, member?.id) : '';
 
   return (
     <AnimatePresence>
@@ -113,7 +116,7 @@ export function RoomListContextMenu({
           style={getMenuStyle()}
         >
           <div className="border-b border-[var(--color-border)] px-4 py-3">
-            <p className="truncate text-sm font-semibold text-[var(--color-text-high)]">{room.name}</p>
+            <p className="truncate text-sm font-semibold text-[var(--color-text-high)]">{displayName}</p>
           </div>
 
           <div className="py-1.5">

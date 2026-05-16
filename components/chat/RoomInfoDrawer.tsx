@@ -20,6 +20,8 @@ import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/ToastProvider';
 import { useChatStore } from '@/store/useChatStore';
 import {
+  formatChatMemberName,
+  getChatRoomDisplayName,
   updateRoom,
   removeMember,
   leaveRoom,
@@ -79,6 +81,17 @@ export function RoomInfoDrawer({
   const notificationsEnabled = notificationsOverride ?? myMembership?.notifications_enabled ?? true;
   const isAdmin = myMembership?.role === 'admin';
   const isDm = room?.type === 'dm';
+  const otherDmMember = useMemo(
+    () => (isDm ? roomMembers.find((roomMember) => roomMember.member_id !== memberId) : null),
+    [isDm, memberId, roomMembers]
+  );
+  const roomDisplayName = useMemo(() => {
+    if (isDm) {
+      if (otherDmMember?.choir_members) return formatChatMemberName(otherDmMember.choir_members);
+      if (room) return getChatRoomDisplayName(room, memberId);
+    }
+    return room?.name ?? 'Sohbet';
+  }, [isDm, memberId, otherDmMember?.choir_members, room]);
 
   useEffect(() => {
     if (!isRoomInfoOpen) setIsAddMemberOpen(false);
@@ -277,10 +290,16 @@ export function RoomInfoDrawer({
                     ref={fileInputRef} 
                     onChange={handleAvatarChange}
                   />
-                  {room.avatar_url ? (
+                  {isDm && otherDmMember?.choir_members?.photo_url ? (
+                    <img
+                      src={otherDmMember.choir_members.photo_url}
+                      alt={roomDisplayName}
+                      className="h-full w-full rounded-full object-cover"
+                    />
+                  ) : room.avatar_url ? (
                     <img
                       src={getDriveImageUrl(room.avatar_url)}
-                      alt={room.name}
+                      alt={roomDisplayName}
                       className={`h-full w-full rounded-full object-cover ${isAdmin && !isDm ? 'group-hover:opacity-60 transition-opacity' : ''}`}
                     />
                   ) : (
@@ -322,7 +341,7 @@ export function RoomInfoDrawer({
                 ) : (
                   <div className="flex items-center gap-2">
                     <h3 className="text-lg font-bold text-[var(--color-text-high)]">
-                      {room.name}
+                      {roomDisplayName}
                     </h3>
                     {isAdmin && !isDm && (
                       <button

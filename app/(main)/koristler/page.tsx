@@ -34,6 +34,8 @@ function formatPercent(value: number | null | undefined) {
 
 function VoiceGroupStatCard({
   summary,
+  selected = false,
+  onClick,
 }: {
   summary: {
     groupName: string;
@@ -43,13 +45,24 @@ function VoiceGroupStatCard({
     continuity_percent: number | null;
     show_homework_metrics: boolean;
   };
+  selected?: boolean;
+  onClick?: () => void;
 }) {
   const continuityPercent = summary.show_homework_metrics
     ? summary.continuity_percent
     : summary.attendance_percent;
 
   return (
-    <div className="min-w-[140px] flex-1 rounded-[10px] border border-[var(--color-border)] bg-white/[0.03] p-3.5 transition-colors hover:bg-white/[0.05]">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      className={`min-w-[140px] flex-1 rounded-[10px] border p-3.5 text-left transition-colors hover:bg-white/[0.05] ${
+        selected
+          ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
+          : 'border-[var(--color-border)] bg-white/[0.03]'
+      }`}
+    >
       <div className="flex items-center justify-between gap-2">
         <h4 className="font-serif text-[0.95rem] tracking-[-0.04em] text-[var(--color-text-high)]">
           {summary.groupName}
@@ -75,7 +88,7 @@ function VoiceGroupStatCard({
           <span className="font-serif text-[0.95rem] text-[var(--color-text-high)]">{formatPercent(continuityPercent)}</span>
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -108,14 +121,24 @@ function MemberAvatar({ member }: { member: PerformanceRosterMember }) {
 function MetricBadge({
   label,
   percent,
+  value,
 }: {
   label: string;
   percent: number | null;
+  value?: string;
 }) {
+  const displayValue = value ?? formatPercent(percent);
+
   return (
     <div className="rounded-[8px] border border-[var(--color-border)] bg-black/15 px-3 py-2">
       <p className="text-[0.55rem] font-bold uppercase tracking-[0.18em] text-[var(--color-text-medium)]">{label}</p>
-      <p className="mt-1 font-serif text-[1.1rem] leading-none tracking-[-0.04em] text-[var(--color-text-high)]">{formatPercent(percent)}</p>
+      <p
+        className={`mt-1 font-serif leading-none tracking-[-0.04em] text-[var(--color-text-high)] ${
+          value ? 'text-[0.98rem]' : 'text-[1.1rem]'
+        }`}
+      >
+        {displayValue}
+      </p>
     </div>
   );
 }
@@ -128,6 +151,8 @@ function MemberCard({
   defaultShowHomeworkMetrics: boolean;
 }) {
   const showHomeworkMetrics = defaultShowHomeworkMetrics && member.show_homework_metrics;
+  const isHomeworkExemptMember = defaultShowHomeworkMetrics && !member.show_homework_metrics && Boolean(member.voice_group);
+  const showThreeMetricBoxes = showHomeworkMetrics || isHomeworkExemptMember;
   const voiceGroupLabel = member.voice_group ?? 'Şef';
 
   return (
@@ -167,12 +192,12 @@ function MemberCard({
               </span>
             </div>
 
-            <div className={`mt-3 grid gap-2 ${showHomeworkMetrics ? 'grid-cols-3' : 'grid-cols-1'}`}>
-              {showHomeworkMetrics ? (
+            <div className={`mt-3 grid gap-2 ${showThreeMetricBoxes ? 'grid-cols-3' : 'grid-cols-1'}`}>
+              {showThreeMetricBoxes ? (
                 <>
                   <MetricBadge label="Prova" percent={member.attendance_percent} />
-                  <MetricBadge label="Ödev" percent={member.homework_percent} />
-                  <MetricBadge label="Devam" percent={member.continuity_percent} />
+                  <MetricBadge label="Ödev" percent={member.homework_percent} value={isHomeworkExemptMember ? 'MUAF' : undefined} />
+                  <MetricBadge label="Devam" percent={isHomeworkExemptMember ? member.attendance_percent : member.continuity_percent} />
                 </>
               ) : (
                 <MetricBadge label="Normal devamlılık" percent={member.attendance_percent} />
@@ -189,6 +214,7 @@ export default function KoristlerPage() {
   const queryClient = useQueryClient();
   const { member, isAdmin, isSectionLeader } = useAuth();
   const [search, setSearch] = useState('');
+  const [selectedVoiceGroup, setSelectedVoiceGroup] = useState<string | null>(null);
   const deferredSearch = useDeferredValue(search);
   const handleBack = useBackOrHome();
 
@@ -231,11 +257,12 @@ export default function KoristlerPage() {
 
   const filteredMembers = useMemo(() => {
     const normalized = normalizePerformanceSearchQuery(deferredSearch);
-    if (!normalized) {
-      return members;
-    }
-    return members.filter((row) => row.search_text.includes(normalized));
-  }, [deferredSearch, members]);
+    return members.filter((row) => {
+      const matchesVoiceGroup = !selectedVoiceGroup || row.voice_group === selectedVoiceGroup;
+      const matchesSearch = !normalized || row.search_text.includes(normalized);
+      return matchesVoiceGroup && matchesSearch;
+    });
+  }, [deferredSearch, members, selectedVoiceGroup]);
 
   const groupedMembers = useMemo(() => {
     const resolveVoiceGroup = (row: PerformanceRosterMember) => row.voice_group?.trim() || 'Şef';
@@ -364,7 +391,12 @@ export default function KoristlerPage() {
             ) : (
               <div className="mt-4 flex gap-4 overflow-x-auto pb-4 scrollbar-hide sm:grid sm:grid-cols-4 sm:overflow-visible sm:pb-0">
                 {overview.groupSummaries.map((gs) => (
-                  <VoiceGroupStatCard key={gs.groupName} summary={gs} />
+                  <VoiceGroupStatCard
+                    key={gs.groupName}
+                    summary={gs}
+                    selected={selectedVoiceGroup === gs.groupName}
+                    onClick={() => setSelectedVoiceGroup((current) => (current === gs.groupName ? null : gs.groupName))}
+                  />
                 ))}
               </div>
             )}

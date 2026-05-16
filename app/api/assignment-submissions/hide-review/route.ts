@@ -17,12 +17,20 @@ interface SubmissionRow {
   assignment_id: string;
   member_id: string;
   reviewer_note: string | null;
+  reviewer_audio_drive_file_id: string | null;
+  reviewer_audio_file_name: string | null;
+  reviewer_audio_mime_type: string | null;
+  reviewer_audio_file_size_bytes: number | null;
   reviewer_note_history: unknown;
   is_reviewer_note_hidden: boolean | null;
 }
 
 interface PrivateNoteRow {
   reviewer_note: string | null;
+  reviewer_audio_drive_file_id: string | null;
+  reviewer_audio_file_name: string | null;
+  reviewer_audio_mime_type: string | null;
+  reviewer_audio_file_size_bytes: number | null;
   note_history_json: unknown;
   is_hidden: boolean;
   last_hidden_by: string | null;
@@ -63,7 +71,7 @@ export async function POST(request: Request) {
 
     const { data: submissionData, error: submissionError } = await serviceClient
       .from('assignment_submissions')
-      .select('id, assignment_id, member_id, reviewer_note, reviewer_note_history, is_reviewer_note_hidden')
+      .select('id, assignment_id, member_id, reviewer_note, reviewer_audio_drive_file_id, reviewer_audio_file_name, reviewer_audio_mime_type, reviewer_audio_file_size_bytes, reviewer_note_history, is_reviewer_note_hidden')
       .eq('id', submissionId)
       .maybeSingle();
 
@@ -82,12 +90,16 @@ export async function POST(request: Request) {
         id: submission.id,
         is_reviewer_note_hidden: currentlyHidden,
         reviewer_note: submission.reviewer_note,
+        reviewer_audio_drive_file_id: submission.reviewer_audio_drive_file_id,
+        reviewer_audio_file_name: submission.reviewer_audio_file_name,
+        reviewer_audio_mime_type: submission.reviewer_audio_mime_type,
+        reviewer_audio_file_size_bytes: submission.reviewer_audio_file_size_bytes,
       });
     }
 
     const { data: privateNoteData, error: privateNoteError } = await serviceClient
       .from('assignment_submission_private_notes')
-      .select('reviewer_note, note_history_json, is_hidden, last_hidden_by, last_hidden_at')
+      .select('reviewer_note, reviewer_audio_drive_file_id, reviewer_audio_file_name, reviewer_audio_mime_type, reviewer_audio_file_size_bytes, note_history_json, is_hidden, last_hidden_by, last_hidden_at')
       .eq('submission_id', submission.id)
       .maybeSingle();
 
@@ -108,6 +120,14 @@ export async function POST(request: Request) {
           assignment_id: submission.assignment_id,
           member_id: submission.member_id,
           reviewer_note: privateNote?.reviewer_note ?? submission.reviewer_note ?? null,
+          reviewer_audio_drive_file_id:
+            privateNote?.reviewer_audio_drive_file_id ?? submission.reviewer_audio_drive_file_id ?? null,
+          reviewer_audio_file_name:
+            privateNote?.reviewer_audio_file_name ?? submission.reviewer_audio_file_name ?? null,
+          reviewer_audio_mime_type:
+            privateNote?.reviewer_audio_mime_type ?? submission.reviewer_audio_mime_type ?? null,
+          reviewer_audio_file_size_bytes:
+            privateNote?.reviewer_audio_file_size_bytes ?? submission.reviewer_audio_file_size_bytes ?? null,
           note_history_json: [
             ...privateHistory,
             {
@@ -132,11 +152,29 @@ export async function POST(request: Request) {
     const restoredReviewerNote = hidden
       ? null
       : (privateNote?.reviewer_note ?? submission.reviewer_note ?? null);
+    const restoredAudioFields = hidden
+      ? {
+          reviewer_audio_drive_file_id: null,
+          reviewer_audio_file_name: null,
+          reviewer_audio_mime_type: null,
+          reviewer_audio_file_size_bytes: null,
+        }
+      : {
+          reviewer_audio_drive_file_id:
+            privateNote?.reviewer_audio_drive_file_id ?? submission.reviewer_audio_drive_file_id ?? null,
+          reviewer_audio_file_name:
+            privateNote?.reviewer_audio_file_name ?? submission.reviewer_audio_file_name ?? null,
+          reviewer_audio_mime_type:
+            privateNote?.reviewer_audio_mime_type ?? submission.reviewer_audio_mime_type ?? null,
+          reviewer_audio_file_size_bytes:
+            privateNote?.reviewer_audio_file_size_bytes ?? submission.reviewer_audio_file_size_bytes ?? null,
+        };
 
     const { data: updatedSubmission, error: updateError } = await serviceClient
       .from('assignment_submissions')
       .update({
         reviewer_note: restoredReviewerNote,
+        ...restoredAudioFields,
         reviewer_note_history: [
           ...publicHistory,
           {
@@ -151,7 +189,7 @@ export async function POST(request: Request) {
         updated_at: nowIso,
       })
       .eq('id', submission.id)
-      .select('id, reviewer_note, is_reviewer_note_hidden, hidden_by, hidden_at, updated_at')
+      .select('id, reviewer_note, reviewer_audio_drive_file_id, reviewer_audio_file_name, reviewer_audio_mime_type, reviewer_audio_file_size_bytes, is_reviewer_note_hidden, hidden_by, hidden_at, updated_at')
       .maybeSingle();
 
     if (updateError) {

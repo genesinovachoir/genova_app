@@ -6,7 +6,7 @@ import { X, Search, Check, Users, MessageCircle } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
 import { useChatStore } from '@/store/useChatStore';
 import { supabase } from '@/lib/supabase';
-import { createRoom } from '@/lib/chat';
+import { createRoom, formatChatMemberName } from '@/lib/chat';
 import type { ChoirMember } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 
@@ -45,11 +45,14 @@ export function CreateRoomModal() {
     if (!member?.id || selected.length === 0) return;
     setLoading(true);
     try {
-      const roomName = roomType === 'dm'
-        ? members.find(m => m.id === selected[0])?.first_name ?? 'DM'
+      const shouldCreateDm = roomType === 'dm' || selected.length === 1;
+      const selectedMember = members.find(m => m.id === selected[0]);
+      const roomName = shouldCreateDm
+        ? formatChatMemberName(selectedMember, 'DM')
         : name.trim() || 'Yeni Oda';
       const room = await createRoom(roomName, member.id, selected, {
-        type: roomType, description: desc.trim() || undefined,
+        type: shouldCreateDm ? 'dm' : roomType,
+        description: shouldCreateDm ? undefined : desc.trim() || undefined,
       });
       setCreateRoomOpen(false);
       router.push(`/chat/${room.slug}`);
@@ -134,8 +137,8 @@ export function CreateRoomModal() {
                 </div>
                 <div className="mt-4 flex gap-2">
                   <button onClick={() => setStep('type')} className="flex-1 rounded-xl border border-[var(--color-border)] py-2.5 text-sm font-medium text-[var(--color-text-medium)]">Geri</button>
-                  <button onClick={() => roomType === 'dm' ? handleCreate() : setStep('details')} disabled={selected.length === 0}
-                    className="flex-1 rounded-xl bg-[var(--color-accent)] py-2.5 text-sm font-bold text-white disabled:opacity-40">{roomType === 'dm' ? 'Başlat' : 'İleri'}</button>
+                  <button onClick={() => roomType === 'dm' || selected.length === 1 ? handleCreate() : setStep('details')} disabled={selected.length === 0 || loading}
+                    className="flex-1 rounded-xl bg-[var(--color-accent)] py-2.5 text-sm font-bold text-white disabled:opacity-40">{roomType === 'dm' || selected.length === 1 ? (loading ? 'Açılıyor...' : 'Başlat') : 'İleri'}</button>
                 </div>
               </>
             )}

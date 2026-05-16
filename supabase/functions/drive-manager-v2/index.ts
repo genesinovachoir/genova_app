@@ -45,6 +45,8 @@ const STORAGE_LINK_PREFIX = 'storage://';
 const ASSIGNMENT_STORAGE_BUCKET = 'assignment-submissions';
 const SONG_COMMENT_AUDIO_MAX_BYTES = 20 * 1024 * 1024;
 const SONG_COMMENT_FOLDER_NAME = 'Şef Notları';
+const ASSIGNMENT_REVIEW_AUDIO_MAX_BYTES = 20 * 1024 * 1024;
+const ASSIGNMENT_REVIEW_AUDIO_FOLDER_NAME = 'Değerlendirme Sesleri';
 const VOICE_GROUPS = new Set(['Soprano', 'Alto', 'Tenor', 'Bass']);
 
 async function createFolder(token: string, name: string, parentId: string) {
@@ -384,6 +386,10 @@ async function upsertAssignmentSubmission(params: {
       updated_at: uploadedAt,
       status: 'pending',
       reviewer_note: null,
+      reviewer_audio_drive_file_id: null,
+      reviewer_audio_file_name: null,
+      reviewer_audio_mime_type: null,
+      reviewer_audio_file_size_bytes: null,
       is_reviewer_note_hidden: false,
       reviewer_note_history: [],
       submission_note_history: submissionNote
@@ -626,6 +632,108 @@ Deno.serve(async (req) => {
         const folder = await createFolder(token, sanitizeFolderName(assignment_title), creatorId);
         await supabaseAdmin.from('assignments').update({ drive_folder_id: folder.id }).eq('id', assignment_id);
         return new Response(JSON.stringify({ folder_id: folder.id }), { headers: jsonHeaders });
+      }
+      case 'upload_assignment_review_audio': {
+        if (!roleFlags.isChef && !roleFlags.isSectionLeader) {
+          throw new Error('Yetkisiz');
+        }
+
+        const {
+          submission_id,
+          audio_file_name,
+          audio_mime_type,
+          audio_data_base64,
+        } = body;
+
+        if (!submission_id || !audio_file_name || !audio_data_base64) {
+          throw new Error('Eksik değerlendirme sesi verisi');
+        }
+
+        const { data: submissionRow, error: submissionRowError } = await supabaseAdmin
+          .from('assignment_submissions')
+          .select('id, assignment_id, member_id, drive_member_folder_id')
+          .eq('id', submission_id)
+          .maybeSingle();
+        if (submissionRowError) {
+          throw new Error(submissionRowError.message);
+        }
+        if (!submissionRow?.id) {
+          throw new Error('Teslim bulunamadı');
+        }
+
+        const { data: targetMember, error: targetMemberError } = await supabaseAdmin
+          .from('choir_members')
+          .select('id, first_name, last_name, voice_group')
+          .eq('id', submissionRow.member_id)
+          .maybeSingle();
+        if (targetMemberError) {
+          throw new Error(targetMemberError.message);
+        }
+        if (!targetMember?.id) {
+          throw new Error('Teslim sahibi korist bulunamadı');
+        }
+
+        if (!roleFlags.isChef) {
+          if (!member.voice_group) {
+            throw new Error('Partisyon şefi için ses grubu tanımlı değil.');
+          }
+          if (!targetMember.voice_group || targetMember.voice_group !== member.voice_group) {
+            throw new Error('Sadece kendi partinizdeki teslimlere sesli değerlendirme ekleyebilirsiniz.');
+          }
+        }
+
+        const { data: assignmentRow, error: assignmentRowError } = await supabaseAdmin
+          .from('assignments')
+          .select('id, drive_folder_id')
+          .eq('id', submissionRow.assignment_id)
+          .maybeSingle();
+        if (assignmentRowError) {
+          throw new Error(assignmentRowError.message);
+        }
+        if (!assignmentRow?.drive_folder_id) {
+          throw new Error('Ödev klasörü bulunamadı');
+        }
+
+        const safeAudioFileName = sanitizeFileName(audio_file_name);
+        const resolvedMimeType =
+          typeof audio_mime_type === 'string' && audio_mime_type.trim().length > 0
+            ? audio_mime_type.trim()
+            : detectAudioMimeType(safeAudioFileName);
+        if (!resolvedMimeType.toLowerCase().startsWith('audio/')) {
+          throw new Error('Yalnızca audio/* dosyaları kabul edilir.');
+        }
+
+        const audioBytes = parseBase64Bytes(audio_data_base64, 'Ses dosyası verisi bozuk.');
+        if (!audioBytes.byteLength) {
+          throw new Error('Ses dosyası boş.');
+        }
+        if (audioBytes.byteLength > ASSIGNMENT_REVIEW_AUDIO_MAX_BYTES) {
+          throw new Error('Ses dosyası 20MB sınırını aşıyor.');
+        }
+
+        const memberFolderId =
+          submissionRow.drive_member_folder_id ||
+          await findOrCreateFolder(token, `${targetMember.first_name}_${targetMember.last_name}`, assignmentRow.drive_folder_id);
+        const reviewAudioFolderId = await findOrCreateFolder(token, ASSIGNMENT_REVIEW_AUDIO_FOLDER_NAME, memberFolderId);
+        const uploadedAudio = await uploadFileMultipart(token, audioBytes, {
+          name: safeAudioFileName,
+          mimeType: resolvedMimeType,
+          parents: [reviewAudioFolderId],
+        });
+        await setFilePublicReadable(token, uploadedAudio.id);
+
+        const uploadedSize = Number.parseInt(String(uploadedAudio.size ?? ''), 10);
+        return new Response(
+          JSON.stringify({
+            audio: {
+              drive_file_id: uploadedAudio.id,
+              file_name: safeAudioFileName,
+              mime_type: resolvedMimeType,
+              file_size_bytes: Number.isFinite(uploadedSize) ? uploadedSize : null,
+            },
+          }),
+          { headers: jsonHeaders },
+        );
       }
       case 'upload_chat_image': {
         const { room_id, file_name, mime_type, file_data_base64 } = body;

@@ -22,6 +22,8 @@ import {
   deleteMessage,
   deleteMessageForMe,
   createPollMessage,
+  formatChatMemberName,
+  getChatRoomDisplayName,
   starMessage,
   unstarMessage,
   fetchStarredMessages,
@@ -783,8 +785,8 @@ export function ChatRoom({ slug }: ChatRoomProps) {
   const roomName = useMemo(() => {
     if (room?.type === 'dm') {
       const other = roomMembers.find((m) => m.member_id !== member?.id);
-      if (other?.choir_members)
-        return `${other.choir_members.first_name} ${other.choir_members.last_name}`;
+      if (other?.choir_members) return formatChatMemberName(other.choir_members);
+      return getChatRoomDisplayName(room, member?.id);
     }
     return room?.name ?? 'Sohbet';
   }, [room, roomMembers, member?.id]);

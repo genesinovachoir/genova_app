@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, Clock, XCircle, Loader2, RotateCcw, Users } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, Clock, Edit3, XCircle, Loader2, RotateCcw, Users } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
 
@@ -87,6 +87,13 @@ async function postJsonWithAuth<T>(url: string, payload: Record<string, unknown>
   }
 
   return (await response.json()) as T;
+}
+
+async function finalizePastAttendance() {
+  return postJsonWithAuth<{ ok: true; inserted: number; updated: number }>(
+    '/api/rehearsals/attendance/finalize-past',
+    {},
+  );
 }
 
 function toLocalDateStr(y: number, m: number, d: number) {
@@ -297,23 +304,31 @@ export default function DevamsizlikPage() {
   const [editRehearsal, setEditRehearsal] = useState<Rehearsal | null>(null);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
 
-  const todayStr = useMemo(() => getTodayString(), []);
+  const [todayStr, setTodayStr] = useState(() => getTodayString());
   const canApprove = isAdmin() || isSectionLeader();
   const canManageAdmin = isAdmin();
   const canManageSectionLeader = isSectionLeader();
   const canManage = canManageAdmin || canManageSectionLeader;
   const monthKey = `${currentMonth.getFullYear()}-${currentMonth.getMonth()}`;
 
+  const finalizePastAttendanceQuery = useQuery({
+    queryKey: ['devamsizlik', 'finalize-past', member?.id, todayStr],
+    queryFn: finalizePastAttendance,
+    enabled: Boolean(member?.id),
+    staleTime: 60_000,
+  });
+  const finalizeAttempted = finalizePastAttendanceQuery.isSuccess || finalizePastAttendanceQuery.isError;
+
   const monthDataQuery = useQuery({
     queryKey: ['devamsizlik', 'month', member?.id, monthKey],
     queryFn: () => fetchMonthData(member!.id, currentMonth),
-    enabled: Boolean(member?.id),
+    enabled: Boolean(member?.id && finalizeAttempted),
   });
 
   const pendingQuery = useQuery({
     queryKey: ['devamsizlik', 'pending', member?.id],
     queryFn: fetchPendingApprovals,
-    enabled: Boolean(member?.id && canApprove),
+    enabled: Boolean(member?.id && canApprove && finalizeAttempted),
   });
 
   const continuityQuery = useQuery({
@@ -321,6 +336,29 @@ export default function DevamsizlikPage() {
     queryFn: () => fetchContinuityInfo(member!.id),
     enabled: Boolean(member?.id),
   });
+
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleNextDateRefresh = () => {
+      const now = new Date();
+      const nextMidnight = new Date(now);
+      nextMidnight.setHours(24, 0, 1, 0);
+
+      timeoutId = setTimeout(() => {
+        setTodayStr(getTodayString());
+        scheduleNextDateRefresh();
+      }, nextMidnight.getTime() - now.getTime());
+    };
+
+    scheduleNextDateRefresh();
+
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!member?.id) {
@@ -405,7 +443,7 @@ export default function DevamsizlikPage() {
   const rehearsals = monthDataQuery.data?.rehearsals;
   const myAttendance = monthDataQuery.data?.myAttendance;
   const myInvitedRehearsalIds = monthDataQuery.data?.myInvitedRehearsalIds;
-  const pendingAttendances = pendingQuery.data ?? [];
+  const pendingAttendances = useMemo(() => pendingQuery.data ?? [], [pendingQuery.data]);
   const continuity = continuityQuery.data;
 
   const calendarDays = useMemo<CalendarDay[]>(() => {
@@ -479,6 +517,19 @@ export default function DevamsizlikPage() {
     [calendarDays, selectedDate],
   );
 
+  const pendingAttendanceCountsByDate = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const attendance of pendingAttendances) {
+      const date = attendance.rehearsals.date;
+      counts.set(date, (counts.get(date) ?? 0) + 1);
+    }
+    return counts;
+  }, [pendingAttendances]);
+  const selectedDatePendingAttendances = useMemo(
+    () => pendingAttendances.filter((attendance) => attendance.rehearsals.date === selectedDate),
+    [pendingAttendances, selectedDate],
+  );
+
   const selectedRehearsalId = selectedDay?.rehearsal?.id ?? null;
   const participantsQuery = useQuery({
     queryKey: ['devamsizlik', 'participants', selectedRehearsalId],
@@ -486,7 +537,7 @@ export default function DevamsizlikPage() {
     enabled: Boolean(selectedRehearsalId),
   });
 
-  const loading = monthDataQuery.isPending || (canApprove && pendingQuery.isPending);
+  const loading = finalizePastAttendanceQuery.isPending || monthDataQuery.isPending || (canApprove && pendingQuery.isPending);
   const hasQueryError = monthDataQuery.isError || pendingQuery.isError;
   const approvingId = approveMutation.isPending ? approveMutation.variables : null;
   const participants = participantsQuery.data ?? [];
@@ -529,7 +580,7 @@ export default function DevamsizlikPage() {
     if (status === 'approved') return 'Katıldı';
     if (status === 'pending') return 'Onay bekliyor';
     if (status === 'rejected') return 'Katılmadı';
-    return 'Katılım yok';
+    return 'BEKLENİYOR';
   }
 
   function participantStatusClass(status: AttendanceRecordStatus | null) {
@@ -613,6 +664,7 @@ export default function DevamsizlikPage() {
 
                   const isSelected = selectedDate === day.date;
                   const hasRehearsal = Boolean(day.rehearsal?.collect_attendance);
+                  const pendingApprovalCount = canApprove ? pendingAttendanceCountsByDate.get(day.date) ?? 0 : 0;
 
                   return (
                     <button
@@ -621,8 +673,13 @@ export default function DevamsizlikPage() {
                         setSelectedDate(isSelected ? null : day.date);
                         setSelectedParticipantId(null);
                       }}
-                      className={`aspect-square rounded-lg transition-all active:scale-90 ${dayBgClass(day)} ${isSelected ? 'ring-2 ring-white/50 ring-offset-1 ring-offset-black' : ''}`}
+                      className={`relative aspect-square rounded-lg transition-all active:scale-90 ${dayBgClass(day)} ${isSelected ? 'ring-2 ring-white/50 ring-offset-1 ring-offset-black' : ''}`}
                     >
+                      {pendingApprovalCount > 0 ? (
+                        <span className="absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-1/3 rounded-full bg-sky-500 px-1.5 py-0.5 text-[0.45rem] font-bold uppercase leading-none tracking-[0.04em] text-white shadow-[0_2px_8px_rgba(14,165,233,0.45)]">
+                          okunmadı
+                        </span>
+                      ) : null}
                       <div className="flex h-full flex-col items-center justify-center gap-0.5">
                         <span className={`text-[0.72rem] font-bold leading-none ${day.attendanceStatus === 'attended' ? 'text-black' : 'text-[var(--color-text-high)]'}`}>
                           {String(day.dayNum).padStart(2, '0')}
@@ -771,8 +828,15 @@ export default function DevamsizlikPage() {
                                     }
                                   }}
                                   disabled={!canEditParticipant}
-                                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors enabled:hover:bg-white/5 disabled:cursor-default"
+                                  className="relative flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors enabled:hover:bg-white/5 disabled:cursor-default"
                                 >
+                                  {canEditParticipant ? (
+                                    <Edit3
+                                      size={12}
+                                      aria-hidden="true"
+                                      className="absolute right-2 top-2 text-[var(--color-text-medium)] opacity-55"
+                                    />
+                                  ) : null}
                                   <div className="min-w-0">
                                     <p className="truncate text-sm font-medium">
                                       {participant.first_name} {participant.last_name}
@@ -837,12 +901,12 @@ export default function DevamsizlikPage() {
               ) : null}
             </AnimatePresence>
 
-            {canApprove && pendingAttendances.length > 0 ? (
+            {canApprove && selectedDate && selectedDatePendingAttendances.length > 0 ? (
               <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
                 <div className="glass-panel p-5">
                   <span className="page-kicker mb-4 block">Bekleyen Onaylar</span>
                   <div className="space-y-2">
-                    {pendingAttendances.map((attendance) => (
+                    {selectedDatePendingAttendances.map((attendance) => (
                       <div key={attendance.id} className="flex items-center justify-between gap-3 rounded-[8px] border border-[var(--color-border)] bg-white/4 px-4 py-3">
                         <div>
                           <p className="text-sm font-medium">

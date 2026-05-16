@@ -12,6 +12,7 @@ export type ChatRoomMemberRole = 'admin' | 'member';
 export interface ChatRoomMemberPreview {
   member_id: string;
   first_name: string;
+  last_name: string;
   photo_url: string | null;
 }
 
@@ -185,6 +186,31 @@ const TURKISH_CHAR_MAP: Record<string, string> = {
   ı: 'i',
   İ: 'I',
 };
+
+type ChatMemberNameParts = {
+  first_name?: string | null;
+  last_name?: string | null;
+};
+
+export function formatChatMemberName(member: ChatMemberNameParts | null | undefined, fallback = 'Üye'): string {
+  const name = `${member?.first_name ?? ''} ${member?.last_name ?? ''}`.trim();
+  return name || fallback;
+}
+
+export function getOtherDmMemberPreview(room: ChatRoom, memberId: string | null | undefined): ChatRoomMemberPreview | null {
+  if (room.type !== 'dm') return null;
+
+  const previews = room.members_preview ?? [];
+  if (previews.length === 0) return null;
+
+  return previews.find((preview) => preview.member_id !== memberId) ?? previews[0] ?? null;
+}
+
+export function getChatRoomDisplayName(room: ChatRoom, memberId: string | null | undefined): string {
+  const dmMember = getOtherDmMemberPreview(room, memberId);
+  if (dmMember) return formatChatMemberName(dmMember);
+  return room.name;
+}
 
 type FileCandidate = {
   url: string;
@@ -568,6 +594,7 @@ function normalizeMembersPreview(value: unknown): ChatRoomMemberPreview[] {
       first_name: typeof entry.first_name === 'string' && entry.first_name.trim()
         ? entry.first_name.trim()
         : 'Üye',
+      last_name: typeof entry.last_name === 'string' ? entry.last_name.trim() : '',
       photo_url: typeof entry.photo_url === 'string' ? entry.photo_url : null,
     }));
 }
@@ -686,7 +713,7 @@ async function fetchChatRoomsLegacy(memberId: string) {
       .from('chat_room_members')
       .select(`
         room_id, member_id,
-        choir_members (first_name, photo_url)
+        choir_members (first_name, last_name, photo_url)
       `)
       .in('room_id', roomIds)
       .order('joined_at', { ascending: true });
@@ -699,14 +726,15 @@ async function fetchChatRoomsLegacy(memberId: string) {
       if (!roomId || !memberIdFromRow) continue;
 
       const memberRelation = row.choir_members as
-        | { first_name?: string | null; photo_url?: string | null }
-        | Array<{ first_name?: string | null; photo_url?: string | null }>
+        | { first_name?: string | null; last_name?: string | null; photo_url?: string | null }
+        | Array<{ first_name?: string | null; last_name?: string | null; photo_url?: string | null }>
         | null;
       const memberProfile = Array.isArray(memberRelation) ? memberRelation[0] : memberRelation;
 
       const preview: ChatRoomMemberPreview = {
         member_id: memberIdFromRow,
         first_name: memberProfile?.first_name?.trim() || 'Üye',
+        last_name: memberProfile?.last_name?.trim() || '',
         photo_url: memberProfile?.photo_url ?? null,
       };
 
@@ -918,6 +946,73 @@ export async function sendMessage(
   } as ChatMessage;
 }
 
+async function findExistingDmRoom(createdBy: string, otherMemberId: string): Promise<{ id: string; slug: string | null } | null> {
+  const { data: otherMemberships, error: otherMembershipsError } = await supabase
+    .from('chat_room_members')
+    .select('room_id')
+    .eq('member_id', otherMemberId);
+
+  if (otherMembershipsError) throw otherMembershipsError;
+
+  const otherRoomIds = (otherMemberships ?? [])
+    .map((row) => (typeof row.room_id === 'string' ? row.room_id : null))
+    .filter((roomId): roomId is string => Boolean(roomId));
+
+  if (otherRoomIds.length === 0) return null;
+
+  const { data: sharedMemberships, error: sharedMembershipsError } = await supabase
+    .from('chat_room_members')
+    .select('room_id')
+    .eq('member_id', createdBy)
+    .in('room_id', otherRoomIds);
+
+  if (sharedMembershipsError) throw sharedMembershipsError;
+
+  const sharedRoomIds = (sharedMemberships ?? [])
+    .map((row) => (typeof row.room_id === 'string' ? row.room_id : null))
+    .filter((roomId): roomId is string => Boolean(roomId));
+
+  if (sharedRoomIds.length === 0) return null;
+
+  const { data: dmRooms, error: dmRoomsError } = await supabase
+    .from('chat_rooms')
+    .select('id, slug, created_at')
+    .in('id', sharedRoomIds)
+    .eq('type', 'dm')
+    .eq('is_archived', false)
+    .order('created_at', { ascending: true });
+
+  if (dmRoomsError) throw dmRoomsError;
+
+  for (const dmRoom of dmRooms ?? []) {
+    const roomId = typeof dmRoom.id === 'string' ? dmRoom.id : null;
+    if (!roomId) continue;
+
+    const { data: members, error: membersError } = await supabase
+      .from('chat_room_members')
+      .select('member_id')
+      .eq('room_id', roomId);
+
+    if (membersError) throw membersError;
+
+    const memberSet = new Set((members ?? []).map((row) => row.member_id));
+    if (memberSet.size === 2 && memberSet.has(createdBy) && memberSet.has(otherMemberId)) {
+      await supabase
+        .from('chat_room_members')
+        .update({ hidden_at: null })
+        .eq('room_id', roomId)
+        .eq('member_id', createdBy);
+
+      return {
+        id: roomId,
+        slug: typeof dmRoom.slug === 'string' ? dmRoom.slug : null,
+      };
+    }
+  }
+
+  return null;
+}
+
 /** Create a new chat room */
 export async function createRoom(
   name: string,
@@ -933,37 +1028,12 @@ export async function createRoom(
 
   // For DM rooms, check if one already exists between these two members
   if (type === 'dm' && memberIds.length === 1) {
-    const otherMemberId = memberIds[0];
-    const { data: existingDms } = await supabase
-      .from('chat_room_members')
-      .select('room_id')
-      .eq('member_id', createdBy)
-      .in(
-        'room_id',
-        (
-          await supabase
-            .from('chat_room_members')
-            .select('room_id')
-            .eq('member_id', otherMemberId)
-        ).data?.map((d) => d.room_id) ?? []
-      );
-
-    if (existingDms && existingDms.length > 0) {
-      // Check if any of these rooms is a DM
-      for (const dm of existingDms) {
-        const { data: room } = await supabase
-          .from('chat_rooms')
-          .select('id, type, slug')
-          .eq('id', dm.room_id)
-          .eq('type', 'dm')
-          .maybeSingle();
-        if (room) {
-          return {
-            id: room.id as string,
-            slug: (room.slug as string | null) ?? generateSlug(name),
-          };
-        }
-      }
+    const existingDm = await findExistingDmRoom(createdBy, memberIds[0]);
+    if (existingDm) {
+      return {
+        id: existingDm.id,
+        slug: existingDm.slug ?? generateSlug(name),
+      };
     }
   }
 

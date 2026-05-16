@@ -12,6 +12,8 @@ import { useChatStore } from '@/store/useChatStore';
 import { useAuth } from '@/components/AuthProvider';
 import {
   archiveRoomForEveryone,
+  getChatRoomDisplayName,
+  getOtherDmMemberPreview,
   hideRoomForMe,
   leaveRoom,
   setRoomNotifications,
@@ -69,16 +71,6 @@ function getRoomIcon(room: ChatRoom) {
   return Hash;
 }
 
-function getRoomDisplayName(room: ChatRoom, memberId: string | undefined): string {
-  if (room.type === 'dm' && room.last_message?.sender) {
-    // For DM, show the other person's name
-    if (room.last_message.sender.id !== memberId) {
-      return `${room.last_message.sender.first_name} ${room.last_message.sender.last_name}`;
-    }
-  }
-  return room.name;
-}
-
 function getInitial(value: string | null | undefined): string {
   const trimmed = value?.trim();
   if (!trimmed) return '?';
@@ -127,11 +119,16 @@ export function ChatRoomList() {
     if (!searchQuery.trim()) return visibleRooms;
     const q = searchQuery.toLowerCase();
     return visibleRooms.filter(
-      (r) =>
-        r.name.toLowerCase().includes(q) ||
-        r.description?.toLowerCase().includes(q)
+      (r) => {
+        const displayName = getChatRoomDisplayName(r, memberId).toLowerCase();
+        return (
+          displayName.includes(q) ||
+          r.name.toLowerCase().includes(q) ||
+          r.description?.toLowerCase().includes(q)
+        );
+      }
     );
-  }, [searchQuery, visibleRooms]);
+  }, [memberId, searchQuery, visibleRooms]);
 
   const selectedRoom = useMemo(
     () => filteredRooms.find((room) => room.id === menuRoomId) ?? null,
@@ -335,8 +332,9 @@ export function ChatRoomList() {
           ) : (
             filteredRooms.map((room, index) => {
               const Icon = getRoomIcon(room);
-              const displayName = getRoomDisplayName(room, member?.id);
+              const displayName = getChatRoomDisplayName(room, memberId);
               const preview = getMessagePreview(room);
+              const dmMember = getOtherDmMemberPreview(room, memberId);
               const timeStr = room.last_message
                 ? formatRelativeTime(room.last_message.created_at)
                 : '';
@@ -369,7 +367,13 @@ export function ChatRoomList() {
                 >
                   {/* Avatar */}
                   <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)]">
-                    {room.avatar_url ? (
+                    {dmMember?.photo_url ? (
+                      <img
+                        src={dmMember.photo_url}
+                        alt={displayName}
+                        className="h-full w-full rounded-full object-cover"
+                      />
+                    ) : room.avatar_url ? (
                       <img
                         src={getDriveImageUrl(room.avatar_url)}
                         alt={displayName}

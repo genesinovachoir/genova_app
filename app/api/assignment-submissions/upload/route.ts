@@ -15,9 +15,9 @@ const MAX_SUBMISSION_SIZE_BYTES = MAX_SUBMISSION_SIZE_MB * 1024 * 1024;
 const STORAGE_BUCKET = 'assignment-submissions';
 const STORAGE_LINK_PREFIX = 'storage://';
 const SUBMISSION_SELECT_COLUMNS =
-  'id, assignment_id, member_id, drive_file_id, drive_web_view_link, drive_download_link, file_name, mime_type, file_size_bytes, drive_member_folder_id, submitted_at, updated_at, status, submission_note, reviewer_note, is_reviewer_note_hidden, reviewer_note_history, submission_note_history, hidden_by, hidden_at, approved_at, approved_by';
+  'id, assignment_id, member_id, drive_file_id, drive_web_view_link, drive_download_link, file_name, mime_type, file_size_bytes, drive_member_folder_id, submitted_at, updated_at, status, submission_note, reviewer_note, reviewer_audio_drive_file_id, reviewer_audio_file_name, reviewer_audio_mime_type, reviewer_audio_file_size_bytes, is_reviewer_note_hidden, reviewer_note_history, submission_note_history, hidden_by, hidden_at, approved_at, approved_by';
 const SUBMISSION_SNAPSHOT_COLUMNS =
-  'id, assignment_id, member_id, drive_file_id, drive_web_view_link, drive_download_link, file_name, mime_type, file_size_bytes, drive_member_folder_id, submitted_at, updated_at, status, submission_note, reviewer_note, is_reviewer_note_hidden, hidden_by, hidden_at, approved_at, approved_by';
+  'id, assignment_id, member_id, drive_file_id, drive_web_view_link, drive_download_link, file_name, mime_type, file_size_bytes, drive_member_folder_id, submitted_at, updated_at, status, submission_note, reviewer_note, reviewer_audio_drive_file_id, reviewer_audio_file_name, reviewer_audio_mime_type, reviewer_audio_file_size_bytes, is_reviewer_note_hidden, hidden_by, hidden_at, approved_at, approved_by';
 
 interface SubmissionSnapshot {
   id: string;
@@ -35,6 +35,10 @@ interface SubmissionSnapshot {
   status: string | null;
   submission_note: string | null;
   reviewer_note: string | null;
+  reviewer_audio_drive_file_id: string | null;
+  reviewer_audio_file_name: string | null;
+  reviewer_audio_mime_type: string | null;
+  reviewer_audio_file_size_bytes: number | null;
   is_reviewer_note_hidden: boolean | null;
   hidden_by: string | null;
   hidden_at: string | null;
@@ -246,6 +250,10 @@ async function archiveSubmissionSnapshot(
       status: snapshot.status,
       submission_note: snapshot.submission_note,
       reviewer_note: snapshot.reviewer_note,
+      reviewer_audio_drive_file_id: snapshot.reviewer_audio_drive_file_id,
+      reviewer_audio_file_name: snapshot.reviewer_audio_file_name,
+      reviewer_audio_mime_type: snapshot.reviewer_audio_mime_type,
+      reviewer_audio_file_size_bytes: snapshot.reviewer_audio_file_size_bytes,
       approved_at: snapshot.approved_at,
       approved_by: snapshot.approved_by,
       archive_reason: 'resubmitted',
@@ -303,6 +311,10 @@ async function persistSubmissionFromStorage(params: {
     status: 'pending',
     submission_note: note || null,
     reviewer_note: null,
+    reviewer_audio_drive_file_id: null,
+    reviewer_audio_file_name: null,
+    reviewer_audio_mime_type: null,
+    reviewer_audio_file_size_bytes: null,
     is_reviewer_note_hidden: false,
     reviewer_note_history: [],
     submission_note_history: note

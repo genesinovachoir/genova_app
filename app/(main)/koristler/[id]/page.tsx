@@ -18,12 +18,14 @@ import {
   Mail,
   Music2,
   Phone,
+  RotateCcw,
   School2,
   XCircle,
 } from 'lucide-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from '@/components/AuthProvider';
+import { useToast } from '@/components/ToastProvider';
 import { supabase } from '@/lib/supabase';
 import { createRealtimeTopic } from '@/lib/realtime';
 import { sanitizeRichText } from '@/lib/richText';
@@ -39,6 +41,7 @@ import {
 } from '@/lib/korist-performance';
 
 const DAY_LABELS = ['PZT', 'SAL', 'ÇAR', 'PER', 'CUM', 'CMT', 'PAZ'];
+type ManualAttendanceStatus = 'approved' | 'rejected' | 'clear';
 
 function getTodayString(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -88,6 +91,34 @@ function formatPercent(value: number | null | undefined) {
     return '—';
   }
   return `%${Math.max(0, Math.min(100, Math.round(value)))}`;
+}
+
+async function getAccessToken() {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !sessionData.session?.access_token) {
+    throw new Error('Oturum doğrulanamadı. Lütfen tekrar giriş yapın.');
+  }
+
+  return sessionData.session.access_token;
+}
+
+async function postJsonWithAuth<T>(url: string, payload: Record<string, unknown>) {
+  const accessToken = await getAccessToken();
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `İstek başarısız (${response.status})`);
+  }
+
+  return (await response.json()) as T;
 }
 
 function getInitials(firstName: string, lastName: string) {
@@ -387,6 +418,7 @@ function MetricBox({
 export default function KoristDetailPage() {
   const params = useParams<{ id?: string | string[] }>();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const { member: currentMember, isAdmin, isSectionLeader } = useAuth();
   const handleBack = useBackOrHome();
 
@@ -400,6 +432,28 @@ export default function KoristDetailPage() {
     queryKey: [...PERFORMANCE_ROOT_QUERY_KEY, 'detail', memberId, currentMember?.id ?? null, isAdmin(), isSectionLeader(), currentMember?.voice_group ?? null],
     queryFn: () => loadPerformanceMemberDetail(currentMember, memberId, isAdmin(), isSectionLeader()),
     enabled: Boolean(memberId && currentMember?.id && privileged),
+  });
+
+  const manualAttendanceMutation = useMutation({
+    mutationFn: async (input: { rehearsalId: string; memberId: string; status: ManualAttendanceStatus }) => {
+      await postJsonWithAuth<{ ok: true }>('/api/rehearsals/attendance/update', {
+        rehearsal_id: input.rehearsalId,
+        member_id: input.memberId,
+        status: input.status,
+      });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Katılım durumu güncellenemedi.', 'Katılım');
+    },
+    onSuccess: () => {
+      toast.success('Katılım durumu güncellendi.');
+    },
+    onSettled: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: PERFORMANCE_ROOT_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+      ]);
+    },
   });
 
   useEffect(() => {
@@ -512,6 +566,8 @@ export default function KoristDetailPage() {
 
   const member = detail.member;
   const showHomeworkMetrics = detail.show_homework_metrics;
+  const isHomeworkExemptMember = !showHomeworkMetrics && Boolean(member.voice_group);
+  const showThreeMetricBoxes = showHomeworkMetrics || isHomeworkExemptMember;
   const continuityFormula = showHomeworkMetrics
     ? `${member.attended_rehearsals} prova + ${member.approved_assignments ?? 0} ödev / ${member.total_rehearsals} prova + ${member.total_assignments ?? 0} ödev`
     : null;
@@ -532,6 +588,26 @@ export default function KoristDetailPage() {
     member.tiktok_url ||
     member.x_url,
   );
+  const canEditMemberAttendance = isAdmin() || (
+    isSectionLeader()
+    && Boolean(currentMember?.voice_group)
+    && member.voice_group === currentMember?.voice_group
+  );
+  const selectedAttendanceStatus = selectedRehearsal?.attendance?.status ?? null;
+  const selectedAttendanceVariables = manualAttendanceMutation.variables;
+
+  function updateSelectedMemberAttendance(status: ManualAttendanceStatus) {
+    const rehearsalId = selectedRehearsal?.rehearsal?.id;
+    if (!rehearsalId) {
+      return;
+    }
+
+    manualAttendanceMutation.mutate({
+      rehearsalId,
+      memberId: member.id,
+      status,
+    });
+  }
 
   return (
     <SwipeBack fallback="/">
@@ -598,7 +674,7 @@ export default function KoristDetailPage() {
       </motion.section>
 
       <div className="mt-4 grid grid-cols-3 divide-x divide-[var(--color-border)] border border-[var(--color-border)] rounded-[12px] bg-white/4 overflow-hidden">
-        {showHomeworkMetrics ? (
+        {showThreeMetricBoxes ? (
           <>
             <div className="flex flex-col items-center justify-center px-6 py-5 text-center">
               <span className="text-[0.58rem] font-bold uppercase tracking-[0.2em] text-[var(--color-text-medium)] opacity-70">PROVA KATILIMI</span>
@@ -609,13 +685,13 @@ export default function KoristDetailPage() {
             <div className="flex flex-col items-center justify-center px-6 py-5 text-center">
               <span className="text-[0.58rem] font-bold uppercase tracking-[0.2em] text-[var(--color-text-medium)] opacity-70">ÖDEV BAŞARISI</span>
               <span className="mt-2 font-serif text-[1.8rem] font-medium leading-none tracking-[-0.04em] text-[var(--color-text-high)]">
-                {formatPercent(member.homework_percent)}
+                {isHomeworkExemptMember ? 'MUAF' : formatPercent(member.homework_percent)}
               </span>
             </div>
             <div className="flex flex-col items-center justify-center px-6 py-5 text-center">
               <span className="text-[0.58rem] font-bold uppercase tracking-[0.2em] text-[var(--color-text-medium)] opacity-70">GENEL DEVAMLILIK</span>
               <span className="mt-2 font-serif text-[1.8rem] font-medium leading-none tracking-[-0.04em] text-[var(--color-text-high)]">
-                {formatPercent(member.continuity_percent)}
+                {formatPercent(isHomeworkExemptMember ? member.attendance_percent : member.continuity_percent)}
               </span>
             </div>
           </>
@@ -732,6 +808,37 @@ export default function KoristDetailPage() {
                         className="prose mt-3 max-w-none text-[var(--color-text-high)] opacity-90 [--tw-prose-body:var(--color-text-high)] [--tw-prose-headings:var(--color-text-high)] [--tw-prose-links:var(--color-accent)] [--tw-prose-bold:var(--color-text-high)] [--tw-prose-bullets:var(--color-text-medium)] [--tw-prose-quotes:var(--color-text-high)] [--tw-prose-code:var(--color-text-high)] [--tw-prose-hr:var(--color-border)] prose-p:my-0.5 prose-p:text-[14px] prose-p:leading-[1.4]"
                         dangerouslySetInnerHTML={{ __html: sanitizeRichText(selectedRehearsal.rehearsal.notes) }}
                       />
+                    ) : null}
+                    {canEditMemberAttendance && selectedDay.status !== 'no-rehearsal' ? (
+                      <div className="grid grid-cols-3 gap-2 border-t border-[var(--color-border)] pt-3">
+                        <button
+                          type="button"
+                          onClick={() => updateSelectedMemberAttendance('approved')}
+                          disabled={manualAttendanceMutation.isPending || selectedAttendanceStatus === 'approved'}
+                          className="flex items-center justify-center gap-1.5 rounded-[6px] border border-emerald-500/30 bg-emerald-500/10 px-2 py-2 text-[0.62rem] font-bold uppercase tracking-[0.1em] text-emerald-300 transition-all active:scale-95 disabled:opacity-45 [.light_&]:text-emerald-700"
+                        >
+                          {selectedAttendanceVariables?.status === 'approved' && manualAttendanceMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                          Katıldı
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateSelectedMemberAttendance('rejected')}
+                          disabled={manualAttendanceMutation.isPending || selectedAttendanceStatus === 'rejected'}
+                          className="flex items-center justify-center gap-1.5 rounded-[6px] border border-rose-500/30 bg-rose-500/10 px-2 py-2 text-[0.62rem] font-bold uppercase tracking-[0.1em] text-rose-300 transition-all active:scale-95 disabled:opacity-45 [.light_&]:text-rose-700"
+                        >
+                          {selectedAttendanceVariables?.status === 'rejected' && manualAttendanceMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />}
+                          Katılmadı
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateSelectedMemberAttendance('clear')}
+                          disabled={manualAttendanceMutation.isPending || !selectedAttendanceStatus}
+                          className="flex items-center justify-center gap-1.5 rounded-[6px] border border-[var(--color-border)] bg-white/4 px-2 py-2 text-[0.62rem] font-bold uppercase tracking-[0.1em] text-[var(--color-text-medium)] transition-all hover:text-[var(--color-text-high)] active:scale-95 disabled:opacity-45"
+                        >
+                          {selectedAttendanceVariables?.status === 'clear' && manualAttendanceMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                          Kaldır
+                        </button>
+                      </div>
                     ) : null}
                   </div>
                 ) : (

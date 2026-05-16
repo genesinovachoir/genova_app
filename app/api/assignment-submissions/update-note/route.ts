@@ -22,12 +22,20 @@ interface SubmissionRow {
   submission_note: string | null;
   submission_note_history: unknown;
   reviewer_note: string | null;
+  reviewer_audio_drive_file_id: string | null;
+  reviewer_audio_file_name: string | null;
+  reviewer_audio_mime_type: string | null;
+  reviewer_audio_file_size_bytes: number | null;
   reviewer_note_history: unknown;
   is_reviewer_note_hidden: boolean | null;
 }
 
 interface PrivateNoteRow {
   reviewer_note: string | null;
+  reviewer_audio_drive_file_id: string | null;
+  reviewer_audio_file_name: string | null;
+  reviewer_audio_mime_type: string | null;
+  reviewer_audio_file_size_bytes: number | null;
   note_history_json: unknown;
   is_hidden: boolean;
   last_hidden_by: string | null;
@@ -70,7 +78,7 @@ export async function POST(request: Request) {
 
     const { data: submissionData, error: submissionError } = await serviceClient
       .from('assignment_submissions')
-      .select('id, assignment_id, member_id, submission_note, submission_note_history, reviewer_note, reviewer_note_history, is_reviewer_note_hidden')
+      .select('id, assignment_id, member_id, submission_note, submission_note_history, reviewer_note, reviewer_audio_drive_file_id, reviewer_audio_file_name, reviewer_audio_mime_type, reviewer_audio_file_size_bytes, reviewer_note_history, is_reviewer_note_hidden')
       .eq('id', submissionId)
       .maybeSingle();
 
@@ -174,7 +182,7 @@ export async function POST(request: Request) {
 
     const { data: privateNoteData, error: privateNoteError } = await serviceClient
       .from('assignment_submission_private_notes')
-      .select('reviewer_note, note_history_json, is_hidden, last_hidden_by, last_hidden_at')
+      .select('reviewer_note, reviewer_audio_drive_file_id, reviewer_audio_file_name, reviewer_audio_mime_type, reviewer_audio_file_size_bytes, note_history_json, is_hidden, last_hidden_by, last_hidden_at')
       .eq('submission_id', submission.id)
       .maybeSingle();
 
@@ -219,6 +227,14 @@ export async function POST(request: Request) {
           assignment_id: submission.assignment_id,
           member_id: submission.member_id,
           reviewer_note: note,
+          reviewer_audio_drive_file_id:
+            privateNote?.reviewer_audio_drive_file_id ?? submission.reviewer_audio_drive_file_id ?? null,
+          reviewer_audio_file_name:
+            privateNote?.reviewer_audio_file_name ?? submission.reviewer_audio_file_name ?? null,
+          reviewer_audio_mime_type:
+            privateNote?.reviewer_audio_mime_type ?? submission.reviewer_audio_mime_type ?? null,
+          reviewer_audio_file_size_bytes:
+            privateNote?.reviewer_audio_file_size_bytes ?? submission.reviewer_audio_file_size_bytes ?? null,
           note_history_json: nextPrivateHistory,
           is_hidden: isHidden,
           last_hidden_by: privateNote?.last_hidden_by ?? null,

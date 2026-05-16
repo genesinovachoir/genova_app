@@ -330,7 +330,6 @@ function buildMemberMetrics(
   submissionRows: AssignmentSubmission[],
   todayKey: string,
   includeHomeworkMetrics: boolean,
-  isLeadershipMember: boolean,
 ): PerformanceMemberMetrics {
   const memberInviteeIds = new Set(
     inviteRows.filter((row) => row.member_id === member.id).map((row) => row.rehearsal_id),
@@ -358,27 +357,25 @@ function buildMemberMetrics(
     }
   }
 
-  let attendedRehearsals = isLeadershipMember ? relevantRehearsals.length : 0;
+  let attendedRehearsals = 0;
   let pendingRehearsals = 0;
   let missedRehearsals = 0;
 
-  if (!isLeadershipMember) {
-    for (const rehearsal of relevantRehearsals) {
-      const attendance = attendanceByRehearsal.get(rehearsal.id) ?? null;
-      if (attendance?.status === 'approved') {
-        attendedRehearsals += 1;
-        continue;
-      }
-      if (attendance?.status === 'pending') {
-        pendingRehearsals += 1;
-        missedRehearsals += 1;
-        continue;
-      }
-      missedRehearsals += 1;
+  for (const rehearsal of relevantRehearsals) {
+    const attendance = attendanceByRehearsal.get(rehearsal.id) ?? null;
+    if (attendance?.status === 'approved') {
+      attendedRehearsals += 1;
+      continue;
     }
+    if (attendance?.status === 'pending') {
+      pendingRehearsals += 1;
+      missedRehearsals += 1;
+      continue;
+    }
+    missedRehearsals += 1;
   }
 
-  const attendancePercent = isLeadershipMember ? 100 : formatMetricPercent(attendedRehearsals, relevantRehearsals.length);
+  const attendancePercent = formatMetricPercent(attendedRehearsals, relevantRehearsals.length);
 
   if (!includeHomeworkMetrics) {
     return {
@@ -665,7 +662,6 @@ function buildScopeSummary(dataset: PerformanceDataset): {
       submissionRows,
       todayKey,
       show_homework_metrics && homeworkEligibleMemberIds.has(member.id),
-      leadershipMemberIds.has(member.id),
     ),
   );
 
@@ -814,7 +810,6 @@ export async function loadPerformanceMemberDetail(
   }
 
   const todayKey = getTodayKey();
-  const isSelectedMemberLeadership = dataset.leadershipMemberIds.has(targetMemberId);
   const inviteRows = dataset.inviteRows.filter((row) => row.member_id === targetMemberId);
   const memberInviteeIds = new Set(inviteRows.map((row) => row.rehearsal_id));
   const attendanceByRehearsal = new Map<string, Attendance>();
@@ -834,8 +829,6 @@ export async function loadPerformanceMemberDetail(
     if (rehearsal.collect_attendance && isRelevant) {
       if (isFuture) {
         status = 'future';
-      } else if (isSelectedMemberLeadership) {
-        status = 'attended';
       } else if (attendance?.status === 'approved') {
         status = 'attended';
       } else if (attendance?.status === 'pending') {
